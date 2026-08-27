@@ -13,21 +13,8 @@ import { useThemeStore } from "../store/useThemeStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { catalog, categories as allCategories } from "../data/catalog.ts";
 import ComponentArtwork from "../components/ComponentArtwork.tsx";
+import LogoMark from "../components/LogoMark.tsx";
 import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom } from "lucide-react";
-
-function Logo() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 22 22" fill="none" aria-hidden>
-      <rect x="1.5" y="1.5" width="19" height="19" rx="4" stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="7" cy="7" r="1.1" fill="currentColor" />
-      <circle cx="15" cy="7" r="1.1" fill="currentColor" />
-      <circle cx="7" cy="15" r="1.1" fill="currentColor" />
-      <circle cx="15" cy="15" r="1.1" fill="currentColor" />
-      <path d="M7 8.1v5.8M8.1 7h5.8M15 8.1v5.8M15.9 15H8.1" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
-      <circle cx="11" cy="11" r="1" fill="currentColor" />
-    </svg>
-  );
-}
 
 function ThemeIcon({ theme }: { theme: string }) {
   return theme === "dark" ? (
@@ -108,13 +95,13 @@ export default function StudioPage() {
       <header className="workbench-header h-11 shrink-0 border-b border-border px-3">
         <div className="flex min-w-0 items-center gap-3">
           <Link to="/" className="flex items-center gap-1.5">
-            <span className="brand-mark"><Logo /></span>
+            <span className="brand-mark"><LogoMark /></span>
             <span className="hidden text-[13px] font-semibold tracking-[-0.025em] sm:inline">Schematic</span>
           </Link>
           <span className="hidden h-4 w-px bg-border md:block" />
           <div className="hidden min-w-0 items-center gap-2 md:flex">
             <span className="truncate text-xs font-medium">{project.name}</span>
-            <span className="status-pill"><span className="status-dot is-ready" /> Saved locally</span>
+            <span className="status-pill">Saved locally</span>
           </div>
           <div className="hidden items-center gap-1 lg:flex">
             <button aria-label="Toggle component library" title="Toggle component library" onClick={() => setLeftCollapsed(v => !v)} className={`workspace-icon-button ${!leftCollapsed ? "is-active" : ""}`}>
@@ -225,7 +212,7 @@ export default function StudioPage() {
                   </div>
                 ) : (
                   filteredResults.slice(0, 80).map((c) => {
-                    const dot = c.category === "board" ? "bg-sky-500" : c.category === "sensor" ? "bg-emerald-500" : c.category === "display" ? "bg-amber-500" : "bg-zinc-400";
+                    const dot = c.category === "board" || c.category === "display" ? "bg-blue-500" : "bg-zinc-400";
                     return (
                       <button
                         key={c.id}
@@ -241,7 +228,7 @@ export default function StudioPage() {
                           <div className="truncate text-xs font-semibold leading-tight">{c.title}</div>
                           <div className="truncate text-[10px] text-muted-foreground">{c.manufacturer ?? c.id}</div>
                           <div className="mt-0.5 flex items-center gap-1">
-                            <span className={`h-1 w-1 rounded-full ${dot}`} />
+                            <span className={`h-3 w-[2px] rounded-sm ${dot}`} />
                             <span className="text-[10px] capitalize text-muted-foreground">{c.category}</span>
                             <span className="text-muted-foreground/30 text-[10px]">·</span>
                             <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{c.ports.length}</span>
@@ -315,7 +302,7 @@ export default function StudioPage() {
       <footer className="flex h-5 items-center gap-2 border-t border-border bg-muted/40 px-2.5 text-[10px] font-mono tabular-nums text-muted-foreground shrink-0">
         <span>{project.components.length}c · {project.connections.length}w</span>
         <span className="hidden sm:inline">· {toolNames.length} tools</span>
-        <span className="ml-auto inline-flex items-center gap-1"><span className={`h-1 w-1 rounded-full ${running ? "bg-emerald-500 animate-pulse" : "bg-border"}`} />{running ? "run" : "idle"}</span>
+        <span className="ml-auto">{running ? "running" : "idle"}</span>
       </footer>
     </div>
   );

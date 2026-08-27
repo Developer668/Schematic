@@ -21,6 +21,14 @@ void loop() {
 }
 `;
 
+const EDITOR_OPTIONS = {
+  minimap: { enabled: false }, fontSize: 12, lineHeight: 18,
+  lineNumbersMinChars: 2, glyphMargin: false, lineDecorationsWidth: 4,
+  folding: false, overviewRulerLanes: 0, hideCursorInOverviewRuler: true,
+  scrollBeyondLastLine: false, padding: { top: 8, bottom: 8 },
+  fontFamily: "JetBrains Mono, monospace",
+};
+
 export default function MonacoWorkspace() {
   const activeId = useSelectionStore((s) => s.activeComponentId);
   const project = useProjectStore((s) => s.project);
@@ -79,7 +87,7 @@ export default function MonacoWorkspace() {
           <button onClick={() => navigator.clipboard.writeText(code)} className="w-6 h-6 rounded hover:bg-muted flex items-center justify-center text-muted-foreground" title="Copy"><Copy size={11} /></button>
         </div>
         <div className="flex-1 min-h-[160px] relative">
-          <Editor height="100%" theme={isDark ? "vs-dark" : "light"} defaultLanguage="cpp" value={code} options={{ minimap: { enabled: false }, fontSize: 12, lineHeight: 18, scrollBeyondLastLine: false, padding: { top: 8, bottom: 8 }, fontFamily: "JetBrains Mono, monospace" }} onChange={(v) => setCode(v ?? "")} />
+          <Editor height="100%" theme={isDark ? "vs-dark" : "light"} defaultLanguage="cpp" value={code} options={EDITOR_OPTIONS} onChange={(v) => setCode(v ?? "")} />
         </div>
         <div className="px-2 py-1.5 border-t border-border bg-muted/20 text-[11px] text-muted-foreground">Select a board on canvas to bind firmware.</div>
       </div>
@@ -103,7 +111,7 @@ export default function MonacoWorkspace() {
       </div>
 
       <div className="flex-1 min-h-[120px] relative">
-        <Editor height="100%" theme={isDark ? "vs-dark" : "light"} defaultLanguage="cpp" value={code} onChange={(v) => setCode(v ?? "")} options={{ minimap: { enabled: false }, fontSize: 12, lineHeight: 18, scrollBeyondLastLine: false, padding: { top: 8, bottom: 8 }, fontFamily: "JetBrains Mono, monospace" }} />
+        <Editor height="100%" theme={isDark ? "vs-dark" : "light"} defaultLanguage="cpp" value={code} onChange={(v) => setCode(v ?? "")} options={EDITOR_OPTIONS} />
       </div>
 
       {compileLog && (

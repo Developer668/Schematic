@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { catalog, searchCatalog } from "../data/catalog";
+import { componentArtworkHref, presentationSvg } from "../data/componentArtwork";
 
 describe("catalog expansion", () => {
   it("has 150+ components", () => {
@@ -22,5 +23,16 @@ describe("catalog expansion", () => {
     expect(cats.has("board")).toBe(true);
     expect(cats.has("sensor")).toBe(true);
     expect(cats.has("display")).toBe(true);
+  });
+  it("provides artwork for every component, including minimap rendering", () => {
+    const missing = catalog.filter((component) => !componentArtworkHref(component));
+    expect(missing.map((component) => component.id)).toEqual([]);
+  });
+  it("removes thumbnail cards and duplicate value captions for workspace presentation", () => {
+    const svg = '<svg width="64" height="64"><rect width="64" height="64" fill="#111"/><text x="5" y="58">100 µF</text><path d="M1 1h3"/></svg>';
+    const cleaned = presentationSvg(svg);
+    expect(cleaned).not.toContain("100 µF");
+    expect(cleaned).not.toContain('<rect width="64" height="64"');
+    expect(cleaned).toContain('viewBox="0 0 64 64"');
   });
 });

@@ -4,8 +4,8 @@ import { useThemeStore } from "../store/useThemeStore.ts";
 import { useProjectStore } from "../store/useProjectStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { getRegisteredToolNames } from "../webmcp/tools.ts";
+import LogoMark from "../components/LogoMark.tsx";
 import {
-  Settings,
   Palette,
   Grid3X3,
   Cpu,
@@ -31,7 +31,7 @@ export default function SettingsPage() {
   const { theme, setTheme } = useThemeStore();
   const project = useProjectStore((s) => s.project);
   const clear = useProjectStore((s) => s.clear);
-  const { showGrid: canvasDots, setShowGrid: setCanvasDots, snapToGrid: snapGrid, setSnapToGrid: setSnapGrid, libraryDensity, setLibraryDensity, reducedMotion, setReducedMotion } = useWorkspaceStore();
+  const { showGrid: lineGrid, setShowGrid: setLineGrid, snapToGrid: snapGrid, setSnapToGrid: setSnapGrid, libraryDensity, setLibraryDensity, reducedMotion, setReducedMotion } = useWorkspaceStore();
   const [apiStatus, setApiStatus] = useState<"checking" | "ok" | "offline">("checking");
   const [enginesStatus, setEnginesStatus] = useState<any>(null);
   const toolCount = getRegisteredToolNames().length;
@@ -81,9 +81,7 @@ export default function SettingsPage() {
             <ArrowLeft size={14} />
           </Link>
           <div className="flex items-center gap-2.5">
-            <div className="brand-mark">
-              <Settings size={14} />
-            </div>
+            <div className="brand-mark"><LogoMark /></div>
             <div className="leading-none">
               <div className="font-bold text-[15px] tracking-tight">Settings</div>
               <div className="text-[11px] text-muted-foreground">Schematic · Hardware WebMCP Workbench</div>
@@ -159,14 +157,14 @@ export default function SettingsPage() {
               <div className="space-y-3 pt-3 border-t border-border">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-xs font-medium flex items-center gap-1"><Grid3X3 size={12} /> Dotted world background</div>
-                    <div className="text-[11px] text-muted-foreground">Dot grid 22px in the world canvas</div>
+                    <div className="text-xs font-medium flex items-center gap-1"><Grid3X3 size={12} /> Drafting line grid</div>
+                    <div className="text-[11px] text-muted-foreground">Subtle 24px lines in the world canvas</div>
                   </div>
                   <button
-                    onClick={() => setCanvasDots(!canvasDots)}
-                    className={`w-10 h-6 rounded-full p-0.5 transition-colors ${canvasDots ? "bg-primary" : "bg-muted border border-border"}`}
+                    onClick={() => setLineGrid(!lineGrid)}
+                    className={`w-10 h-6 rounded-full p-0.5 transition-colors ${lineGrid ? "bg-primary" : "bg-muted border border-border"}`}
                   >
-                    <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${canvasDots ? "translate-x-4" : "translate-x-0"}`} />
+                    <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${lineGrid ? "translate-x-4" : "translate-x-0"}`} />
                   </button>
                 </div>
                 <div className="flex items-center justify-between">

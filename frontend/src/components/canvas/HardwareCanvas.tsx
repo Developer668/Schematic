@@ -12,6 +12,7 @@ import {
   type Node,
   BackgroundVariant,
   type ReactFlowInstance,
+  type MiniMapNodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import HardwareNode from "./HardwareNode.tsx";
@@ -20,8 +21,22 @@ import { catalog } from "../../data/catalog.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
 import { Maximize2, Grid3X3, EyeOff, Map } from "lucide-react";
+import { componentArtworkHref } from "../../data/componentArtwork.ts";
 
 const nodeTypes = { hardware: HardwareNode };
+
+function ArtworkMiniMapNode({ id, x, y, width, height, selected }: MiniMapNodeProps) {
+  const component = useProjectStore((state) => state.project.components.find((item) => item.id === id));
+  const definition = catalog.find((item) => item.id === component?.definitionId);
+  const artwork = componentArtworkHref(definition);
+  const inset = Math.max(2, Math.min(width, height) * 0.08);
+  return (
+    <g>
+      <rect x={x} y={y} width={width} height={height} rx={Math.min(10, height * 0.12)} fill="hsl(var(--card))" stroke={selected ? "hsl(var(--accent))" : "hsl(var(--border))"} strokeWidth={selected ? 2 : 1} />
+      {artwork && <image href={artwork} x={x + inset} y={y + inset} width={Math.max(1, width - inset * 2)} height={Math.max(1, height - inset * 2)} preserveAspectRatio="xMidYMid meet" />}
+    </g>
+  );
+}
 
 function projectToFlow(project: ReturnType<typeof useProjectStore.getState>["project"]) {
   const nodes: Node[] = project.components.map((c) => {
@@ -54,7 +69,7 @@ function projectToFlow(project: ReturnType<typeof useProjectStore.getState>["pro
     labelBgStyle: { fill: "hsl(var(--card))", fillOpacity: 0.92 } as any,
     labelBgPadding: [4, 2] as any,
     labelBgBorderRadius: 4 as any,
-    animated: conn.domain === "uart" || conn.domain === "spi",
+    animated: false,
     type: "smoothstep",
   }));
   return { nodes, edges };
@@ -177,7 +192,7 @@ export default function HardwareCanvas() {
   return (
     <div
       ref={canvasRef}
-      className="w-full h-full relative overflow-hidden bg-background world-dots"
+      className="w-full h-full relative overflow-hidden bg-background world-grid"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -214,8 +229,8 @@ export default function HardwareCanvas() {
           "controls.ariaLabel": "Canvas view controls",
         }}
       >
-        {/* Dotted background - distinct dot style */}
-        {showGrid && <Background variant={BackgroundVariant.Dots} gap={22} size={1.15} color="hsl(var(--border))" style={{ opacity: 0.9 }} />}
+        {/* Optional drafting grid uses lines only. */}
+        {showGrid && <Background variant={BackgroundVariant.Lines} gap={24} size={0.65} color="hsl(var(--border))" style={{ opacity: 0.46 }} />}
 
         <Controls
           position="bottom-left"
@@ -233,8 +248,8 @@ export default function HardwareCanvas() {
             {
               top: 8,
               right: 8,
-              width: 106,
-              height: 64,
+              width: 124,
+              height: 76,
               background: "hsl(var(--card))",
               border: "1px solid hsl(var(--border))",
               borderRadius: 6,
@@ -242,14 +257,7 @@ export default function HardwareCanvas() {
             } as any
           }
           maskColor="hsl(var(--background) / 0.6)"
-          nodeStrokeWidth={2}
-          nodeColor={(n: any) => {
-            const cat = catalog.find((c) => c.id === (n.data as any)?.definitionId)?.category;
-            if (cat === "board") return "#3b82f6";
-            if (cat === "sensor") return "#06b6d4";
-            if (cat === "display") return "#f59e0b";
-            return "hsl(var(--muted-foreground))";
-          }}
+          nodeComponent={ArtworkMiniMapNode}
         />}
 
         <div className="absolute top-2 left-2 right-[144px] flex items-center gap-1 pointer-events-none">
@@ -258,7 +266,7 @@ export default function HardwareCanvas() {
               onClick={() => setShowGrid(!showGrid)}
               className={`workspace-icon-button ${showGrid ? "is-active" : ""}`}
               aria-pressed={showGrid}
-              title={showGrid ? "Hide dots" : "Show dots"}
+              title={showGrid ? "Hide grid" : "Show grid"}
             >
               {showGrid ? <Grid3X3 size={12} /> : <EyeOff size={12} />}
             </button>

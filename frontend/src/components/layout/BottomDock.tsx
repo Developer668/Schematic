@@ -36,7 +36,7 @@ export default function BottomDock({ collapsed, onToggleCollapse, height }: { co
         </div>
         <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
           <span className="hidden sm:inline">{project.components.length} comps · {project.connections.length} wires</span>
-          <span className={`w-1.5 h-1.5 rounded-full ${running ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
+          <span className="font-mono text-[9px] uppercase tracking-wide">{running ? "running" : "idle"}</span>
           <button onClick={onToggleCollapse} className="w-6 h-6 rounded hover:bg-muted flex items-center justify-center"><ChevronDown size={12} /></button>
         </div>
       </div>

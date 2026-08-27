@@ -1,5 +1,6 @@
 import { ArrowRight, Boxes, Cable, Code2, Cpu, ShieldCheck, Sparkles, TerminalSquare } from "lucide-react";
 import { Link } from "react-router-dom";
+import LogoMark from "../components/LogoMark.tsx";
 
 const capabilities = [
   { icon: Boxes, title: "Real component catalog", body: "Search boards, sensors, displays, actuators, and passives with recognizable hardware artwork." },
@@ -12,14 +13,13 @@ export default function LandingPage() {
   return (
     <div className="landing-shell">
       <nav className="landing-nav">
-        <Link to="/" className="landing-brand"><span className="landing-logo"><Cpu size={17} /></span>Schematic</Link>
+        <Link to="/" className="landing-brand"><span className="landing-logo"><LogoMark /></span>Schematic</Link>
         <div className="landing-nav-links"><a href="#platform">Platform</a><a href="#workflow">Workflow</a><Link to="/settings">Settings</Link></div>
         <Link to="/studio" className="landing-open">Open studio <ArrowRight size={14} /></Link>
       </nav>
 
       <main>
         <section className="landing-hero">
-          <div className="landing-orb landing-orb-one" /><div className="landing-orb landing-orb-two" />
           <div className="landing-copy">
             <div className="landing-eyebrow"><Sparkles size={13} /> Agent-native hardware workspace</div>
             <h1>Design the system.<br /><span>Understand every connection.</span></h1>
@@ -29,7 +29,7 @@ export default function LandingPage() {
           </div>
 
           <div className="landing-visual" aria-label="Hardware workspace preview">
-            <div className="landing-window-bar"><i /><i /><i /><span>environment-controller.vlx</span></div>
+            <div className="landing-window-bar"><LogoMark /><span>environment-controller.vlx</span></div>
             <div className="landing-window-body">
               <div className="landing-rail"><b>COMPONENTS</b><div className="landing-part"><img src="/component-svgs/esp32-board.svg" /> ESP32</div><div className="landing-part"><img src="/component-svgs/bmp280.svg" /> BMP280</div><div className="landing-part"><img src="/component-svgs/ssd1306.svg" /> OLED</div></div>
               <div className="landing-canvas">

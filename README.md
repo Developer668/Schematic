@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="frontend/public/component-svgs/esp32-board.svg" width="118" alt="ESP32 board" />
+  <img src="frontend/public/schematic-logo.png" width="118" alt="Schematic logo" />
 
   # Schematic
 
@@ -59,13 +59,6 @@ python -m pytest backend/tests -q
 ```
 
 External simulation engines such as Renode, QEMU, Verilator, and ngspice are detected from the local system. Missing engines are reported as unavailable instead of being simulated as successful.
-
-## Documentation
-
-- [Architecture](ARCHITECTURE.md)
-- [Hardware WebMCP specification](HardwareWebMCP.md)
-- [Implementation plan](Plan.md)
-- [Third-party notices](NOTICE)
 
 ## License
 

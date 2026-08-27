@@ -166,7 +166,7 @@ const tools: ToolDef[] = [
       required: ["componentId", "files"],
     },
     execute: async ({ componentId, files }) => {
-      // For stub, store in project.firmwareTargets
+      // Persist to the same project state used by the editor and project export.
       const proj = useProjectStore.getState().project;
       const existing = proj.firmwareTargets.find((f) => f.componentId === componentId);
       if (existing) {
@@ -188,7 +188,9 @@ const tools: ToolDef[] = [
       const tgt = proj.firmwareTargets.find((f) => f.componentId === componentId);
       if (!tgt) return { content: [{ type: "text", text: `No firmware for ${componentId} — call firmware.write first` }], isError: true };
       try {
-        const res = await fetch("/api/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: tgt.files, board_fqbn: boardFqbn ?? "arduino:avr:uno" }) }).then((r) => r.json());
+        const response = await fetch("/api/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: tgt.files, board_fqbn: boardFqbn ?? "arduino:avr:uno" }) });
+        const res = await response.json();
+        if (!response.ok) return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res, isError: true };
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
       } catch (e) {
         return { content: [{ type: "text", text: `Compile failed: ${(e as Error).message}` }], isError: true };
@@ -203,11 +205,16 @@ const tools: ToolDef[] = [
       const project = useProjectStore.getState().project;
       useSimulationStore.getState().start();
       try {
-        const res = await fetch("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, duration_ns: (durationMs ?? 1000) * 1e6 }) }).then((r) => r.json());
+        const response = await fetch("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, duration_ns: (durationMs ?? 1000) * 1e6 }) });
+        const res = await response.json();
+        if (!response.ok) {
+          useSimulationStore.getState().stop();
+          return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res, isError: true };
+        }
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
       } catch (e) {
-        // fallback local
-        return { content: [{ type: "text", text: `Simulation started locally (backend not reachable): ${(e as Error).message}` }] };
+        useSimulationStore.getState().stop();
+        return { content: [{ type: "text", text: `Simulation failed: ${(e as Error).message}` }], isError: true };
       }
     },
   },
@@ -217,8 +224,13 @@ const tools: ToolDef[] = [
     inputSchema: { type: "object", properties: {} },
     execute: async () => {
       useSimulationStore.getState().stop();
-      try { await fetch("/api/simulation/stop", { method: "POST" }); } catch {}
-      return { content: [{ type: "text", text: "Simulation stopped" }] };
+      try {
+        const response = await fetch("/api/simulation/stop", { method: "POST" });
+        if (!response.ok) return { content: [{ type: "text", text: `Simulation stopped locally; backend returned HTTP ${response.status}` }], isError: true };
+        return { content: [{ type: "text", text: "Simulation stopped" }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Simulation stopped locally; backend stop failed: ${(e as Error).message}` }], isError: true };
+      }
     },
   },
   {

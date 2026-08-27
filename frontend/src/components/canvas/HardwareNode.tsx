@@ -35,7 +35,7 @@ function Pin({ port, side, index, total }: { port: HardwareNodeData["ports"][num
     <div className={`hardware-pin hardware-pin-${side}`} style={{ top }} title={`${port.id} · ${port.domain} · ${port.direction}`}>
       <Handle type="source" position={position} id={port.id} style={{ background: color, borderColor: "hsl(var(--background))" }} />
       <Handle type="target" position={position} id={port.id} style={{ background: color, borderColor: "hsl(var(--background))" }} />
-      <span className="hardware-pin-label"><i style={{ background: color }} />{port.id}</span>
+      <span className="hardware-pin-label"><b style={{ background: color }} />{port.id}</span>
     </div>
   );
 }
@@ -45,10 +45,12 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
   const leftPorts = data.ports.filter((_, index) => index % 2 === 0);
   const rightPorts = data.ports.filter((_, index) => index % 2 === 1);
   const rows = Math.max(leftPorts.length, rightPorts.length, 4);
-  const visualHeight = Math.min(320, Math.max(142, rows * 22 + 30));
+  const compact = data.ports.length <= 4 && ["passive", "analog", "logic"].includes(def?.category ?? "");
+  const display = ["display", "displays"].includes(def?.category ?? "");
+  const visualHeight = compact ? 108 : display ? Math.max(138, rows * 22 + 20) : Math.min(320, Math.max(142, rows * 22 + 30));
 
   return (
-    <div className={`hardware-node ${selected ? "is-selected" : ""}`} style={{ fontFamily: "Inter, sans-serif" }}>
+    <div className={`hardware-node ${compact ? "is-compact-part" : ""} ${display ? "is-display-part" : ""} ${selected ? "is-selected" : ""}`} style={{ fontFamily: "Inter, sans-serif" }}>
       <NodeToolbar isVisible={selected} position={Position.Top} offset={10}>
         <div className="node-toolbar">
           <span>{data.label}</span>
@@ -57,7 +59,9 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
       </NodeToolbar>
 
       <div className="hardware-node-identity">
-        <span className="hardware-node-kind">{def?.category === "board" ? <CircuitBoard size={11} /> : <span className="hardware-node-status" />}</span>
+        {def?.category === "board"
+          ? <span className="hardware-node-kind"><CircuitBoard size={11} /></span>
+          : <span className="hardware-node-glyph">{(def?.category ?? "part").slice(0, 2).toUpperCase()}</span>}
         <span className="min-w-0"><strong>{data.label}</strong><small>{data.definitionId} · {data.ports.length} pins</small></span>
       </div>
 
