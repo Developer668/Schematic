@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="48" viewBox="0 0 64 48" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.22"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.2" stdDeviation="0.8" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <rect x="6" y="10" width="52" height="30" rx="2" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="0.6" filter="url(#softShadow)"/>
+  <rect x="14" y="16" width="36" height="18" rx="5" fill="none" stroke="#0f172a" stroke-width="0.5" stroke-dasharray="1.8 1"/>
+  <text x="32" y="27" text-anchor="middle" font-family="monospace" font-size="3.8" fill="#0f172a">RC522</text>
+  <text x="32" y="42" text-anchor="middle" font-family="monospace" font-size="2.8" font-weight="600" fill="#1e293b">RFID 13.56MHz</text>
+</svg>

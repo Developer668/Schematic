@@ -24,6 +24,8 @@ env/
 # Local application data
 backend/data/
 data/
+!frontend/src/data/
+!frontend/src/data/**
 *.db
 *.sqlite
 *.sqlite3

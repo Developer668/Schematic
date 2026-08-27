@@ -153,16 +153,22 @@ body {
 .component-list { display: grid; gap: 4px; }
 .component-list-item { display: flex; width: 100%; align-items: center; gap: 9px; border: 1px solid transparent; border-radius: 6px; padding: 7px; text-align: left; transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease; }
 .component-list-item:hover { border-color: hsl(var(--border)); background: hsl(var(--muted) / 0.6); transform: translateX(1px); }
-.component-preview { position: relative; width: 58px; height: 48px; display: grid; place-items: center; }
+.component-preview { position: relative; width: 58px; height: 48px; display: grid; place-items: center; overflow: hidden; isolation: isolate; border-radius: 4px; background: hsl(var(--muted) / 0.18); border: 1px solid hsl(var(--border) / 0.5); }
 .component-add { display: grid; width: 22px; height: 22px; flex: none; place-items: center; align-self: center; border: 1px solid hsl(var(--border)); border-radius: 5px; color: hsl(var(--muted-foreground)); background: hsl(var(--card)); font-size: 12px; opacity: 0; transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease; }
 .component-list-item:hover .component-add, .component-list-item:focus-visible .component-add { opacity: 1; color: hsl(var(--accent)); border-color: hsl(var(--accent) / 0.45); }
 .component-list.is-compact { gap: 1px; }
 .component-list.is-compact .component-list-item { padding: 4px 6px; }
 .component-list.is-compact .component-preview { width: 44px; height: 38px; }
 
-.component-artwork { position: relative; z-index: 1; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; object-position: center; filter: drop-shadow(0 4px 10px hsl(240 20% 4% / .22)); user-select: none; pointer-events: none; display: block; }
-.component-artwork-inline { display: grid; place-items: center; overflow: visible; width: 100%; height: 100%; }
-.component-artwork-inline > svg { width: 100%; height: 100%; max-width: 100%; max-height: 100%; overflow: visible; object-fit: contain; }
+.component-artwork { position: relative; z-index: 1; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; object-position: center; filter: drop-shadow(0 2px 4px hsl(240 20% 4% / .14)); user-select: none; pointer-events: none; display: block; }
+.component-artwork-inline { display: grid; place-items: center; overflow: hidden; width: 100%; height: 100%; }
+.component-artwork-inline > svg { width: 100%; height: 100%; max-width: 100%; max-height: 100%; overflow: hidden; object-fit: contain; }
+/* Hardware canvas keeps larger shadow, sidebar preview gets tighter */
+.hardware-part-artwork .component-artwork { filter: drop-shadow(0 4px 10px hsl(240 20% 4% / .22)); }
+.hardware-part-artwork .component-artwork-inline { overflow: visible; }
+.hardware-part-artwork .component-artwork-inline > svg { overflow: visible; }
+.component-preview .component-artwork { filter: drop-shadow(0 1px 3px hsl(240 20% 4% / .12)); padding: 3px; box-sizing: border-box; }
+.component-preview .component-artwork-inline { padding: 3px; box-sizing: border-box; }
 .component-artwork-fallback { display: grid; place-items: center; color: hsl(var(--muted-foreground)); font: 700 10px ui-monospace, monospace; border: 1px dashed hsl(var(--border)); border-radius: 6px; width: 100%; height: 100%; min-height: 56px; }
 
 .hardware-node { position: relative; width: 270px; background: transparent; color: hsl(var(--foreground)); }
