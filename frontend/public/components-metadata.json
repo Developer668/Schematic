@@ -5233,6 +5233,1247 @@
       "name": "OLED 0.91\" (128\u00d732, I2C)",
       "category": "display",
       "description": "0.91\" OLED 128\u00d732 SSD1306 I2C \u2014 tiny 4-pin, 3.3V. Status & icon display."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ESP32-S2-D</text></svg>",
+      "tags": [
+        "esp32",
+        "s2",
+        "wifi",
+        "usb-otg",
+        "espressif",
+        "board"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "esp32-s2-devkit",
+      "tagName": "wokwi-esp32-s2-devkit",
+      "name": "ESP32-S2 DevKitC",
+      "category": "boards",
+      "description": "ESP32-S2 single-core Wi-Fi, 43 GPIOs, USB-OTG, 2MB flash. Native USB for HID."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ESP32-C6-D</text></svg>",
+      "tags": [
+        "esp32",
+        "c6",
+        "risc-v",
+        "wifi6",
+        "zigbee",
+        "espressif",
+        "board"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "esp32-c6-devkit",
+      "tagName": "wokwi-esp32-c6-devkit",
+      "name": "ESP32-C6 DevKitC",
+      "category": "boards",
+      "description": "ESP32-C6 RISC-V Wi-Fi 6 + BLE 5 + Zigbee, 30 GPIOs, 8MB flash. Matter-ready."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ARDUINO-PR</text></svg>",
+      "tags": [
+        "arduino",
+        "pro",
+        "mini",
+        "atmega328p",
+        "board"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "arduino-pro-mini",
+      "tagName": "wokwi-pro-mini",
+      "name": "Arduino Pro Mini (5V, 16MHz)",
+      "category": "boards",
+      "description": "ATmega328P Pro Mini 5V 16MHz \u2014 14 DIO, 8 AIO, 32KB, no USB. Ultra-compact 18\u00d733mm."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ARDUINO-LE</text></svg>",
+      "tags": [
+        "arduino",
+        "leonardo",
+        "atmega32u4",
+        "board",
+        "usb"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "arduino-leonardo",
+      "tagName": "wokwi-leonardo",
+      "name": "Arduino Leonardo",
+      "category": "boards",
+      "description": "ATmega32u4 Leonardo \u2014 native USB, 20 DIO, 12 AIO, 32KB. Keyboard/Mouse HID."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">STM32-NUCL</text></svg>",
+      "tags": [
+        "stm32",
+        "nucleo",
+        "f401",
+        "st",
+        "cortex-m4",
+        "board"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "stm32-nucleo-f401re",
+      "tagName": "wokwi-nucleo-f401re",
+      "name": "STM32 Nucleo-F401RE",
+      "category": "boards",
+      "description": "Nucleo-F401RE 84MHz Cortex-M4, 512KB, ST-Link, Arduino + ST morpho headers. MBED."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">STM32-NUCL</text></svg>",
+      "tags": [
+        "stm32",
+        "nucleo",
+        "g071",
+        "st",
+        "cortex-m0",
+        "board"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "stm32-nucleo-g071rb",
+      "tagName": "wokwi-nucleo-g071",
+      "name": "STM32 Nucleo-G071RB",
+      "category": "boards",
+      "description": "Nucleo-G071RB 64MHz Cortex-M0+, 128KB, 2\u00d7 CAN-FD. Low-power modern STM32."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">RASPBERRY-</text></svg>",
+      "tags": [
+        "raspberry",
+        "pi",
+        "5",
+        "8gb",
+        "broadcom",
+        "linux",
+        "board",
+        "sbc"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "raspberry-pi-5-8gb",
+      "tagName": "wokwi-pi-5",
+      "name": "Raspberry Pi 5 (8GB)",
+      "category": "boards",
+      "description": "Pi 5 BCM2712 quad A76 2.4GHz, 8GB, PCIe, RTC, 40-pin. Fastest Pi SBC."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">RASPBERRY-</text></svg>",
+      "tags": [
+        "raspberry",
+        "pico",
+        "2",
+        "rp2350",
+        "board",
+        "arm",
+        "risc-v"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "raspberry-pi-pico-2",
+      "tagName": "wokwi-pico-2",
+      "name": "Raspberry Pi Pico 2",
+      "category": "boards",
+      "description": "RP2350 Pico 2 \u2014 150MHz M33+RISC-V, 520KB, 26 GPIO, USB-C. 2024 upgrade."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">BEAGLEBONE</text></svg>",
+      "tags": [
+        "beaglebone",
+        "am3358",
+        "ti",
+        "linux",
+        "board",
+        "sbc"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "beaglebone-black",
+      "tagName": "wokwi-beaglebone",
+      "name": "BeagleBone Black",
+      "category": "boards",
+      "description": "BeagleBone Black AM3358 1GHz Cortex-A8, 512MB, 65 GPIOs, PRU. Industrial Linux."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ADAFRUIT-F</text></svg>",
+      "tags": [
+        "adafruit",
+        "feather",
+        "m4",
+        "samd51",
+        "board",
+        "cortex-m4"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "adafruit-feather-m4",
+      "tagName": "wokwi-feather-m4",
+      "name": "Adafruit Feather M4 (SAMD51)",
+      "category": "boards",
+      "description": "Feather M4 SAMD51 120MHz Cortex-M4, 192KB, STEMMA QT, LiPo. Feather ecosystem."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">PARTICLE-P</text></svg>",
+      "tags": [
+        "particle",
+        "photon",
+        "stm32",
+        "wifi",
+        "board",
+        "iot"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "particle-photon",
+      "tagName": "wokwi-photon",
+      "name": "Particle Photon",
+      "category": "boards",
+      "description": "Photon P0 STM32F205 + CYW43438 Wi-Fi, 1MB, cloud OTA, Breadboard. IoT fleet."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ONION-OMEG</text></svg>",
+      "tags": [
+        "onion",
+        "omega2",
+        "mt7688",
+        "linux",
+        "mips",
+        "board",
+        "openwrt"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "onion-omega2",
+      "tagName": "wokwi-omega2",
+      "name": "Onion Omega2+",
+      "category": "boards",
+      "description": "Omega2+ MT7688 MIPS 580MHz, 128MB, Wi-Fi, 18 GPIOs, Linux OpenWrt. Tiny router board."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">JETSON-NAN</text></svg>",
+      "tags": [
+        "jetson",
+        "nano",
+        "nvidia",
+        "ai",
+        "sbc",
+        "linux",
+        "board"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0,
+      "id": "jetson-nano-devkit",
+      "tagName": "wokwi-jetson-nano",
+      "name": "Jetson Nano Developer Kit",
+      "category": "boards",
+      "description": "Jetson Nano 128-core Maxwell + quad A57, 4GB, 12 GPIOs, CSI, 40-pin. Edge AI SBC."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ESP-01S</text></svg>",
+      "tags": [
+        "esp01",
+        "esp8266",
+        "wifi",
+        "espressif",
+        "communication",
+        "module"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "esp-01s",
+      "tagName": "wokwi-esp-01s",
+      "name": "ESP-01S (ESP8266 module)",
+      "category": "communication",
+      "description": "ESP-01S 1MB Wi-Fi module \u2014 2 GPIOs, AT or Arduino, 3.3V, FCC. Cheap Wi-Fi add-on."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">HC-06-BLUE</text></svg>",
+      "tags": [
+        "hc06",
+        "bluetooth",
+        "uart",
+        "slave",
+        "communication"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "hc-06-bluetooth",
+      "tagName": "wokwi-hc06",
+      "name": "HC-06 Bluetooth Slave",
+      "category": "communication",
+      "description": "HC-06 slave BT 2.0 \u2014 UART 9600, AT, 3.3V, status LED. Simpler than HC-05."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ADXL345-AC</text></svg>",
+      "tags": [
+        "adxl345",
+        "accel",
+        "i2c",
+        "spi",
+        "sensor",
+        "analog-devices"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "adxl345-accel",
+      "tagName": "wokwi-adxl345",
+      "name": "ADXL345 (3-Axis Accel, I2C/SPI)",
+      "category": "sensors",
+      "description": "ADXL345 16g 13-bit I2C/SPI, 3\u00d73mm, tap/idle detect. Motion & tilt core."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">HMC5883L-M</text></svg>",
+      "tags": [
+        "hmc5883l",
+        "magnet",
+        "compass",
+        "i2c",
+        "sensor",
+        "honeywell"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 5,
+      "id": "hmc5883l-magnet",
+      "tagName": "wokwi-hmc5883l",
+      "name": "HMC5883L Magnetometer (I2C)",
+      "category": "sensors",
+      "description": "HMC5883L 3-axis magnet \u00b18G I2C, 137 LSB/Gauss. Compass heading module."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">L3G4200D-G</text></svg>",
+      "tags": [
+        "l3g4200d",
+        "gyro",
+        "i2c",
+        "spi",
+        "sensor",
+        "st"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "l3g4200d-gyro",
+      "tagName": "wokwi-l3g4200d",
+      "name": "L3G4200D Gyroscope (I2C/SPI)",
+      "category": "sensors",
+      "description": "L3G4200D 250/500/2000 dps I2C/SPI, 16-bit, ST. Rotation rate sensor."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">BMP388-PRE</text></svg>",
+      "tags": [
+        "bmp388",
+        "bosch",
+        "pressure",
+        "barometer",
+        "i2c",
+        "spi",
+        "sensor"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 6,
+      "id": "bmp388-pressure",
+      "tagName": "wokwi-bmp388",
+      "name": "BMP388 Barometer (I2C/SPI)",
+      "category": "sensors",
+      "description": "BMP388 \u00b18Pa I2C/SPI, 0.08Pa rms, 3.3V. Next-gen BMP280 pressure."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">SHT30-TEMP</text></svg>",
+      "tags": [
+        "sht30",
+        "sht31",
+        "temperature",
+        "humidity",
+        "i2c",
+        "sensirion",
+        "sensor"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "sht30-temp-hum",
+      "tagName": "wokwi-sht30",
+      "name": "SHT30 Temp/Humidity (I2C)",
+      "category": "sensors",
+      "description": "SHT30 \u00b10.3\u00b0C \u00b12%RH I2C, 0.01\u00b0C res, DFN-8. Reliable SHT30-DIS."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">SHT40-TEMP</text></svg>",
+      "tags": [
+        "sht40",
+        "temperature",
+        "humidity",
+        "i2c",
+        "sensirion",
+        "sensor"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "sht40-temp-hum",
+      "tagName": "wokwi-sht40",
+      "name": "SHT40 Temp/Humidity (I2C)",
+      "category": "sensors",
+      "description": "SHT40 \u00b10.2\u00b0C \u00b11.8%RH I2C, 0.1mW, DFN-4. Latest Sensirion SHT4x."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">BME680-GAS</text></svg>",
+      "tags": [
+        "bme680",
+        "bosch",
+        "gas",
+        "iaq",
+        "pressure",
+        "humidity",
+        "i2c",
+        "spi",
+        "sensor"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 6,
+      "id": "bme680-gas",
+      "tagName": "wokwi-bme680",
+      "name": "BME680 Gas/Press/Hum/Temp (I2C/SPI)",
+      "category": "sensors",
+      "description": "BME680 4-in-1 gas + press/hum/temp I2C/SPI, Bosch, IAQ. E-nose module."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">CCS811-AIR</text></svg>",
+      "tags": [
+        "ccs811",
+        "eco2",
+        "tvoc",
+        "i2c",
+        "ams",
+        "sensor",
+        "air"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "ccs811-air-quality",
+      "tagName": "wokwi-ccs811",
+      "name": "CCS811 eCO2/TVOC (I2C)",
+      "category": "sensors",
+      "description": "CCS811 400-8192ppm eCO2 I2C, 10-yr life, 1.8-3.6V. VOC air quality."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">MH-Z19B-CO</text></svg>",
+      "tags": [
+        "mh-z19b",
+        "co2",
+        "ndir",
+        "uart",
+        "sensor",
+        "winsen"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 6,
+      "id": "mh-z19b-co2",
+      "tagName": "wokwi-mhz19b",
+      "name": "MH-Z19B CO2 (UART/PWM)",
+      "category": "sensors",
+      "description": "MH-Z19B NDIR CO2 0-5000ppm UART/PWM, 3.6V, ABC. Ventilation control."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">PMS5003-DU</text></svg>",
+      "tags": [
+        "pms5003",
+        "dust",
+        "pm2.5",
+        "laser",
+        "uart",
+        "sensor",
+        "plantower"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "pms5003-dust",
+      "tagName": "wokwi-pms5003",
+      "name": "PMS5003 Dust (PM1/2.5/10, UART)",
+      "category": "sensors",
+      "description": "PMS5003 laser dust PM1/2.5/10 UART, 3.3V, fan. Air purifier sensor."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">TSL2561-LU</text></svg>",
+      "tags": [
+        "tsl2561",
+        "lux",
+        "light",
+        "i2c",
+        "ams",
+        "sensor"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "tsl2561-lux",
+      "tagName": "wokwi-tsl2561",
+      "name": "TSL2561 Luminosity (I2C)",
+      "category": "sensors",
+      "description": "TSL2561 0.1-40000 lux I2C, 16-bit, dual diode, IR. Light meter."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">VEML7700-L</text></svg>",
+      "tags": [
+        "veml7700",
+        "lux",
+        "vishay",
+        "i2c",
+        "sensor",
+        "light"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "veml7700-lux",
+      "tagName": "wokwi-veml7700",
+      "name": "VEML7700 Lux (I2C)",
+      "category": "sensors",
+      "description": "VEML7700 0-120k lux I2C, 16-bit, ALS. Modern TSL2561 replacement."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">MLX90614-I</text></svg>",
+      "tags": [
+        "mlx90614",
+        "ir",
+        "temperature",
+        "i2c",
+        "melexis",
+        "sensor"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "mlx90614-ir-temp",
+      "tagName": "wokwi-mlx90614",
+      "name": "MLX90614 IR Temp (I2C)",
+      "category": "sensors",
+      "description": "MLX90614 -70 to 382\u00b0C IR I2C, 0.02\u00b0C, 3V. Non-contact temp."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">MAX6675-TH</text></svg>",
+      "tags": [
+        "max6675",
+        "thermocouple",
+        "k-type",
+        "spi",
+        "maxim",
+        "sensor"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 6,
+      "id": "max6675-thermocouple",
+      "tagName": "wokwi-max6675",
+      "name": "MAX6675 K-Thermocouple (SPI)",
+      "category": "sensors",
+      "description": "MAX6675 K-type 0-1024\u00b0C SPI, 12-bit, cold-junction. Furnace probe."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">INA219-CUR</text></svg>",
+      "tags": [
+        "ina219",
+        "current",
+        "power",
+        "i2c",
+        "ti",
+        "sensor",
+        "ina"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "ina219-current",
+      "tagName": "wokwi-ina219",
+      "name": "INA219 Current/Power (I2C)",
+      "category": "sensors",
+      "description": "INA219 26V 3.2A I2C, 12-bit, 0.1\u03a9. High-side DC power monitor."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ACS712-30A</text></svg>",
+      "tags": [
+        "acs712",
+        "current",
+        "hall",
+        "analog",
+        "sensor",
+        "allegro"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 3,
+      "id": "acs712-30a",
+      "tagName": "wokwi-acs712",
+      "name": "ACS712 30A Current (Analog)",
+      "category": "sensors",
+      "description": "ACS712 30A Hall, 66mV/A, 5V, isolated. AC/DC current brick."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">QTR-8RC-RE</text></svg>",
+      "tags": [
+        "qtr",
+        "8rc",
+        "reflectance",
+        "ir",
+        "line",
+        "sensor",
+        "pololu"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 10,
+      "id": "qtr-8rc-reflectance",
+      "tagName": "wokwi-qtr8rc",
+      "name": "QTR-8RC Reflectance (8-ch)",
+      "category": "sensors",
+      "description": "QTR-8RC 8\u00d7 IR reflectance 3.3-5V, analog/digital. Line follower array."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">TCRT5000-L</text></svg>",
+      "tags": [
+        "tcrt5000",
+        "ir",
+        "line",
+        "reflectance",
+        "sensor",
+        "vishay"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 3,
+      "id": "tcrt5000-line",
+      "tagName": "wokwi-tcrt5000",
+      "name": "TCRT5000 Line Sensor",
+      "category": "sensors",
+      "description": "TCRT5000 IR 950nm analog 3.3-5V, 2.5cm. Single line / encoder."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">SHARP-GP2Y</text></svg>",
+      "tags": [
+        "sharp",
+        "gp2y0a",
+        "ir",
+        "distance",
+        "analog",
+        "sensor"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 3,
+      "id": "sharp-gp2y0a-distance",
+      "tagName": "wokwi-gp2y0a",
+      "name": "Sharp GP2Y0A21 IR Distance (10-80cm)",
+      "category": "sensors",
+      "description": "GP2Y0A21 analog 10-80cm, 5V, 30mA, JST. Sharp IR ranger."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">DHT11-TEMP</text></svg>",
+      "tags": [
+        "dht11",
+        "temperature",
+        "humidity",
+        "sensor",
+        "1-wire"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 3,
+      "id": "dht11-temp-hum",
+      "tagName": "wokwi-dht11",
+      "name": "DHT11 Temp/Humidity",
+      "category": "sensors",
+      "description": "DHT11 \u00b12\u00b0C \u00b15%RH, 1-wire, 3-5V, 2.5mA. Budget DHT22 alternative."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">SSD1351-1-</text></svg>",
+      "tags": [
+        "ssd1351",
+        "oled",
+        "display",
+        "spi",
+        "1.5",
+        "128x128"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 7,
+      "id": "ssd1351-1-5-oled",
+      "tagName": "wokwi-ssd1351",
+      "name": "SSD1351 1.5\" OLED 128\u00d7128 (SPI)",
+      "category": "displays",
+      "description": "SSD1351 1.5\" 128\u00d7128 65k SPI, SD, 3.3V. Full-color OLED."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">TM1637-4DI</text></svg>",
+      "tags": [
+        "tm1637",
+        "7seg",
+        "display",
+        "4digit",
+        "clk",
+        "dio"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "tm1637-4digit",
+      "tagName": "wokwi-tm1637",
+      "name": "TM1637 4-Digit 7-Seg (CLK/DIO)",
+      "category": "displays",
+      "description": "TM1637 4\u00d7 7-seg 0.56\" CLK/DIO, 3.3-5V, colon. Clock display."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">MAX7219-8X</text></svg>",
+      "tags": [
+        "max7219",
+        "matrix",
+        "8x8",
+        "spi",
+        "display",
+        "led"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 5,
+      "id": "max7219-8x8-matrix",
+      "tagName": "wokwi-max7219-matrix",
+      "name": "MAX7219 8\u00d78 Matrix (SPI)",
+      "category": "displays",
+      "description": "MAX7219 8\u00d78 64-LED SPI, 5V, cascade 8. LED matrix driver."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">HT16K33-14</text></svg>",
+      "tags": [
+        "ht16k33",
+        "14seg",
+        "alphanumeric",
+        "i2c",
+        "display",
+        "adafruit"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "ht16k33-14seg",
+      "tagName": "wokwi-ht16k33",
+      "name": "HT16K33 14-Seg (I2C, 4-char)",
+      "category": "displays",
+      "description": "HT16K33 I2C 14-seg 0.54\" \u00d74, 4.5V, brightness. Alphanumeric."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ILI9341-2-</text></svg>",
+      "tags": [
+        "ili9341",
+        "tft",
+        "display",
+        "spi",
+        "2.4",
+        "240x320",
+        "touch"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "ili9341-2-4-tft",
+      "tagName": "wokwi-ili9341-2-4",
+      "name": "ILI9341 2.4\" TFT 240\u00d7320 (SPI)",
+      "category": "displays",
+      "description": "ILI9341 2.4\" 240\u00d7320 TFT SPI, SD, touch XPT2046, 3.3V. Color touch."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">NEXTION-3-</text></svg>",
+      "tags": [
+        "nextion",
+        "hmi",
+        "uart",
+        "display",
+        "3.2",
+        "touch"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "nextion-3-2-hmi",
+      "tagName": "wokwi-nextion",
+      "name": "Nextion 3.2\" HMI (UART)",
+      "category": "displays",
+      "description": "Nextion 3.2\" 400\u00d7240 UART HMI, 5V, resistive touch, SD. Drag-drop UI."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">TFT-1-14-S</text></svg>",
+      "tags": [
+        "st7789",
+        "tft",
+        "display",
+        "spi",
+        "1.14",
+        "135x240"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 7,
+      "id": "tft-1-14-st7789",
+      "tagName": "wokwi-st7789",
+      "name": "ST7789 1.14\" TFT 135\u00d7240 (SPI)",
+      "category": "displays",
+      "description": "ST7789 1.14\" 135\u00d7240 IPS SPI, 3.3V, 240 nits. TTGO T-Display style."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">OLED-0-96-</text></svg>",
+      "tags": [
+        "oled",
+        "ssd1306",
+        "spi",
+        "display",
+        "0.96",
+        "128x64"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 7,
+      "id": "oled-0-96-128x64-spi",
+      "tagName": "wokwi-oled-096-spi",
+      "name": "OLED 0.96\" 128\u00d764 (SPI)",
+      "category": "displays",
+      "description": "0.96\" OLED 128\u00d764 SSD1306 SPI, 7-pin, 3.3V. SPI variant of I2C 0.96."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">CHAR-LCD-1</text></svg>",
+      "tags": [
+        "lcd",
+        "16x1",
+        "hd44780",
+        "display",
+        "char"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 16,
+      "id": "char-lcd-16x1",
+      "tagName": "wokwi-lcd1601",
+      "name": "LCD 16\u00d71 (HD44780)",
+      "category": "displays",
+      "description": "HD44780 16\u00d71 char LCD 5V, 16-pin, contrast pot. Single-line text."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">E-INK-2-13</text></svg>",
+      "tags": [
+        "epaper",
+        "e-ink",
+        "display",
+        "2.13",
+        "spi",
+        "gxepd2"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "e-ink-2-13-v2",
+      "tagName": "velxio-epaper",
+      "name": "ePaper 2.13\" V2 (250\u00d7122 BW)",
+      "category": "displays",
+      "description": "ePaper 2.13\" V2 250\u00d7122 BW, SPI, GxEPD2, partial refresh. Updated driver."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">SIM800L-GS</text></svg>",
+      "tags": [
+        "sim800l",
+        "gsm",
+        "gprs",
+        "uart",
+        "simcom",
+        "communication"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 6,
+      "id": "sim800l-gsm",
+      "tagName": "wokwi-sim800l",
+      "name": "SIM800L GSM (UART)",
+      "category": "communication",
+      "description": "SIM800L quad-band GSM/GPRS UART, 3.7-4.2V, SMA. SMS & data."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ZIGBEE-CC2</text></svg>",
+      "tags": [
+        "cc2530",
+        "zigbee",
+        "uart",
+        "ti",
+        "communication",
+        "2.4ghz"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 6,
+      "id": "zigbee-cc2530",
+      "tagName": "wokwi-cc2530",
+      "name": "Zigbee CC2530 (UART)",
+      "category": "communication",
+      "description": "CC2530 Zigbee 2.4GHz UART, 3.3V, PA, SMA. Zigbee coordinator."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">BLE-HM10</text></svg>",
+      "tags": [
+        "hm10",
+        "ble",
+        "bluetooth",
+        "uart",
+        "cc2541",
+        "communication"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "ble-hm10",
+      "tagName": "wokwi-hm10",
+      "name": "HM-10 BLE 4.0 (UART)",
+      "category": "communication",
+      "description": "HM-10 CC2541 BLE 4.0 UART, 3.3V, iBeacon, 100m. BLE serial."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">CAN-MCP251</text></svg>",
+      "tags": [
+        "mcp2515",
+        "can",
+        "spi",
+        "tja1050",
+        "microchip",
+        "communication"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "can-mcp2515",
+      "tagName": "wokwi-mcp2515",
+      "name": "MCP2515 CAN (SPI)",
+      "category": "communication",
+      "description": "MCP2515 CAN 2.0B SPI + TJA1050, 8MHz, 1Mbps, 120\u03a9. Auto CAN."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">RS485-MAX4</text></svg>",
+      "tags": [
+        "max485",
+        "rs485",
+        "uart",
+        "maxim",
+        "communication"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 6,
+      "id": "rs485-max485",
+      "tagName": "wokwi-max485",
+      "name": "MAX485 RS485 (UART)",
+      "category": "communication",
+      "description": "MAX485 RS485 half-duplex, 2.5Mbps, 32 nodes, DE/RE. Industrial bus."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ETHERNET-W</text></svg>",
+      "tags": [
+        "w5500",
+        "ethernet",
+        "spi",
+        "wiznet",
+        "communication"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "ethernet-w5500",
+      "tagName": "wokwi-w5500",
+      "name": "W5500 Ethernet (SPI)",
+      "category": "communication",
+      "description": "W5500 10/100 Ethernet SPI, 32KB, 8 sockets, 3.3V. Hardwired TCP/IP."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">TP4056-CHA</text></svg>",
+      "tags": [
+        "tp4056",
+        "charger",
+        "lipo",
+        "power",
+        "battery",
+        "dw01"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "tp4056-charger",
+      "tagName": "wokwi-tp4056",
+      "name": "TP4056 LiPo Charger (5V, 1A)",
+      "category": "power",
+      "description": "TP4056 5V 1A LiPo charger, DW01 protect, micro-USB, 4.2V. 18650 charger."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">MT3608-BOO</text></svg>",
+      "tags": [
+        "mt3608",
+        "boost",
+        "converter",
+        "power",
+        "step-up"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "mt3608-boost",
+      "tagName": "wokwi-mt3608",
+      "name": "MT3608 Boost (2-24V \u2192 5-28V, 2A)",
+      "category": "power",
+      "description": "MT3608 2-24V to 5-28V 2A boost, pot, 1.2MHz, 93%. Step-up."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">AMS1117-3V</text></svg>",
+      "tags": [
+        "ams1117",
+        "ldo",
+        "3.3v",
+        "power",
+        "regulator"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 3,
+      "id": "ams1117-3v3",
+      "tagName": "wokwi-ams1117",
+      "name": "AMS1117-3.3 LDO (800mA)",
+      "category": "power",
+      "description": "AMS1117-3.3 1A LDO, 1V dropout, SOT-223, 4.75-12V. 5V\u21923.3V."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">MCP23017-I</text></svg>",
+      "tags": [
+        "mcp23017",
+        "io",
+        "expander",
+        "i2c",
+        "microchip",
+        "gpio"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "mcp23017-io-expander",
+      "tagName": "wokwi-mcp23017",
+      "name": "MCP23017 16-Bit I/O Expander (I2C)",
+      "category": "communication",
+      "description": "MCP23017 16\u00d7 GPIO I2C, 8 addr, 25mA, interrupt. I2C I/O expander."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">PCF8574-IO</text></svg>",
+      "tags": [
+        "pcf8574",
+        "io",
+        "expander",
+        "i2c",
+        "nxp",
+        "gpio"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 6,
+      "id": "pcf8574-io-expander",
+      "tagName": "wokwi-pcf8574",
+      "name": "PCF8574 8-Bit I/O Expander (I2C)",
+      "category": "communication",
+      "description": "PCF8574 8\u00d7 GPIO I2C, 3 addr, 25mA, quasi-bidir. Classic expander."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">TB6612-MOT</text></svg>",
+      "tags": [
+        "tb6612",
+        "motor",
+        "driver",
+        "dual",
+        "toshiba",
+        "actuator"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 8,
+      "id": "tb6612-motor-driver",
+      "tagName": "wokwi-tb6612",
+      "name": "TB6612FNG Dual Motor Driver",
+      "category": "actuator",
+      "description": "TB6612FNG 15V 1.2A dual, 3.3/5V, 500kHz, standby. Modern L298N."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">ULN2003-ST</text></svg>",
+      "tags": [
+        "uln2003",
+        "stepper",
+        "driver",
+        "28byj",
+        "actuator",
+        "darlington"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 7,
+      "id": "uln2003-stepper-driver",
+      "tagName": "wokwi-uln2003",
+      "name": "ULN2003 28BYJ-48 Driver Board",
+      "category": "actuator",
+      "description": "ULN2003 7\u00d7 Darlington 500mA, 5-12V, 4 LEDs, 5-wire. 28BYJ stepper board."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">MG996R-SER</text></svg>",
+      "tags": [
+        "mg996r",
+        "servo",
+        "metal",
+        "11kg",
+        "actuator",
+        "towerpro"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 3,
+      "id": "mg996r-servo",
+      "tagName": "wokwi-mg996r",
+      "name": "MG996R Servo (Metal 11kg)",
+      "category": "actuator",
+      "description": "MG996R 11kg metal gear, 0.17s/60\u00b0, 4.8-7.2V, 20kg horn. Strong servo."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">NEMA17-STE</text></svg>",
+      "tags": [
+        "nema17",
+        "stepper",
+        "bipolar",
+        "actuator",
+        "motor",
+        "42mm"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "nema17-stepper",
+      "tagName": "wokwi-nema17",
+      "name": "NEMA17 Stepper (42\u00d742mm, 4-wire)",
+      "category": "actuator",
+      "description": "NEMA17 1.8\u00b0 4-wire bipolar, 1.7A, 1.2\u03a9, 200 steps. 3D printer motor."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">SOLENOID-5</text></svg>",
+      "tags": [
+        "solenoid",
+        "5v",
+        "push",
+        "actuator",
+        "electromagnet"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 2,
+      "id": "solenoid-5v",
+      "tagName": "wokwi-solenoid-5v",
+      "name": "Solenoid 5V Push-Pull (5mm stroke)",
+      "category": "actuator",
+      "description": "5V push-pull 1A, 5mm stroke, 10N, flyback diode. Latch & lock."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">VIBRATION-</text></svg>",
+      "tags": [
+        "vibration",
+        "motor",
+        "erm",
+        "1027",
+        "actuator",
+        "haptic"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 2,
+      "id": "vibration-motor-1027",
+      "tagName": "wokwi-vibra-1027",
+      "name": "Vibration Motor 1027 (ERM, 3V)",
+      "category": "actuator",
+      "description": "1027 ERM 3V 90mA, 12000 RPM, 1G, JST. Haptic feedback."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">MOSFET-MOD</text></svg>",
+      "tags": [
+        "mosfet",
+        "irl520",
+        "module",
+        "actuator",
+        "power",
+        "opto"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 3,
+      "id": "mosfet-module-irl520",
+      "tagName": "wokwi-irl520-module",
+      "name": "MOSFET Module IRL520 (5V, 9A)",
+      "category": "actuator",
+      "description": "IRL520 logic MOSFET 100V 9A, optoisolated, 5V gate, screw. High-side switch."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">SSR-40DA</text></svg>",
+      "tags": [
+        "ssr",
+        "relay",
+        "40da",
+        "solid",
+        "state",
+        "actuator",
+        "ac"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 4,
+      "id": "ssr-40da",
+      "tagName": "wokwi-ssr-40da",
+      "name": "SSR-40DA Solid State Relay (40A)",
+      "category": "actuator",
+      "description": "SSR-40DA 3-32V DC \u2192 24-380V AC 40A, zero-cross, LED. Silent AC switch."
+    },
+    {
+      "thumbnail": "<svg width=\"64\" height=\"64\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"64\" height=\"64\" fill=\"#e0e0e0\" rx=\"4\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" font-size=\"7\" fill=\"#666\">BUZZER-5V-</text></svg>",
+      "tags": [
+        "buzzer",
+        "active",
+        "5v",
+        "2300hz",
+        "actuator"
+      ],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 2,
+      "id": "buzzer-5v-active",
+      "tagName": "wokwi-buzzer-active-5v",
+      "name": "Buzzer 5V Active (Beep, 2300Hz)",
+      "category": "actuator",
+      "description": "5V active buzzer 2300Hz, 30mA, 85dB, 12mm. Beep with 5V."
     }
   ]
 }

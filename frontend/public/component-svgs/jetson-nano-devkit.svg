@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="96" height="64" viewBox="0 0 96 64" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.22"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.2" stdDeviation="0.8" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <rect x="4" y="8" width="88" height="48" rx="2" fill="#0f172a" stroke="#020617" stroke-width="0.6" filter="url(#softShadow)"/>
+  <rect x="8" y="14" width="24" height="16" rx="0.6" fill="#1f2937"/><text x="20" y="24" text-anchor="middle" font-family="monospace" font-size="1.7" fill="#76e194">Maxwell 128</text>
+  <rect x="36" y="14" width="20" height="10" rx="0.5" fill="#052e16"/><text x="46" y="20.5" text-anchor="middle" font-family="monospace" font-size="1.3" fill="#86efac">4GB</text>
+  <rect x="60" y="16" width="16" height="8" rx="0.5" fill="#e5e7eb"/><text x="68" y="21" text-anchor="middle" font-family="monospace" font-size="1.1" fill="#111827">CSI</text>
+  <text x="48" y="42" text-anchor="middle" font-family="monospace" font-size="3.2" font-weight="700" fill="#76e194">Jetson Nano</text>
+</svg>

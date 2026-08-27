@@ -366,7 +366,7 @@ export default function StudioPage() {
                     <p className="text-[10px] text-muted-foreground mt-0.5">Try “esp32”</p>
                   </div>
                 ) : (
-                  filteredResults.slice(0, 80).map((c) => {
+                  filteredResults.map((c) => {
                     const dot = c.category === "board" || c.category === "display" ? "bg-blue-500" : "bg-zinc-400";
                     return (
                       <button
@@ -394,7 +394,7 @@ export default function StudioPage() {
                     );
                   })
                 )}
-                {filteredResults.length > 80 && <div className="py-1.5 text-center font-mono text-[10px] text-muted-foreground">80 of {filteredResults.length}</div>}
+                <div className="py-1.5 text-center font-mono text-[10px] text-muted-foreground">{filteredResults.length} components • scroll to browse • {filteredResults.length > 80 ? "all visible" : ""}</div>
               </div>
             </div>
 
