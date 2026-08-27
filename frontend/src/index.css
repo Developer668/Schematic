@@ -160,10 +160,10 @@ body {
 .component-list.is-compact .component-list-item { padding: 4px 6px; }
 .component-list.is-compact .component-preview { width: 44px; height: 38px; }
 
-.component-artwork { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 5px 5px hsl(240 20% 4% / .24)); user-select: none; }
-.component-artwork-inline { display: grid; place-items: center; overflow: visible; }
-.component-artwork-inline > svg { width: 100%; height: 100%; overflow: visible; }
-.component-artwork-fallback { display: grid; place-items: center; color: hsl(var(--muted-foreground)); font: 700 10px ui-monospace, monospace; border: 1px dashed hsl(var(--border)); border-radius: 6px; }
+.component-artwork { position: relative; z-index: 1; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; object-position: center; filter: drop-shadow(0 4px 10px hsl(240 20% 4% / .22)); user-select: none; pointer-events: none; display: block; }
+.component-artwork-inline { display: grid; place-items: center; overflow: visible; width: 100%; height: 100%; }
+.component-artwork-inline > svg { width: 100%; height: 100%; max-width: 100%; max-height: 100%; overflow: visible; object-fit: contain; }
+.component-artwork-fallback { display: grid; place-items: center; color: hsl(var(--muted-foreground)); font: 700 10px ui-monospace, monospace; border: 1px dashed hsl(var(--border)); border-radius: 6px; width: 100%; height: 100%; min-height: 56px; }
 
 .hardware-node { position: relative; width: 270px; background: transparent; color: hsl(var(--foreground)); }
 .hardware-node.is-compact-part { width: 220px; }
@@ -173,13 +173,17 @@ body {
 .hardware-node-glyph { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border-radius: 5px; color: hsl(var(--accent)); background: hsl(var(--accent) / .1); font: 800 8px/1 ui-monospace, monospace; }
 .hardware-node-identity strong, .hardware-node-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hardware-node-identity strong { font-size: 11px; line-height: 1.25; }.hardware-node-identity small { margin-top: 2px; color: hsl(var(--muted-foreground)); font: 9px ui-monospace, monospace; }
-.hardware-part-stage { position: relative; width: 100%; display: grid; place-items: center; perspective: 700px; }
-.hardware-part-selection { position: absolute; inset: 5px 34px; border: 1px dashed transparent; border-radius: 13px; transition: border-color 140ms ease, background 140ms ease; }
+.hardware-part-stage { position: relative; width: 100%; display: grid; place-items: center; perspective: 800px; padding: 8px 44px; box-sizing: border-box; isolation: isolate; }
+.hardware-part-selection { position: absolute; inset: 5px 34px; border: 1px dashed transparent; border-radius: 13px; transition: border-color 140ms ease, background 140ms ease; z-index: 0; }
 .hardware-node.is-selected .hardware-part-selection { border-color: hsl(var(--accent) / .75); background: hsl(var(--accent) / .035); }
-.hardware-part-shadow { display: none; }
-.hardware-part-artwork { width: 72%; height: calc(100% - 16px); transform: rotateX(4deg); transition: transform 180ms ease, filter 180ms ease; }
-.hardware-node.is-compact-part .hardware-part-artwork { width: 62%; height: 88%; }
-.hardware-node.is-display-part .hardware-part-artwork { width: 84%; height: 94%; }
+.hardware-part-shadow { display: block; position: absolute; left: 14%; right: 14%; bottom: 8px; height: 12px; background: radial-gradient(ellipse at center, hsl(240 20% 4% / .14) 0%, transparent 72%); filter: blur(2px); z-index: 0; pointer-events: none; border-radius: 50%; }
+.hardware-node.is-compact-part .hardware-part-shadow { left: 18%; right: 18%; bottom: 6px; height: 8px; }
+.hardware-part-artwork { width: 100%; height: 100%; max-height: 100%; display: grid; place-items: center; transform: rotateX(2deg); transform-origin: center center; transition: transform 180ms ease, filter 180ms ease; z-index: 1; }
+.hardware-part-artwork img, .hardware-part-artwork .component-artwork, .hardware-part-artwork .component-artwork-inline { width: 100%; height: 100%; max-height: 100%; object-fit: contain; object-position: center; }
+.hardware-node.is-compact-part .hardware-part-stage { padding: 6px 32px; }
+.hardware-node.is-compact-part .hardware-part-artwork { max-height: 78px; }
+.hardware-node.is-display-part .hardware-part-stage { padding: 6px 32px; }
+.hardware-node.is-display-part .hardware-part-artwork { max-height: 98%; }
 .hardware-live-display { position: absolute; z-index: 3; left: 13.5%; top: 24%; width: 73%; height: 47%; overflow: hidden; padding: 5px 7px; color: #8390a7; background: #05070a; font-family: "JetBrains Mono", ui-monospace, monospace; pointer-events: none; }
 .hardware-live-display header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 3px; border-bottom: 1px solid #263244; font-size: 6px; letter-spacing: .09em; }
 .hardware-live-display header b { color: #718096; font-size: 6px; }
@@ -195,13 +199,14 @@ body {
 .hardware-live-output-dot { width: 5px; height: 5px; border-radius: 50%; background: hsl(var(--muted-foreground) / .45); }
 .hardware-live-output.is-on { color: rgb(5 150 105); border-color: rgb(16 185 129 / .45); background: rgb(16 185 129 / .1); }
 .hardware-live-output.is-on .hardware-live-output-dot { background: rgb(16 185 129); box-shadow: 0 0 9px rgb(16 185 129 / .9); }
-.hardware-node:hover .hardware-part-artwork { transform: rotateX(1deg) translateY(-2px); filter: drop-shadow(0 10px 8px hsl(240 20% 4% / .30)); }
-.hardware-pin { position: absolute; z-index: 4; display: flex; align-items: center; transform: translateY(-50%); }
-.hardware-pin-left { left: 13px; flex-direction: row-reverse; }.hardware-pin-right { right: 13px; }
-.hardware-node.is-compact-part .hardware-pin-left { left: 2px; }.hardware-node.is-compact-part .hardware-pin-right { right: 2px; }
-.hardware-pin-label { display: inline-flex; min-width: 42px; max-width: 74px; height: 18px; align-items: center; gap: 4px; overflow: hidden; border: 1px solid hsl(var(--border) / .85); border-radius: 4px; padding: 0 5px; color: hsl(var(--foreground)); background: hsl(var(--card) / .88); box-shadow: 0 2px 7px hsl(240 20% 4% / .13); backdrop-filter: blur(8px); font: 600 9px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.hardware-pin-left .hardware-pin-label { justify-content: flex-end; }.hardware-pin-label b { width: 2px; height: 10px; flex: none; border-radius: 1px; }
-.hardware-pin .react-flow__handle { position: absolute; top: 50%; }.hardware-pin-left .react-flow__handle { left: -5px; }.hardware-pin-right .react-flow__handle { right: -5px; left: auto; }
+.hardware-node:hover .hardware-part-artwork { transform: rotateX(1deg) translateY(-1px); filter: drop-shadow(0 8px 12px hsl(240 20% 4% / .26)); }
+.hardware-pin { position: absolute; z-index: 4; display: flex; align-items: center; transform: translateY(-50%); pointer-events: none; }
+.hardware-pin-left { left: 10px; flex-direction: row-reverse; }.hardware-pin-right { right: 10px; }
+.hardware-node.is-compact-part .hardware-pin-left { left: 6px; }.hardware-node.is-compact-part .hardware-pin-right { right: 6px; }
+.hardware-pin-label { display: inline-flex; min-width: 36px; max-width: 68px; height: 16px; align-items: center; gap: 4px; overflow: hidden; border: 1px solid hsl(var(--border) / .9); border-radius: 4px; padding: 0 4px; color: hsl(var(--foreground)); background: hsl(var(--card) / .92); box-shadow: 0 1px 6px hsl(240 20% 4% / .14); backdrop-filter: blur(8px); font: 600 8.5px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; pointer-events: auto; }
+.hardware-pin-left .hardware-pin-label { justify-content: flex-end; }.hardware-pin-label b { width: 2px; height: 9px; flex: none; border-radius: 1px; }
+.hardware-pin .react-flow__handle { position: absolute; top: 50%; transform: translateY(-50%); width: 10px !important; height: 10px !important; border-radius: 50% !important; border-width: 1.5px !important; box-shadow: 0 1px 4px hsl(240 20% 4% / .22); pointer-events: auto; }
+.hardware-pin-left .react-flow__handle { left: -4px; }.hardware-pin-right .react-flow__handle { right: -4px; left: auto; }
 .hardware-node-caption { width: 205px; margin: 2px auto 0; overflow: hidden; color: hsl(var(--muted-foreground)); font-size: 9px; line-height: 1.35; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .node-toolbar { display: flex; min-width: 150px; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 5px 4px 9px; border: 1px solid hsl(var(--border)); border-radius: 7px; background: hsl(var(--card) / .96); box-shadow: 0 7px 22px hsl(240 20% 4% / .2); backdrop-filter: blur(12px); font-size: 10px; font-weight: 600; }
 .node-toolbar-delete, .inspector-delete { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; color: rgb(239 68 68); transition: background 120ms ease, color 120ms ease; }

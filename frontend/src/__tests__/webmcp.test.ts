@@ -4,6 +4,7 @@ import { useSimulationStore } from "../store/useSimulationStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { useValidationStore } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
+import { useShoppingStore } from "../store/useShoppingStore.ts";
 import { getRegisteredToolNames, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools } from "../webmcp/tools.ts";
 
 describe("WebMCP tools", () => {
@@ -189,13 +190,104 @@ describe("WebMCP tools", () => {
     await call("shopping.choose_alternative", { resultId: shoppingResultId, catalogId: "arduino-uno-r3" });
     await call("shopping.cart_reset", { requiredCatalogIds: ["esp32-s3"] });
     await call("shopping.cart_undo");
-    await call("shopping.cart_remove", { resultId: shoppingResultId });
+    await call("shopping.cart_remove", { resultId: useShoppingStore.getState().cart[0]?.resultId });
     await call("design.auto_layout");
     await call("project.get_graph");
     await call("component.remove", { instanceId: sensorId });
 
     expect([...invoked].sort()).toEqual([...getRegisteredToolNames()].sort());
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("runs an agent-authored button-to-LED build and exposes failures in diagnostics", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("backend is not connected"); }));
+    useShoppingStore.setState({ query: "", results: [], cart: [], budget: null, lastSearchAt: null, undoStack: [] });
+
+    const board: any = await invokeWebMCPTool("component.add", { componentId: "esp32-devkit-v1", x: 40, y: 40 });
+    const button: any = await invokeWebMCPTool("component.add", { componentId: "pushbutton", x: 280, y: 40 });
+    const led: any = await invokeWebMCPTool("component.add", { componentId: "led", x: 520, y: 40 });
+    const boardId = board.data.instanceId;
+    const buttonId = button.data.instanceId;
+    const ledId = led.data.instanceId;
+
+    await invokeWebMCPTool("connection.connect", { sourceComponentId: boardId, sourcePortId: "GPIO18", targetComponentId: buttonId, targetPortId: "A" });
+    await invokeWebMCPTool("connection.connect", { sourceComponentId: boardId, sourcePortId: "GPIO19", targetComponentId: ledId, targetPortId: "IN" });
+    const source = "constexpr int BUTTON_PIN = 18; constexpr int LED_PIN = 19; void setup() {} void loop() { bool pressed = digitalRead(BUTTON_PIN) == LOW; digitalWrite(LED_PIN, pressed); delay(10); }";
+    await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: source }] });
+    await invokeWebMCPTool("validation.check");
+    expect(useValidationStore.getState().valid).toBe(true);
+
+    await invokeWebMCPTool("simulation.set_input", { componentId: buttonId, key: "pressed", value: true });
+    const pressed: any = await invokeWebMCPTool("simulation.run", { durationMs: 50 });
+    expect(pressed.data.runtime).toBe("browser");
+    expect(pressed.data.outputs[`${ledId}:IN`]).toBe(true);
+    expect(useSimulationStore.getState().lastRun?.outputs[`${ledId}:IN`]).toBe(true);
+
+    await invokeWebMCPTool("simulation.set_input", { componentId: buttonId, key: "pressed", value: false });
+    const released: any = await invokeWebMCPTool("simulation.run", { durationMs: 50 });
+    expect(released.data.outputs[`${ledId}:IN`]).toBe(false);
+    await invokeWebMCPTool("workspace.set_panel", { panel: "debug" });
+    const workspace: any = await invokeWebMCPTool("workspace.get_state");
+    expect(workspace.data.panel).toBe("debug");
+    expect(workspace.data.panels.debug.lastRun.outputs[`${ledId}:IN`]).toBe(false);
+
+    const badConnection: any = await invokeWebMCPTool("connection.connect", { sourceComponentId: boardId, sourcePortId: "GPIO18", targetComponentId: ledId, targetPortId: "GND" });
+    expect(badConnection.isError).toBe(true);
+    const badComponent: any = await invokeWebMCPTool("component.remove", { instanceId: "missing-component" });
+    expect(badComponent.isError).toBe(true);
+    const badCart: any = await invokeWebMCPTool("shopping.cart_add", { resultId: "missing-result", quantity: 1 });
+    expect(badCart.isError).toBe(true);
+
+    const fallbackShopping: any = await invokeWebMCPTool("shopping.search", { query: "pushbutton", quantity: 1 });
+    expect(fallbackShopping.data.source).toBe("catalog-links");
+    expect(fallbackShopping.data.results.some((result: any) => result.catalogId === "pushbutton")).toBe(true);
+    expect(fallbackShopping.data.liveOffers).toBe(false);
+
+    await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: "void setup() {" }] });
+    const diagnostics: any = await invokeWebMCPTool("firmware.check", { componentId: boardId });
+    expect(diagnostics.data.codeIssues.some((issue: any) => issue.code === "FIRMWARE_UNBALANCED_BRACES")).toBe(true);
+    const invalid: any = await invokeWebMCPTool("validation.check");
+    expect(invalid.data.valid).toBe(false);
+    const compile: any = await invokeWebMCPTool("firmware.compile", { componentId: boardId, boardFqbn: "esp32:esp32:esp32" });
+    expect(compile.data.preflight.balanced_braces).toBe(false);
+    expect(useValidationStore.getState().compile.status).toBe("error");
+
+    const shopping: any = await invokeWebMCPTool("shopping.search", {
+      query: "ESP32-S3",
+      quantity: 2,
+      listings: [
+        {
+          catalogId: "esp32-s3",
+          title: "ESP32-S3 DevKit",
+          manufacturer: "Espressif",
+          partNumber: "ESP32-S3-DevKitC-1",
+          exactMatch: true,
+          alternatives: [{ catalogId: "arduino-uno-r3", title: "Arduino Uno R3", reason: "Lower-cost GPIO alternative for this simple build." }],
+          offers: [
+            { retailer: "Digi-Key", price: 8.5, currency: "USD", url: "https://www.digikey.com/" },
+            { retailer: "Mouser", price: 9.1, currency: "USD", url: "https://www.mouser.com/" },
+            { retailer: "Newark", price: 10.2, currency: "USD", url: "https://www.newark.com/" },
+          ],
+        },
+        { catalogId: "arduino-uno-r3", title: "Arduino Uno R3", exactMatch: true, offers: [{ retailer: "Digi-Key", price: 22, currency: "USD", url: "https://www.digikey.com/" }] },
+      ],
+    });
+    expect(shopping.data.source).toBe("webmcp-agent");
+    expect(shopping.data.results[0].offers).toHaveLength(3);
+    const resultId = shopping.data.results[0].id;
+    await invokeWebMCPTool("shopping.cart_add", { resultId, quantity: 2 });
+    await invokeWebMCPTool("shopping.cart_set_budget", { budget: 20 });
+    const quote: any = await invokeWebMCPTool("shopping.quote");
+    expect(quote.data.total).toBe(17);
+    expect(quote.data.overBudget).toBe(false);
+    await invokeWebMCPTool("shopping.cart_set_quantity", { resultId, quantity: 3 });
+    expect((await invokeWebMCPTool("shopping.quote") as any).data.overBudget).toBe(true);
+    await invokeWebMCPTool("shopping.cart_undo");
+    await invokeWebMCPTool("shopping.choose_alternative", { resultId, catalogId: "arduino-uno-r3" });
+    await invokeWebMCPTool("shopping.cart_reset", { requiredCatalogIds: ["esp32-s3"] });
+    expect((await invokeWebMCPTool("shopping.quote") as any).data.lines[0].quantity).toBe(1);
+    await invokeWebMCPTool("shopping.cart_remove", { resultId });
+    expect((await invokeWebMCPTool("shopping.quote") as any).data.lines).toHaveLength(0);
   });
 
 });

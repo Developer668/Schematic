@@ -306,6 +306,7 @@ const tools: ToolDef[] = [
     execute: async ({ name }) => {
       const state = useProjectStore.getState();
       const renamed = state.renameProject(state.activeProjectId, String(name));
+      if (!renamed) return { content: [{ type: "text", text: "The active project could not be renamed" }], isError: true };
       return { content: [{ type: "text", text: `Renamed project to ${renamed}` }], data: { name: renamed } };
     },
   },
@@ -434,6 +435,8 @@ const tools: ToolDef[] = [
     description: "Remove a component instance from the project",
     inputSchema: { type: "object", properties: { instanceId: { type: "string" } }, required: ["instanceId"] },
     execute: async ({ instanceId }) => {
+      const exists = useProjectStore.getState().project.components.some((component) => component.id === instanceId);
+      if (!exists) return { content: [{ type: "text", text: `Unknown component instance ${instanceId}` }], isError: true };
       useProjectStore.getState().removeComponent(instanceId);
       if (useSelectionStore.getState().activeComponentId === instanceId) useSelectionStore.getState().clear();
       return { content: [{ type: "text", text: `Removed ${instanceId}` }] };
@@ -479,6 +482,8 @@ const tools: ToolDef[] = [
     description: "Disconnect (remove) a connection by id",
     inputSchema: { type: "object", properties: { connectionId: { type: "string" } }, required: ["connectionId"] },
     execute: async ({ connectionId }) => {
+      const exists = useProjectStore.getState().project.connections.some((connection) => connection.id === connectionId);
+      if (!exists) return { content: [{ type: "text", text: `Unknown connection ${connectionId}` }], isError: true };
       useProjectStore.getState().disconnectPorts(connectionId);
       return { content: [{ type: "text", text: `Disconnected ${connectionId}` }] };
     },
@@ -634,17 +639,28 @@ const tools: ToolDef[] = [
     description: "Set sensor input (e.g. motion=true, temperature=25) for simulation",
     inputSchema: { type: "object", properties: { componentId: { type: "string" }, key: { type: "string" }, value: {} } , required: ["componentId", "key", "value"]},
     execute: async ({ componentId, key, value }) => {
+      const component = useProjectStore.getState().project.components.find((item) => item.id === componentId);
+      if (!component) return { content: [{ type: "text", text: `Unknown component ${componentId}` }], isError: true };
+      if (typeof value !== "boolean" && typeof value !== "number") return { content: [{ type: "text", text: "Simulation input must be a boolean or number" }], isError: true };
       useSimulationStore.getState().setPin(`${componentId}:${key}`, value as boolean | number);
       useSimulationStore.getState().appendSerial(`[input] ${componentId}.${key}=${JSON.stringify(value)}\n`);
-      // also try WS
-      try {
-        const ws = new WebSocket(`ws://${location.hostname}:8001/api/simulation/ws`);
-        ws.onopen = () => {
-          ws.send(JSON.stringify({ op: "set_sensor_input", componentId, key, value }));
-          ws.close();
-        };
-      } catch {}
-      return { content: [{ type: "text", text: `Set ${componentId}.${key}=${JSON.stringify(value)}` }] };
+      // Forward to a connected backend only when explicitly configured, or when
+      // the app is running locally. Never open insecure ws:// from HTTPS Pages.
+      const configuredBackend = import.meta.env.VITE_BACKEND_URL as string | undefined;
+      const localBackend = ["localhost", "127.0.0.1", "::1"].includes(location.hostname) ? `${location.protocol}//${location.hostname}:8001` : undefined;
+      const backendUrl = configuredBackend || localBackend;
+      if (backendUrl) {
+        try {
+          const wsUrl = new URL("/api/simulation/ws", backendUrl);
+          wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+          const ws = new WebSocket(wsUrl.toString());
+          ws.onopen = () => {
+            ws.send(JSON.stringify({ op: "set_sensor_input", componentId, key, value }));
+            ws.close();
+          };
+        } catch {}
+      }
+      return { content: [{ type: "text", text: `Set ${componentId}.${key}=${JSON.stringify(value)}` }], data: { componentId, key, value, pin: `${componentId}:${key}`, forwarded: Boolean(backendUrl) } };
     },
   },
   {
@@ -736,7 +752,9 @@ const tools: ToolDef[] = [
     description: "Add an exact shopping result to the build cart",
     inputSchema: { type: "object", properties: { resultId: { type: "string" }, quantity: { type: "number" } }, required: ["resultId"] },
     execute: async ({ resultId, quantity }) => {
-      useShoppingStore.getState().addToCart(String(resultId), Number(quantity) || 1);
+      const id = String(resultId);
+      if (!useShoppingStore.getState().results.some((result) => result.id === id)) return { content: [{ type: "text", text: `Unknown shopping result ${id}; search for the part first` }], isError: true };
+      useShoppingStore.getState().addToCart(id, Number(quantity) || 1);
       return { content: [{ type: "text", text: JSON.stringify(useShoppingStore.getState().getQuote(), null, 2) }], data: useShoppingStore.getState().getQuote() };
     },
   },
@@ -745,7 +763,9 @@ const tools: ToolDef[] = [
     description: "Remove a part from the shopping cart",
     inputSchema: { type: "object", properties: { resultId: { type: "string" } }, required: ["resultId"] },
     execute: async ({ resultId }) => {
-      useShoppingStore.getState().removeFromCart(String(resultId));
+      const id = String(resultId);
+      if (!useShoppingStore.getState().cart.some((line) => line.resultId === id)) return { content: [{ type: "text", text: `Shopping result ${id} is not in the cart` }], isError: true };
+      useShoppingStore.getState().removeFromCart(id);
       return { content: [{ type: "text", text: "Cart line removed" }], data: useShoppingStore.getState().getQuote() };
     },
   },
@@ -754,7 +774,9 @@ const tools: ToolDef[] = [
     description: "Set the quantity for a shopping cart line, or remove it with zero",
     inputSchema: { type: "object", properties: { resultId: { type: "string" }, quantity: { type: "number" } }, required: ["resultId", "quantity"] },
     execute: async ({ resultId, quantity }) => {
-      useShoppingStore.getState().setQuantity(String(resultId), Number(quantity));
+      const id = String(resultId);
+      if (!useShoppingStore.getState().cart.some((line) => line.resultId === id)) return { content: [{ type: "text", text: `Shopping result ${id} is not in the cart` }], isError: true };
+      useShoppingStore.getState().setQuantity(id, Number(quantity));
       return { content: [{ type: "text", text: JSON.stringify(useShoppingStore.getState().getQuote(), null, 2) }], data: useShoppingStore.getState().getQuote() };
     },
   },
