@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import HardwareCanvas from "../components/canvas/HardwareCanvas.tsx";
 import RightPanel from "../components/layout/RightPanel.tsx";
@@ -7,7 +7,8 @@ import ImportDialog from "../components/import/ImportDialog.tsx";
 import { useComponentCatalogStore } from "../store/useComponentCatalogStore.ts";
 import { useProjectStore } from "../store/useProjectStore.ts";
 import { useSimulationStore } from "../store/useSimulationStore.ts";
-import { getRegisteredToolNames } from "../webmcp/tools.ts";
+import { getRegisteredToolNames, invokeWebMCPTool } from "../webmcp/tools.ts";
+import { buildEnvironmentShowcase } from "../webmcp/environmentShowcase.ts";
 import { triggerDownloadVlx } from "../utils/vllxFile.ts";
 import { useThemeStore } from "../store/useThemeStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
@@ -32,7 +33,7 @@ function ThemeIcon({ theme }: { theme: string }) {
 export default function StudioPage() {
   const { results, search, setCategory, category } = useComponentCatalogStore();
   const { addComponent, project, clear } = useProjectStore();
-  const { running, start, stop } = useSimulationStore();
+  const running = useSimulationStore((state) => state.running);
   const { theme, toggle } = useThemeStore();
   const libraryDensity = useWorkspaceStore((s) => s.libraryDensity);
 
@@ -40,6 +41,9 @@ export default function StudioPage() {
   const [activeCat, setActiveCat] = useState<string | null>(category);
   const [orgFilter, setOrgFilter] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showcaseBusy, setShowcaseBusy] = useState(false);
+  const [showcaseError, setShowcaseError] = useState("");
+  const showcaseStartedRef = useRef(false);
 
   const [leftCollapsed, setLeftCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   const [rightCollapsed, setRightCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
@@ -48,10 +52,28 @@ export default function StudioPage() {
   const isResizingRef = useRef(false);
   const toolNames = getRegisteredToolNames();
 
-  const doRun = async () => {
-    start();
-    try { await fetch("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project }) }); } catch {}
+  const buildShowcase = async () => {
+    setShowcaseBusy(true);
+    setShowcaseError("");
+    try { await buildEnvironmentShowcase(); }
+    catch (error) { setShowcaseError((error as Error).message); }
+    finally { setShowcaseBusy(false); }
   };
+
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("showcase") === "environment";
+    if (!requested || showcaseStartedRef.current || useProjectStore.getState().project.components.length > 0) return;
+    showcaseStartedRef.current = true;
+    void buildShowcase();
+  }, []);
+
+  const doRun = async () => {
+    setShowcaseError("");
+    const result = await invokeWebMCPTool("simulation.run", { durationMs: 1000 });
+    if (result?.isError) setShowcaseError(result.content?.[0]?.text ?? "Simulation failed");
+  };
+
+  const doStop = async () => { await invokeWebMCPTool("simulation.stop"); };
 
   const handleSearch = (v: string) => { setQuery(v); search(v); };
   const handleCategory = (c: string | null) => { setActiveCat(c); setCategory(c); };
@@ -132,7 +154,7 @@ export default function StudioPage() {
             <Trash2 size={12} strokeWidth={1.8} />
           </button>
           {running ? (
-            <button onClick={stop} className="run-button is-running">
+            <button onClick={doStop} className="run-button is-running">
               <Square size={9} className="fill-white" /> Stop
             </button>
           ) : (
@@ -258,6 +280,15 @@ export default function StudioPage() {
           )}
           <div className="relative min-h-0 flex-1">
             <HardwareCanvas />
+            {project.components.length === 0 && (
+              <div className="showcase-empty-state">
+                <span>WebMCP build</span>
+                <strong>Atmospheric Command Center</strong>
+                <p>ESP32-S3, pressure and humidity sensors, a live OLED dashboard, typed wiring, and attached firmware.</p>
+                <button type="button" className="secondary-button inline-flex" onClick={buildShowcase} disabled={showcaseBusy}>{showcaseBusy ? "Building through WebMCP…" : "Build showcase"}</button>
+              </div>
+            )}
+            {showcaseError && <div className="showcase-error" role="alert">{showcaseError}</div>}
           </div>
           {!bottomCollapsed && <div onMouseDown={onResizeStart} className="h-px bg-border hover:bg-foreground/20 cursor-row-resize shrink-0" />}
           <BottomDock collapsed={bottomCollapsed} onToggleCollapse={() => setBottomCollapsed(v => !v)} height={bottomHeight} />

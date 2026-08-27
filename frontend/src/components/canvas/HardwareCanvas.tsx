@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -88,6 +88,12 @@ export default function HardwareCanvas() {
   const [dragPreview, setDragPreview] = useState<{ html: string; title: string; x: number; y: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<ReactFlowInstance | null>(null);
+
+  useEffect(() => {
+    if (!initialNodes.length) return;
+    const timer = window.setTimeout(() => flowRef.current?.fitView({ padding: 0.16, maxZoom: 1 }), 120);
+    return () => window.clearTimeout(timer);
+  }, [initialNodes.length]);
 
   if (nodes.length !== initialNodes.length || edges.length !== initialEdges.length) {
     queueMicrotask(() => {

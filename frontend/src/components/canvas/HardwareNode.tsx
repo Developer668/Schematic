@@ -3,6 +3,7 @@ import { CircuitBoard, Trash2 } from "lucide-react";
 import ComponentArtwork from "../ComponentArtwork.tsx";
 import { catalog } from "../../data/catalog.ts";
 import { useProjectStore } from "../../store/useProjectStore.ts";
+import { useSimulationStore } from "../../store/useSimulationStore.ts";
 
 export interface HardwareNodeData {
   label: string;
@@ -47,6 +48,13 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
   const rows = Math.max(leftPorts.length, rightPorts.length, 4);
   const compact = data.ports.length <= 4 && ["passive", "analog", "logic"].includes(def?.category ?? "");
   const display = ["display", "displays"].includes(def?.category ?? "");
+  const running = useSimulationStore((state) => state.running);
+  const timeNs = useSimulationStore((state) => state.timeNs);
+  const pinStates = useSimulationStore((state) => state.pinStates);
+  const reading = (suffix: string, fallback: number) => {
+    const entry = Object.entries(pinStates).find(([key]) => key.endsWith(`:${suffix}`));
+    return typeof entry?.[1] === "number" ? entry[1] : fallback;
+  };
   const visualHeight = compact ? 108 : display ? Math.max(138, rows * 22 + 20) : Math.min(320, Math.max(142, rows * 22 + 30));
 
   return (
@@ -69,6 +77,19 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
         <div className="hardware-part-selection" />
         <div className="hardware-part-shadow" />
         <ComponentArtwork definition={def} className="hardware-part-artwork" />
+        {data.definitionId === "ssd1306" && (
+          <div className={`hardware-live-display ${running ? "is-running" : ""}`} aria-live="polite">
+            <header><span>ENVIRONMENT</span><b>{running ? "LIVE" : "STANDBY"}</b></header>
+            {running ? (
+              <div className="hardware-live-readings">
+                <strong>{reading("temperatureC", 0).toFixed(1)}<small>°C</small></strong>
+                <span>{reading("pressureHpa", 0).toFixed(1)} hPa</span>
+                <span>{reading("humidityPct", 0).toFixed(1)} %RH</span>
+                <footer>FRAME {timeNs.toString()} ns</footer>
+              </div>
+            ) : <div className="hardware-live-standby">PRESS RUN</div>}
+          </div>
+        )}
         {leftPorts.map((port, index) => <Pin key={`left-${port.id}`} port={port} side="left" index={index} total={leftPorts.length} />)}
         {rightPorts.map((port, index) => <Pin key={`right-${port.id}`} port={port} side="right" index={index} total={rightPorts.length} />)}
       </div>

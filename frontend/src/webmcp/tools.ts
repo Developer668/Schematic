@@ -203,14 +203,23 @@ const tools: ToolDef[] = [
     inputSchema: { type: "object", properties: { durationMs: { type: "number", description: "Duration ms, default 1000" } } },
     execute: async ({ durationMs }) => {
       const project = useProjectStore.getState().project;
+      const inputs = useSimulationStore.getState().pinStates;
       useSimulationStore.getState().start();
       try {
-        const response = await fetch("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, duration_ns: (durationMs ?? 1000) * 1e6 }) });
+        const response = await fetch("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, inputs, duration_ns: (durationMs ?? 1000) * 1e6 }) });
         const res = await response.json();
         if (!response.ok) {
           useSimulationStore.getState().stop();
           return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res, isError: true };
         }
+        const timeNs = BigInt(res.time_ns ?? 0);
+        const simulation = useSimulationStore.getState();
+        simulation.setTime(timeNs);
+        for (const [portId, value] of Object.entries(res.outputs ?? {})) {
+          if (typeof value === "boolean" || typeof value === "number") simulation.setPin(portId, value);
+        }
+        const readings = Object.entries(res.outputs ?? {}).map(([key, value]) => `${key.split(":").pop()}=${value}`).join("  ");
+        simulation.appendSerial(`[${project.name}] t=${timeNs}ns${readings ? `  ${readings}` : ""}\n`);
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
       } catch (e) {
         useSimulationStore.getState().stop();
@@ -253,7 +262,10 @@ const tools: ToolDef[] = [
       // also try WS
       try {
         const ws = new WebSocket(`ws://${location.hostname}:8001/api/simulation/ws`);
-        ws.onopen = () => ws.send(JSON.stringify({ op: "set_sensor_input", componentId, key, value }));
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ op: "set_sensor_input", componentId, key, value }));
+          ws.close();
+        };
       } catch {}
       return { content: [{ type: "text", text: `Set ${componentId}.${key}=${JSON.stringify(value)}` }] };
     },

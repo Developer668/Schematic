@@ -1,7 +1,8 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any
 import json, asyncio
+from app.simulation.engine import PortValue
 from app.simulation.orchestrator import orchestrator
 
 router = APIRouter()
@@ -9,14 +10,21 @@ router = APIRouter()
 class RunReq(BaseModel):
     project: dict
     duration_ns: int | None = None
+    inputs: dict[str, bool | float] = Field(default_factory=dict)
 
 @router.post("/run")
 async def run(req: RunReq):
     await orchestrator.initialize(req.project)
-    # advance a little to prove wiring
-    await orchestrator.advance_to(1_000_000)
+    for port_id, value in req.inputs.items():
+        port_value = PortValue(digital=value) if isinstance(value, bool) else PortValue(analog=float(value))
+        await orchestrator.write_port("wasmtime", port_id, port_value)
+    await orchestrator.advance_to(req.duration_ns or 1_000_000)
     snap = await orchestrator.snapshot()
-    return {"status": "running", "time_ns": orchestrator.time_ns, "snapshot": snap}
+    outputs: dict[str, bool | float | None] = {}
+    for port_id in req.inputs:
+        value = await orchestrator.read_port("wasmtime", port_id)
+        outputs[port_id] = value.digital if value.digital is not None else value.analog
+    return {"status": "running", "time_ns": orchestrator.time_ns, "outputs": outputs, "snapshot": snap}
 
 @router.post("/stop")
 async def stop():

@@ -180,6 +180,17 @@ body {
 .hardware-part-artwork { width: 72%; height: calc(100% - 16px); transform: rotateX(4deg); transition: transform 180ms ease, filter 180ms ease; }
 .hardware-node.is-compact-part .hardware-part-artwork { width: 62%; height: 88%; }
 .hardware-node.is-display-part .hardware-part-artwork { width: 84%; height: 94%; }
+.hardware-live-display { position: absolute; z-index: 3; left: 13.5%; top: 24%; width: 73%; height: 47%; overflow: hidden; padding: 5px 7px; color: #8390a7; background: #05070a; font-family: "JetBrains Mono", ui-monospace, monospace; pointer-events: none; }
+.hardware-live-display header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 3px; border-bottom: 1px solid #263244; font-size: 6px; letter-spacing: .09em; }
+.hardware-live-display header b { color: #718096; font-size: 6px; }
+.hardware-live-display.is-running { color: #dbeafe; }
+.hardware-live-display.is-running header b { color: #60a5fa; }
+.hardware-live-readings { display: grid; grid-template-columns: 1.2fr 1fr; column-gap: 5px; padding-top: 3px; }
+.hardware-live-readings strong { grid-row: span 2; align-self: center; color: #f8fafc; font-size: 16px; line-height: 1; letter-spacing: -.08em; }
+.hardware-live-readings strong small { margin-left: 2px; color: #60a5fa; font-size: 7px; letter-spacing: 0; }
+.hardware-live-readings > span { color: #bfdbfe; font-size: 6px; line-height: 1.5; white-space: nowrap; }
+.hardware-live-readings footer { grid-column: 1 / -1; margin-top: 3px; color: #64748b; font-size: 5px; letter-spacing: .04em; }
+.hardware-live-standby { display: grid; height: calc(100% - 12px); place-items: center; color: #64748b; font-size: 7px; letter-spacing: .16em; }
 .hardware-node:hover .hardware-part-artwork { transform: rotateX(1deg) translateY(-2px); filter: drop-shadow(0 10px 8px hsl(240 20% 4% / .30)); }
 .hardware-pin { position: absolute; z-index: 4; display: flex; align-items: center; transform: translateY(-50%); }
 .hardware-pin-left { left: 13px; flex-direction: row-reverse; }.hardware-pin-right { right: 13px; }
@@ -196,6 +207,11 @@ body {
 
 /* Quiet hardware drafting surface. */
 .world-grid { background-color: hsl(var(--background)); }
+.showcase-empty-state { position: absolute; z-index: 5; left: 50%; top: 50%; width: min(360px, calc(100% - 40px)); transform: translate(-50%, -50%); padding: 22px; border: 1px solid hsl(var(--border)); border-radius: 10px; background: hsl(var(--card) / .96); box-shadow: 0 14px 40px hsl(240 20% 4% / .14); text-align: center; backdrop-filter: blur(12px); }
+.showcase-empty-state > span { color: hsl(var(--accent)); font: 700 9px ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+.showcase-empty-state strong { display: block; margin-top: 7px; font-size: 16px; }
+.showcase-empty-state p { margin: 8px 0 15px; color: hsl(var(--muted-foreground)); font-size: 11px; line-height: 1.55; }
+.showcase-error { position: absolute; z-index: 7; left: 50%; bottom: 12px; max-width: min(560px, calc(100% - 30px)); transform: translateX(-50%); padding: 7px 10px; border: 1px solid rgb(239 68 68 / .35); border-radius: 6px; color: rgb(248 113 113); background: hsl(var(--card)); font-size: 11px; }
 
 /* cursor fix */
 .react-flow__pane { cursor: grab }

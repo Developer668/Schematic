@@ -87,7 +87,7 @@ Checks: wrong voltage, missing ground, output→output, i2c addr collision (scan
 ### 08. Component registry + starter catalog
 `backend/app/components/registry.py` + `frontend/src/data/catalog.ts`:
 - SQLite `components.db` (components, ports, models, tags) + `data/hwpkg/` filestore.
-- Seed by importing `D:\Hardware Opensource\velxio-master\velxio-master\frontend\public\components-metadata.json` + `scripts/component-overrides.json` (≈150 parts).
+- Component metadata is vendored at `vendor/velxio-components-metadata.json` and normalized by `frontend/src/data/catalog.ts` (150+ parts).
 - Expose `GET /api/components?search=TI DRV&domain=i2c`.
 - Frontend `useComponentCatalogStore` (Zustand, search+filter).
 

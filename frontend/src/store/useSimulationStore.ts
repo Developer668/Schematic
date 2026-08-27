@@ -9,6 +9,7 @@ interface SimulationState {
   start: () => void;
   stop: () => void;
   setPin: (portId: string, value: boolean | number) => void;
+  setTime: (timeNs: bigint) => void;
   appendSerial: (chunk: string) => void;
   reset: () => void;
 }
@@ -33,6 +34,9 @@ export const useSimulationStore = create<SimulationState>((set) => ({
   },
   setPin(portId, value) {
     set((s) => ({ pinStates: { ...s.pinStates, [portId]: value } }));
+  },
+  setTime(timeNs) {
+    set({ timeNs });
   },
   appendSerial(chunk) {
     set((s) => ({ serialOutput: s.serialOutput + chunk }));
