@@ -1,0 +1,28 @@
+{
+  "id": "demo3-smart-desk",
+  "name": "Smart Desk Assistant — Pi + ESP32 Multi-board",
+  "description": "60s demo: Raspberry Pi 5 + SSD1306 OLED + PIR + LEDs, ESP32 sensor controller, UART link",
+  "components": [
+    { "id": "pi-1", "definitionId": "raspberry-pi-5", "position": { "x": 80, "y": 80 }, "rotation": 0, "properties": {} },
+    { "id": "esp32-1", "definitionId": "esp32-s3", "position": { "x": 80, "y": 280 }, "rotation": 0, "properties": {} },
+    { "id": "oled-1", "definitionId": "ssd1306", "position": { "x": 380, "y": 60 }, "rotation": 0, "properties": {} },
+    { "id": "pir-1", "definitionId": "hc-sr501", "position": { "x": 380, "y": 180 }, "rotation": 0, "properties": {} },
+    { "id": "led-1", "definitionId": "led", "position": { "x": 380, "y": 280 }, "rotation": 0, "properties": { "color": "green" } },
+    { "id": "buzzer-1", "definitionId": "active-buzzer", "position": { "x": 380, "y": 340 }, "rotation": 0, "properties": {} }
+  ],
+  "connections": [
+    { "id": "c1", "source": { "componentId": "pi-1", "portId": "GPIO2_SDA" }, "target": { "componentId": "oled-1", "portId": "SDA" }, "domain": "i2c" },
+    { "id": "c2", "source": { "componentId": "pi-1", "portId": "GPIO3_SCL" }, "target": { "componentId": "oled-1", "portId": "SCL" }, "domain": "i2c" },
+    { "id": "c3", "source": { "componentId": "esp32-1", "portId": "GPIO4" }, "target": { "componentId": "pir-1", "portId": "OUT" }, "domain": "gpio" },
+    { "id": "c4", "source": { "componentId": "esp32-1", "portId": "GPIO18" }, "target": { "componentId": "led-1", "portId": "Anode" }, "domain": "gpio" },
+    { "id": "c5", "source": { "componentId": "pi-1", "portId": "TX" }, "target": { "componentId": "esp32-1", "portId": "GPIO4" }, "domain": "uart" }
+  ],
+  "firmwareTargets": [
+    { "id": "fw-pi", "componentId": "pi-1", "files": [{ "name": "app.py", "content": "# Pi Linux service — exposes presence via HTTP\nprint('Smart desk running')\n" }] },
+    { "id": "fw-esp32", "componentId": "esp32-1", "files": [{ "name": "sketch.ino", "content": "void setup(){ pinMode(4, INPUT); pinMode(18, OUTPUT); Serial.begin(115200); } void loop(){ if(digitalRead(4)) digitalWrite(18,HIGH); else digitalWrite(18,LOW); }" }] }
+  ],
+  "simulation": { "mode": "interactive", "engines": { "qemu": { "enabled": true, "fidelity": "fast" }, "renode": { "enabled": true, "fidelity": "fast" }, "wasmtime": { "enabled": true, "fidelity": "fast" } } },
+  "createdAt": "2026-08-26T00:00:00Z",
+  "updatedAt": "2026-08-26T00:00:00Z",
+  "version": 1
+}

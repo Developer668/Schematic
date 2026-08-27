@@ -1,0 +1,25 @@
+# Schematic — multi-stage (node build + python backend + nginx)
+FROM node:20-alpine AS frontend-build
+WORKDIR /app
+COPY pnpm-workspace.yaml package.json ./
+COPY frontend/package.json frontend/package.json
+COPY packages/hardware-graph/package.json packages/hardware-graph/package.json
+COPY packages/validation/package.json packages/validation/package.json
+COPY packages/component-format/package.json packages/component-format/package.json
+RUN corepack enable && pnpm install --frozen-lockfile || pnpm install
+COPY frontend frontend
+COPY packages packages
+RUN pnpm --filter @schematic/frontend build:docker
+
+FROM python:3.11-slim AS backend
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+COPY backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/app app
+COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
+
+EXPOSE 8001 80
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+
+# For full production, add nginx stage serving frontend/dist + proxy /api to 8001

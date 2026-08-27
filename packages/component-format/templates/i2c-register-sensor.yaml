@@ -1,0 +1,36 @@
+# Generic Level 2 template: I2C register sensor
+# Per HardwareWebMCP.md § Level 2: configure a generic template (no C++ needed)
+name: i2c-register-sensor
+description: Generic I2C sensor exposing registers to host via I2C bridge
+parameters:
+  address: { type: int, min: 0x03, max: 0x77, default: 0x48, description: "7-bit I2C address" }
+  registers:
+    type: array
+    items:
+      address: { type: int, description: "Register address" }
+      name: { type: string }
+      type: { enum: [int16, uint16, int32, uint8, float] }
+      source: { type: string, description: "Environment binding, e.g. environment.temperature" }
+      scale: { type: number, optional: true }
+      writable: { type: boolean, default: false }
+
+# Example:
+# behavior:
+#   template: i2c-register-sensor
+#   address: 0x48
+# registers:
+#   - address: 0x00
+#     name: temperature
+#     type: int16
+#     source: environment.temperature
+#     scale: 0.0078125
+#   - address: 0x01
+#     name: configuration
+#     type: uint16
+#     writable: true
+
+engine: wasmtime
+handler: |
+  // Generated WASM handler (pseudo) — implements I2CDevice
+  // on I2C read: lookup register, fetch environment value, apply scale, return bytes
+  // on I2C write: if writable, store to shadow register

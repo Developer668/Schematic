@@ -1,0 +1,8 @@
+name: gpio-switch
+description: Generic GPIO switch/button — drives line high/low
+parameters:
+  activeLow: { type: boolean, default: false }
+  initialState: { enum: [open, closed], default: open }
+engine: wasmtime
+handler: |
+  // GPIO switch: writePort sets state, readPort returns level (with activeLow inversion)

@@ -1,0 +1,37 @@
+{
+  "id": "demo1-temp-alarm",
+  "name": "ESP32 Temperature Warning — OLED + Buzzer",
+  "description": "15s agent demo: ESP32-S3 reads BMP280 via I2C, shows temp on SSD1306 OLED, sounds buzzer if >30C",
+  "components": [
+    { "id": "esp32-1", "definitionId": "esp32-s3", "position": { "x": 100, "y": 100 }, "rotation": 0, "properties": {} },
+    { "id": "bmp280-1", "definitionId": "bmp280", "position": { "x": 400, "y": 80 }, "rotation": 0, "properties": { "address": 118 } },
+    { "id": "oled-1", "definitionId": "ssd1306", "position": { "x": 400, "y": 200 }, "rotation": 0, "properties": { "address": 60 } },
+    { "id": "buzzer-1", "definitionId": "active-buzzer", "position": { "x": 400, "y": 320 }, "rotation": 0, "properties": {} }
+  ],
+  "connections": [
+    { "id": "c1", "source": { "componentId": "esp32-1", "portId": "3V3" }, "target": { "componentId": "bmp280-1", "portId": "VCC" }, "domain": "power" },
+    { "id": "c2", "source": { "componentId": "esp32-1", "portId": "GND" }, "target": { "componentId": "bmp280-1", "portId": "GND" }, "domain": "ground" },
+    { "id": "c3", "source": { "componentId": "esp32-1", "portId": "SDA" }, "target": { "componentId": "bmp280-1", "portId": "SDA" }, "domain": "i2c" },
+    { "id": "c4", "source": { "componentId": "esp32-1", "portId": "SCL" }, "target": { "componentId": "bmp280-1", "portId": "SCL" }, "domain": "i2c" },
+    { "id": "c5", "source": { "componentId": "esp32-1", "portId": "3V3" }, "target": { "componentId": "oled-1", "portId": "VCC" }, "domain": "power" },
+    { "id": "c6", "source": { "componentId": "esp32-1", "portId": "SDA" }, "target": { "componentId": "oled-1", "portId": "SDA" }, "domain": "i2c" },
+    { "id": "c7", "source": { "componentId": "esp32-1", "portId": "SCL" }, "target": { "componentId": "oled-1", "portId": "SCL" }, "domain": "i2c" },
+    { "id": "c8", "source": { "componentId": "esp32-1", "portId": "GPIO18" }, "target": { "componentId": "buzzer-1", "portId": "IN" }, "domain": "gpio" }
+  ],
+  "firmwareTargets": [
+    {
+      "id": "fw-esp32-1",
+      "componentId": "esp32-1",
+      "files": [
+        {
+          "name": "sketch.ino",
+          "content": "#include <Wire.h>\n#include <Adafruit_BMP280.h>\n#include <Adafruit_SSD1306.h>\nAdafruit_BMP280 bmp;\nAdafruit_SSD1306 oled(128,64,&Wire,-1);\nvoid setup(){ Wire.begin(); Serial.begin(115200); bmp.begin(0x76); oled.begin(SSD1306_SWITCHCAPVCC,0x3C); pinMode(18, OUTPUT); }\nvoid loop(){ float t=bmp.readTemperature(); oled.clearDisplay(); oled.setCursor(0,0); oled.print(\"Temp: \"); oled.print(t); oled.display(); if(t>30) digitalWrite(18,HIGH); else digitalWrite(18,LOW); delay(1000); }"
+        }
+      ]
+    }
+  ],
+  "simulation": { "mode": "interactive", "engines": { "renode": { "enabled": true, "fidelity": "fast" }, "wasmtime": { "enabled": true, "fidelity": "fast" } } },
+  "createdAt": "2026-08-26T00:00:00Z",
+  "updatedAt": "2026-08-26T00:00:00Z",
+  "version": 1
+}

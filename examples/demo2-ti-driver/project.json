@@ -1,0 +1,20 @@
+{
+  "id": "demo2-ti-driver",
+  "name": "TI DRV8871 Motor — Import & Auto-Fix",
+  "description": "30s demo: import TI DRV8871 SPICE, voltage incompatibility auto-fixed with level shifter, rewire, revalidate",
+  "components": [
+    { "id": "esp32-1", "definitionId": "esp32-s3", "position": { "x": 100, "y": 100 }, "rotation": 0, "properties": {} },
+    { "id": "drv8871-1", "definitionId": "drv8871", "position": { "x": 400, "y": 100 }, "rotation": 0, "properties": {} },
+    { "id": "motor-1", "definitionId": "drv8871", "position": { "x": 650, "y": 100 }, "rotation": 0, "properties": { "role": "motor" } }
+  ],
+  "connections": [
+    { "id": "c1", "source": { "componentId": "esp32-1", "portId": "GPIO4" }, "target": { "componentId": "drv8871-1", "portId": "IN1" }, "domain": "gpio" },
+    { "id": "c2", "source": { "componentId": "esp32-1", "portId": "GPIO18" }, "target": { "componentId": "drv8871-1", "portId": "IN2" }, "domain": "gpio" },
+    { "id": "c3", "source": { "componentId": "drv8871-1", "portId": "OUT1" }, "target": { "componentId": "motor-1", "portId": "VIN" }, "domain": "power_output" }
+  ],
+  "firmwareTargets": [],
+  "simulation": { "mode": "interactive", "engines": { "ngspice": { "enabled": true, "fidelity": "fast" }, "renode": { "enabled": true, "fidelity": "fast" } } },
+  "createdAt": "2026-08-26T00:00:00Z",
+  "updatedAt": "2026-08-26T00:00:00Z",
+  "version": 1
+}

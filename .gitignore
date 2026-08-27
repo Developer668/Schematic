@@ -1,0 +1,68 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Frontend output and tooling
+dist/
+coverage/
+.vite/
+.turbo/
+*.tsbuildinfo
+
+# Python environments and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Local application data
+backend/data/
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.pid
+
+# Generated hardware and solver output
+*.hwpkg
+*.vcd
+*.fst
+*.raw
+*.out
+simulation-output/
+solver-output/
+
+# Local upstream source mirrors (see NOTICE for upstream projects)
+docs/opensource/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors, agents, and operating systems
+.idea/
+.vscode/
+.serena/
+.opencode/
+.codex/
+*.old.*
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+~$*

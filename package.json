@@ -1,0 +1,27 @@
+{
+  "name": "schematic",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Schematic — agent-native virtual hardware workbench (WebMCP hackathon)",
+  "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=9"
+  },
+  "workspaces": [
+    "frontend",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm --filter frontend dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "dev:backend": "python -m uvicorn app.main:app --reload --port 8001 --app-dir backend",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
+  },
+  "devDependencies": {
+    "prettier": "3.8.3"
+  }
+}

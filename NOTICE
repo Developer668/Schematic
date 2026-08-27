@@ -1,0 +1,43 @@
+Schematic — HardwareWebMCP Workbench
+Copyright (C) 2026 Schematic Contributors
+Licensed under GNU Affero General Public License v3.0 (see LICENSE).
+
+Third-party components retain their original licenses:
+
+- Velxio (https://github.com/davidmonterocrespo24/velxio)
+  Copyright (c) 2025 David Montero Crespo
+  License: GNU AGPL v3.0 (LICENSE in velxio-master)
+  Used for: visual canvas concepts, pin management patterns, simulation registry patterns,
+            component metadata structure, MCP server structure.
+  Velxio-derived portions remain AGPL-3.0 as required.
+
+- Renode (https://github.com/renode/renode)
+  Copyright (c) 2010-2026 Antmicro
+  License: MIT (see renode-master/LICENSE)
+  Used for: firmware/MCU simulation backend adapter, .repl platform generation.
+
+- Wasmtime (https://github.com/bytecodealliance/wasmtime)
+  Copyright Bytecode Alliance
+  License: Apache-2.0 (see wasmtime-main/LICENSE)
+  Used for: sandboxed WebAssembly component runtime for community behaviors.
+
+- QEMU (https://www.qemu.org) (cloned as qemu-master)
+  Copyright QEMU contributors
+  License: GPL-2.0+ (see qemu-master/COPYING, LICENSES/)
+  Used for: Linux SBC emulation adapter (future release, stub now).
+
+- Verilator (https://github.com/verilator/verilator)
+  Copyright Verilator contributors
+  License: LGPL-3.0 (see verilator-master/LICENSE) + Perl/Artistic parts
+  Used for: HDL/FPGA digital simulation adapter (stub now).
+
+- Wokwi elements / avr8js / rp2040js (via npm)
+  Licenses: MIT (see node_modules once installed)
+  Used for: component visuals, AVR/RP2040 emulation references.
+
+- Additional optional engines (stubs for architecture):
+  ngspice (GPL), OpenModelica (GPL/OSMC), Gazebo (Apache-2.0), Open CASCADE (LGPL),
+  scikit-rf (BSD), GNU Radio (GPL), openEMS (GPL), Meep (GPL) — each retains own license.
+  Schematic orchestrates them as isolated workers (not merged source), preserving license separation.
+
+This NOTICE file satisfies AGPL-3.0 section 4(d) and Apache-2.0 section 4 attribution requirements.
