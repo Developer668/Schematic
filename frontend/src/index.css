@@ -179,16 +179,16 @@ body {
 .hardware-node-glyph { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border-radius: 5px; color: hsl(var(--accent)); background: hsl(var(--accent) / .1); font: 800 8px/1 ui-monospace, monospace; }
 .hardware-node-identity strong, .hardware-node-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hardware-node-identity strong { font-size: 11px; line-height: 1.25; }.hardware-node-identity small { margin-top: 2px; color: hsl(var(--muted-foreground)); font: 9px ui-monospace, monospace; }
-.hardware-part-stage { position: relative; width: 100%; display: grid; place-items: center; perspective: 800px; padding: 8px 44px; box-sizing: border-box; isolation: isolate; }
-.hardware-part-selection { position: absolute; inset: 5px 34px; border: 1px dashed transparent; border-radius: 13px; transition: border-color 140ms ease, background 140ms ease; z-index: 0; }
+.hardware-part-stage { position: relative; width: 100%; display: grid; place-items: center; perspective: 800px; padding: 6px 20px; box-sizing: border-box; isolation: isolate; }
+.hardware-part-selection { position: absolute; inset: 4px 14px; border: 1px dashed transparent; border-radius: 11px; transition: border-color 140ms ease, background 140ms ease; z-index: 0; }
 .hardware-node.is-selected .hardware-part-selection { border-color: hsl(var(--accent) / .75); background: hsl(var(--accent) / .035); }
-.hardware-part-shadow { display: block; position: absolute; left: 14%; right: 14%; bottom: 8px; height: 12px; background: radial-gradient(ellipse at center, hsl(240 20% 4% / .14) 0%, transparent 72%); filter: blur(2px); z-index: 0; pointer-events: none; border-radius: 50%; }
-.hardware-node.is-compact-part .hardware-part-shadow { left: 18%; right: 18%; bottom: 6px; height: 8px; }
-.hardware-part-artwork { width: 100%; height: 100%; max-height: 100%; display: grid; place-items: center; transform: rotateX(2deg); transform-origin: center center; transition: transform 180ms ease, filter 180ms ease; z-index: 1; }
+.hardware-part-shadow { display: block; position: absolute; left: 12%; right: 12%; bottom: 6px; height: 10px; background: radial-gradient(ellipse at center, hsl(240 20% 4% / .14) 0%, transparent 72%); filter: blur(2px); z-index: 0; pointer-events: none; border-radius: 50%; }
+.hardware-node.is-compact-part .hardware-part-shadow { left: 16%; right: 16%; bottom: 5px; height: 7px; }
+.hardware-part-artwork { width: 100%; height: 100%; max-height: 100%; display: grid; place-items: center; transform: rotateX(1.5deg); transform-origin: center center; transition: transform 180ms ease, filter 180ms ease; z-index: 1; }
 .hardware-part-artwork img, .hardware-part-artwork .component-artwork, .hardware-part-artwork .component-artwork-inline { width: 100%; height: 100%; max-height: 100%; object-fit: contain; object-position: center; }
-.hardware-node.is-compact-part .hardware-part-stage { padding: 6px 32px; }
+.hardware-node.is-compact-part .hardware-part-stage { padding: 6px 16px; }
 .hardware-node.is-compact-part .hardware-part-artwork { max-height: 78px; }
-.hardware-node.is-display-part .hardware-part-stage { padding: 6px 32px; }
+.hardware-node.is-display-part .hardware-part-stage { padding: 6px 18px; }
 .hardware-node.is-display-part .hardware-part-artwork { max-height: 98%; }
 .hardware-live-display { position: absolute; z-index: 3; left: 13.5%; top: 24%; width: 73%; height: 47%; overflow: hidden; padding: 5px 7px; color: #8390a7; background: #05070a; font-family: "JetBrains Mono", ui-monospace, monospace; pointer-events: none; }
 .hardware-live-display header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 3px; border-bottom: 1px solid #263244; font-size: 6px; letter-spacing: .09em; }
@@ -207,8 +207,8 @@ body {
 .hardware-live-output.is-on .hardware-live-output-dot { background: rgb(16 185 129); box-shadow: 0 0 9px rgb(16 185 129 / .9); }
 .hardware-node:hover .hardware-part-artwork { transform: rotateX(1deg) translateY(-1px); filter: drop-shadow(0 8px 12px hsl(240 20% 4% / .26)); }
 .hardware-pin { position: absolute; z-index: 4; display: flex; align-items: center; transform: translateY(-50%); pointer-events: none; }
-.hardware-pin-left { left: 10px; flex-direction: row-reverse; }.hardware-pin-right { right: 10px; }
-.hardware-node.is-compact-part .hardware-pin-left { left: 6px; }.hardware-node.is-compact-part .hardware-pin-right { right: 6px; }
+.hardware-pin-left { left: 6px; flex-direction: row-reverse; }.hardware-pin-right { right: 6px; }
+.hardware-node.is-compact-part .hardware-pin-left { left: 4px; }.hardware-node.is-compact-part .hardware-pin-right { right: 4px; }
 .hardware-pin-label { display: inline-flex; min-width: 36px; max-width: 68px; height: 16px; align-items: center; gap: 4px; overflow: hidden; border: 1px solid hsl(var(--border) / .9); border-radius: 4px; padding: 0 4px; color: hsl(var(--foreground)); background: hsl(var(--card) / .92); box-shadow: 0 1px 6px hsl(240 20% 4% / .14); backdrop-filter: blur(8px); font: 600 8.5px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; pointer-events: auto; }
 .hardware-pin-left .hardware-pin-label { justify-content: flex-end; }.hardware-pin-label b { width: 2px; height: 9px; flex: none; border-radius: 1px; }
 .hardware-pin .react-flow__handle { position: absolute; top: 50%; transform: translateY(-50%); width: 10px !important; height: 10px !important; border-radius: 50% !important; border-width: 1.5px !important; box-shadow: 0 1px 4px hsl(240 20% 4% / .22); pointer-events: auto; }

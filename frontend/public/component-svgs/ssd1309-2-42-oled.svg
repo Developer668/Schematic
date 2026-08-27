@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="48" viewBox="0 0 64 48" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.22"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.2" stdDeviation="0.8" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+<rect x="6" y="8" width="52" height="30" rx="2" fill="#3730a3" stroke="#020617" stroke-width="0.6" filter="url(#softShadow)"/><text x="32" y="24" text-anchor="middle" font-family="monospace" font-size="4" font-weight="700" fill="#fff">SSD1309 2.42</text><text x="32" y="34" text-anchor="middle" font-family="monospace" font-size="2" fill="#e2e8f0">ssd1309-2-42-ole</text></svg>
