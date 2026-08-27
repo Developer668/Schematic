@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useProjectStore } from "../store/useProjectStore.ts";
 import { getRegisteredToolNames, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools } from "../webmcp/tools.ts";
-import { buildEnvironmentShowcase } from "../webmcp/environmentShowcase.ts";
-import { useSimulationStore } from "../store/useSimulationStore.ts";
 
 describe("WebMCP tools", () => {
   beforeEach(() => useProjectStore.getState().clear());
@@ -120,34 +118,4 @@ describe("WebMCP tools", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("builds the atmospheric showcase only through WebMCP callbacks", async () => {
-    useSimulationStore.getState().reset();
-    class MockWebSocket {
-      onopen: null | (() => void) = null;
-      send = vi.fn();
-      close = vi.fn();
-      constructor() { queueMicrotask(() => this.onopen?.()); }
-    }
-    vi.stubGlobal("WebSocket", MockWebSocket);
-    const showcase = await buildEnvironmentShowcase();
-    const project = useProjectStore.getState().project;
-
-    expect(project.name).toBe("Atmospheric Command Center");
-    expect(project.components.map((component) => component.definitionId).sort()).toEqual(["bmp280", "dht22", "esp32-s3", "ssd1306"]);
-    expect(project.connections).toHaveLength(showcase.connectionCount);
-    expect(project.firmwareTargets[0]?.componentId).toBe(showcase.boardId);
-    expect(project.firmwareTargets[0]?.files[0]?.content).toContain("drawDashboard");
-    expect(useSimulationStore.getState().pinStates).toMatchObject({
-      [`${showcase.bmp280Id}:temperatureC`]: 23.8,
-      [`${showcase.bmp280Id}:pressureHpa`]: 1012.6,
-      [`${showcase.dht22Id}:humidityPct`]: 52.4,
-    });
-
-    const outputs = useSimulationStore.getState().pinStates;
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ status: "running", time_ns: 1_000_000, outputs }) })));
-    await invokeWebMCPTool("simulation.run", { durationMs: 1 });
-    expect(useSimulationStore.getState().running).toBe(true);
-    expect(useSimulationStore.getState().timeNs).toBe(1_000_000n);
-    expect(useSimulationStore.getState().serialOutput).toContain("temperatureC=23.8");
-  });
 });

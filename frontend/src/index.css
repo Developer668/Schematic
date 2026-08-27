@@ -207,11 +207,7 @@ body {
 
 /* Quiet hardware drafting surface. */
 .world-grid { background-color: hsl(var(--background)); }
-.showcase-empty-state { position: absolute; z-index: 5; left: 50%; top: 50%; width: min(360px, calc(100% - 40px)); transform: translate(-50%, -50%); padding: 22px; border: 1px solid hsl(var(--border)); border-radius: 10px; background: hsl(var(--card) / .96); box-shadow: 0 14px 40px hsl(240 20% 4% / .14); text-align: center; backdrop-filter: blur(12px); }
-.showcase-empty-state > span { color: hsl(var(--accent)); font: 700 9px ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
-.showcase-empty-state strong { display: block; margin-top: 7px; font-size: 16px; }
-.showcase-empty-state p { margin: 8px 0 15px; color: hsl(var(--muted-foreground)); font-size: 11px; line-height: 1.55; }
-.showcase-error { position: absolute; z-index: 7; left: 50%; bottom: 12px; max-width: min(560px, calc(100% - 30px)); transform: translateX(-50%); padding: 7px 10px; border: 1px solid rgb(239 68 68 / .35); border-radius: 6px; color: rgb(248 113 113); background: hsl(var(--card)); font-size: 11px; }
+.run-error { position: absolute; z-index: 7; left: 50%; bottom: 12px; max-width: min(560px, calc(100% - 30px)); transform: translateX(-50%); padding: 7px 10px; border: 1px solid rgb(239 68 68 / .35); border-radius: 6px; color: rgb(248 113 113); background: hsl(var(--card)); font-size: 11px; }
 
 /* cursor fix */
 .react-flow__pane { cursor: grab }
