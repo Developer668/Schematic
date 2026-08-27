@@ -216,7 +216,9 @@ body {
 
 /* Quiet hardware drafting surface. */
 .world-grid { background-color: hsl(var(--background)); }
-.run-error { position: absolute; z-index: 7; left: 50%; bottom: 12px; max-width: min(560px, calc(100% - 30px)); transform: translateX(-50%); padding: 7px 10px; border: 1px solid rgb(239 68 68 / .35); border-radius: 6px; color: rgb(248 113 113); background: hsl(var(--card)); font-size: 11px; }
+.run-error, .canvas-error { position: absolute; z-index: 7; max-width: min(560px, calc(100% - 30px)); padding: 8px 10px; border: 1px solid rgb(239 68 68 / .35); border-radius: 6px; color: rgb(248 113 113); background: hsl(var(--card)); box-shadow: 0 6px 18px hsl(240 20% 4% / .14); font-size: 11px; line-height: 1.35; }
+.run-error { left: 50%; bottom: 12px; transform: translateX(-50%); }
+.canvas-error { left: 10px; bottom: 10px; display: flex; align-items: flex-start; gap: 7px; }
 .workbench-resize-handle { position: relative; width: 8px; flex: none; align-items: stretch; justify-content: center; cursor: col-resize; background: hsl(var(--border) / .35); touch-action: none; }
 .workbench-resize-handle::after { content: ""; width: 2px; height: 34px; align-self: center; border-radius: 999px; background: hsl(var(--muted-foreground) / .35); transition: background-color 120ms ease, height 120ms ease; }
 .workbench-resize-handle:hover, .workbench-resize-handle:focus-visible { background: hsl(var(--accent) / .1); outline: none; }
@@ -339,6 +341,18 @@ html.light .react-flow__pane {
 
 @media (max-width: 1023px) {
   .workbench aside.w-\[292px\] { width: 248px; }
+}
+
+/* Keep compact engineering controls usable on touch screens without changing desktop density. */
+@media (pointer: coarse) {
+  .workbench .workspace-icon-button { width: 40px; height: 40px; }
+  .workbench .secondary-button, .workbench .run-button { min-height: 40px; height: 40px; }
+  .workbench .component-list-item { min-height: 48px; }
+  .workbench .component-list-item .component-add { width: 28px; height: 28px; opacity: 1; }
+  .workbench aside input, .workbench aside select { min-height: 40px; }
+  .workbench .workbench-resize-handle { width: 16px; }
+  .workbench .react-flow__controls button { width: 40px !important; height: 40px !important; }
+  .workbench .bottom-dock-tab { min-height: 40px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -26,8 +26,8 @@ export default function ValidationPanel({ embedded = false }: { embedded?: boole
       <div className={`flex items-center justify-between ${embedded ? "px-2 py-2 bg-muted/20 border-b border-border" : "mb-2"}`}>
         <div className="text-xs font-medium">Validation {valid !== null && <span className={`ml-1 text-[11px] px-1 py-0 rounded border ${valid ? "bg-emerald-500 text-white border-emerald-600" : "bg-red-500 text-white border-red-600"}`}>{valid ? "pass" : "fail"}</span>}</div>
         <div className="flex gap-1">
-          <button className="text-xs px-2 py-1 border border-border rounded hover:bg-muted" onClick={runCheck}>Validate</button>
-          <button className="text-xs px-2 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90" onClick={autoFixAll}>Auto-fix</button>
+          <button type="button" className="text-xs px-2 py-1 border border-border rounded hover:bg-muted" onClick={runCheck}>Validate</button>
+          <button type="button" className="text-xs px-2 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90" onClick={autoFixAll}>Auto-fix</button>
         </div>
       </div>
 
@@ -42,7 +42,7 @@ export default function ValidationPanel({ embedded = false }: { embedded?: boole
             <li key={i} className={`px-2 py-2 rounded border text-xs ${iss.severity === "error" ? "bg-red-50 dark:bg-red-950/20 border-red-200 text-red-700 dark:text-red-300" : iss.severity === "warning" ? "bg-amber-50 dark:bg-amber-950/20 border-amber-200 text-amber-700 dark:text-amber-300" : "bg-sky-50 dark:bg-sky-950/20 border-sky-200 text-sky-700 dark:text-sky-300"}`}>
               <div className="font-mono text-[11px] font-medium">{iss.code} <span className="ml-1 text-[10px] px-1 py-0 rounded bg-card border border-border">{iss.severity}</span></div>
               <div className="text-xs mt-1 leading-snug">{iss.message}</div>
-              {iss.autoFix && <button className="mt-1.5 text-xs px-2 py-1 bg-primary text-primary-foreground rounded" onClick={() => autoFix(iss.autoFix!.action)}>{iss.autoFix.description}</button>}
+              {iss.autoFix && <button type="button" className="mt-1.5 text-xs px-2 py-1 bg-primary text-primary-foreground rounded" onClick={() => autoFix(iss.autoFix!.action)}>{iss.autoFix.description}</button>}
             </li>
           ))}
           {codeIssues.length > 0 && <li className="pt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Firmware diagnostics</li>}

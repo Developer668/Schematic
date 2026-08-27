@@ -19,11 +19,11 @@ export default function BottomDock({ collapsed, onToggleCollapse, height }: { co
   if (collapsed) {
     return (
       <div className="h-8 border-t border-border bg-card flex items-center px-2 gap-1 shrink-0 text-xs">
-        <button onClick={() => { setTab("webmcp"); onToggleCollapse(); }} className="px-2 py-1 rounded hover:bg-muted">WebMCP</button>
-        <button onClick={() => { setTab("terminal"); onToggleCollapse(); }} className="px-2 py-1 rounded hover:bg-muted">Terminal</button>
-        <button onClick={() => { setTab("debug"); onToggleCollapse(); }} className="px-2 py-1 rounded hover:bg-muted">Debug</button>
-        <button onClick={() => { setTab("validation"); onToggleCollapse(); }} className="px-2 py-1 rounded hover:bg-muted">Problems</button>
-        <button onClick={onToggleCollapse} className="ml-auto w-6 h-6 rounded border border-border hover:bg-muted flex items-center justify-center"><ChevronDown size={12} className="rotate-180" /></button>
+        <button type="button" onClick={() => { setTab("webmcp"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">WebMCP</button>
+        <button type="button" onClick={() => { setTab("terminal"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">Terminal</button>
+        <button type="button" onClick={() => { setTab("debug"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">Debug</button>
+        <button type="button" onClick={() => { setTab("validation"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">Problems</button>
+        <button type="button" onClick={onToggleCollapse} className="ml-auto w-6 h-6 rounded border border-border hover:bg-muted flex items-center justify-center" aria-label="Expand bottom panel" title="Expand bottom panel"><ChevronDown size={12} className="rotate-180" /></button>
       </div>
     );
   }
@@ -40,7 +40,7 @@ export default function BottomDock({ collapsed, onToggleCollapse, height }: { co
         <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
           <span className="hidden sm:inline">{project.components.length} comps · {project.connections.length} wires</span>
           <span className="font-mono text-[9px] uppercase tracking-wide">{running ? "running" : "idle"}</span>
-          <button onClick={onToggleCollapse} className="w-6 h-6 rounded hover:bg-muted flex items-center justify-center"><ChevronDown size={12} /></button>
+          <button type="button" onClick={onToggleCollapse} className="w-6 h-6 rounded hover:bg-muted flex items-center justify-center" aria-label="Collapse bottom panel" title="Collapse bottom panel"><ChevronDown size={12} /></button>
         </div>
       </div>
 
@@ -56,7 +56,7 @@ export default function BottomDock({ collapsed, onToggleCollapse, height }: { co
 
 function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button onClick={onClick} className={`text-xs px-3 h-8 border-b-2 -mb-px ${active ? "border-primary text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+    <button type="button" aria-pressed={active} onClick={onClick} className={`bottom-dock-tab text-xs px-3 h-8 border-b-2 -mb-px ${active ? "border-primary text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
       {children}
     </button>
   );
@@ -114,14 +114,18 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
       return;
     }
     try {
-      await fn(args);
-    } catch {}
+      const result = await fn(args);
+      const output = result?.content?.filter?.((item: any) => item.type === "text").map?.((item: any) => item.text).join("\n") || (result?.data ? JSON.stringify(result.data, null, 2) : "Tool completed");
+      setHistory((h) => [...h, { cmd: raw, out: output, isError: Boolean(result?.isError) }]);
+    } catch (error) {
+      setHistory((h) => [...h, { cmd: raw, out: `Tool failed: ${(error as Error).message}`, isError: true }]);
+    }
     setInput("");
   };
 
   return (
     <div className="h-full flex flex-col font-mono text-xs">
-      <div className="flex-1 overflow-auto p-2 space-y-1.5 bg-[#0a0a0a] text-zinc-100">
+        <div className="flex-1 overflow-auto p-2 space-y-1.5 bg-[#0a0a0a] text-zinc-100" role="log" aria-live="polite">
         {history.map((h, i) => (
           <div key={i} className="space-y-1">
             <div className="flex gap-2">
@@ -134,7 +138,7 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
         {[...activities].reverse().map((activity) => (
           <div key={activity.id} className="space-y-1.5 border-t border-zinc-800 pt-1.5">
             <div className="flex items-center gap-2">
-              <span className={activity.status === "error" ? "text-red-300" : activity.status === "running" ? "text-amber-300" : "text-emerald-400"}>{activity.status === "running" ? "·" : "✓"}</span>
+              <span className={activity.status === "error" ? "text-red-300" : activity.status === "running" ? "text-amber-300" : "text-emerald-400"}>{activity.status === "error" ? "!" : activity.status === "running" ? "·" : "✓"}</span>
               <span className="text-zinc-100 break-all">{activity.name}</span>
               <span className="ml-auto text-[10px] text-zinc-500">{activity.status}{activity.finishedAt ? ` · ${activity.finishedAt - activity.startedAt}ms` : ""}</span>
             </div>
@@ -150,7 +154,7 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
       {filter && filteredTools.length > 0 && filteredTools.length < toolNames.length && (
         <div className="border-t border-zinc-800 bg-zinc-900 px-2 py-1.5 flex flex-wrap gap-1 max-h-20 overflow-auto">
           {filteredTools.slice(0, 8).map((t) => (
-            <button key={t} onClick={() => { setInput(t + " "); setFilter(""); inputRef.current?.focus(); }} className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300">
+            <button type="button" key={t} onClick={() => { setInput(t + " "); setFilter(""); inputRef.current?.focus(); }} className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300">
               {t}
             </button>
           ))}
@@ -164,7 +168,7 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
           value={input}
           onChange={(e) => { setInput(e.target.value); const tok = e.target.value.split(" ")[0]; setFilter(tok); }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") run();
+            if (e.key === "Enter") void run();
             if (e.key === "Tab") {
               e.preventDefault();
               const match = filteredTools[0];
@@ -175,8 +179,8 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
           placeholder='Type tool — e.g. component.search {"query":"esp32"} — Tab to autocomplete, Enter to run'
           className="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
         />
-        <button onClick={run} className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200">Run</button>
-        <button onClick={() => { setHistory([]); clearActivities(); }} className="text-xs px-2 py-1 rounded border border-zinc-700 hover:bg-zinc-800 text-zinc-400"><Trash2 size={11} /></button>
+        <button type="button" onClick={() => void run()} className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200">Run</button>
+        <button type="button" onClick={() => { setHistory([]); clearActivities(); }} className="text-xs px-2 py-1 rounded border border-zinc-700 hover:bg-zinc-800 text-zinc-400" aria-label="Clear WebMCP activity" title="Clear WebMCP activity"><Trash2 size={11} /></button>
       </div>
       <div className="px-2 py-1 border-t border-zinc-800 bg-zinc-900 text-[11px] text-zinc-500 flex items-center gap-3">
         <span>Enter: run · Tab: autocomplete · clear: reset</span>

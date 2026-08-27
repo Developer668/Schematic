@@ -20,7 +20,7 @@ import { useProjectStore } from "../../store/useProjectStore.ts";
 import { catalog } from "../../data/catalog.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
-import { Maximize2, Grid3X3, EyeOff, Map } from "lucide-react";
+import { Maximize2, Grid3X3, EyeOff, Map, AlertCircle } from "lucide-react";
 import { componentArtworkHref } from "../../data/componentArtwork.ts";
 
 const nodeTypes = { hardware: HardwareNode };
@@ -87,6 +87,7 @@ export default function HardwareCanvas() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [showMap, setShowMap] = useState(true);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<{ html: string; title: string; x: number; y: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<ReactFlowInstance | null>(null);
@@ -119,16 +120,9 @@ export default function HardwareCanvas() {
           ),
         );
       } catch (e) {
-        // use a nicer toast-like alert
         const msg = (e as Error).message;
-        // fallback to alert for now, but styled via console
-        console.warn("Connect failed:", msg);
-        // small inline toast
-        const el = document.createElement("div");
-        el.textContent = `Wire failed: ${msg}`;
-        el.className = "fixed bottom-20 left-1/2 -translate-x-1/2 bg-red-600 text-white text-xs px-3 py-1.5 rounded border border-red-700 z-50";
-        document.body.appendChild(el);
-        setTimeout(() => el.remove(), 2600);
+        setConnectionError(`Wire failed: ${msg}`);
+        window.setTimeout(() => setConnectionError(null), 2600);
       }
     },
     [connectPorts, setEdges],
@@ -269,6 +263,7 @@ export default function HardwareCanvas() {
         <div className="absolute top-2 left-2 right-[144px] flex items-center gap-1 pointer-events-none">
           <div className="flex items-center gap-1 pointer-events-auto bg-card border border-border rounded px-1.5 py-1">
             <button
+              type="button"
               onClick={() => setShowGrid(!showGrid)}
               className={`workspace-icon-button ${showGrid ? "is-active" : ""}`}
               aria-pressed={showGrid}
@@ -276,7 +271,7 @@ export default function HardwareCanvas() {
             >
               {showGrid ? <Grid3X3 size={12} /> : <EyeOff size={12} />}
             </button>
-            <button onClick={() => setShowMap((value) => !value)} className={`workspace-icon-button ${showMap ? "is-active" : ""}`} aria-pressed={showMap} title="Toggle overview map"><Map size={12} /></button>
+            <button type="button" onClick={() => setShowMap((value) => !value)} className={`workspace-icon-button ${showMap ? "is-active" : ""}`} aria-pressed={showMap} title="Toggle overview map"><Map size={12} /></button>
             <span className="text-[11px] font-mono text-muted-foreground pr-1 hidden sm:inline">
               {nodes.length} · {edges.length}
             </span>
@@ -304,6 +299,7 @@ export default function HardwareCanvas() {
           </div>
         </div>
       )}
+      {connectionError && <div className="canvas-error" role="alert"><AlertCircle size={13} />{connectionError}</div>}
     </div>
   );
 }

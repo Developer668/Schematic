@@ -3,7 +3,7 @@ import Inspector from "../inspector/Inspector.tsx";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
 import { catalog } from "../../data/catalog.ts";
-import { Code2, Eye, FolderKanban, Copy, Trash2, ShoppingCart } from "lucide-react";
+import { Code2, Eye, FolderKanban, Copy, Trash2, ShoppingCart, Check } from "lucide-react";
 import ComponentArtwork from "../ComponentArtwork.tsx";
 import ShoppingWorkspace from "../shopping/ShoppingWorkspace.tsx";
 
@@ -13,9 +13,21 @@ type Tab = "code" | "inspect" | "project" | "shopping";
 
 export default function RightPanel() {
   const [tab, setTab] = useState<Tab>("code");
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const project = useProjectStore((s) => s.project);
   const activeId = useSelectionStore((s) => s.activeComponentId);
   const active = project.components.find((c) => c.id === activeId);
+
+  const copyToClipboard = async (value: string, label: string) => {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable");
+      await navigator.clipboard.writeText(value);
+      setCopyStatus(`${label} copied`);
+      window.setTimeout(() => setCopyStatus(null), 1800);
+    } catch {
+      setCopyStatus("Clipboard access is unavailable");
+    }
+  };
 
   return (
     <div className="flex h-full flex-col bg-card">
@@ -32,10 +44,11 @@ export default function RightPanel() {
         <button type="button" aria-pressed={tab === "shopping"} onClick={() => setTab("shopping")} className={`flex h-7 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-xs ${tab==="shopping" ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
           <ShoppingCart size={12} strokeWidth={1.6} /> Parts
         </button>
-        <button type="button" onClick={() => navigator.clipboard.writeText(JSON.stringify(project, null, 2))} className="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded hover:bg-muted text-muted-foreground" title="Copy JSON" aria-label="Copy project JSON">
-          <Copy size={12} strokeWidth={1.6} />
+        <button type="button" onClick={() => void copyToClipboard(JSON.stringify(project, null, 2), "Project JSON")} className="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded hover:bg-muted text-muted-foreground" title="Copy JSON" aria-label="Copy project JSON">
+          {copyStatus === "Project JSON copied" ? <Check size={12} strokeWidth={1.8} /> : <Copy size={12} strokeWidth={1.6} />}
         </button>
       </div>
+      {copyStatus && <div className="border-b border-border bg-muted/30 px-2.5 py-1 text-[10px] text-muted-foreground" role="status" aria-live="polite">{copyStatus}</div>}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {tab === "code" && (
@@ -50,8 +63,8 @@ export default function RightPanel() {
             <Inspector />
             {active && (
               <div className="flex gap-1.5 p-2">
-                <button onClick={() => navigator.clipboard.writeText(active.id)} className="flex-1 rounded border border-border py-1.5 text-xs hover:bg-muted">Copy ID</button>
-                <button onClick={() => useProjectStore.getState().removeComponent(active.id)} className="flex-1 rounded border border-red-200 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400">Remove</button>
+                <button type="button" onClick={() => void copyToClipboard(active.id, "Component ID")} className="flex-1 rounded border border-border py-1.5 text-xs hover:bg-muted">Copy ID</button>
+                <button type="button" onClick={() => useProjectStore.getState().removeComponent(active.id)} className="flex-1 rounded border border-red-200 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400">Remove</button>
               </div>
             )}
           </div>
@@ -75,7 +88,7 @@ export default function RightPanel() {
                   const d = catalog.find(x=>x.id===c.definitionId);
                   const isActive = c.id===activeId;
                   return (
-                    <button key={c.id} onClick={()=>useSelectionStore.getState().setActive(c.id)} className={`flex w-full gap-2 px-2 py-2 text-left hover:bg-muted ${isActive?"bg-muted":""}`}>
+                    <button type="button" key={c.id} onClick={()=>useSelectionStore.getState().setActive(c.id)} className={`flex w-full gap-2 px-2 py-2 text-left hover:bg-muted ${isActive?"bg-muted":""}`}>
                       <div className="h-9 w-11 shrink-0"><ComponentArtwork definition={d} /></div>
                       <div className="min-w-0 flex-1"><div className="truncate text-xs font-medium">{d?.title ?? c.definitionId}</div><div className="truncate font-mono text-[11px] text-muted-foreground">{c.id}</div></div>
                     </button>
@@ -94,8 +107,8 @@ export default function RightPanel() {
             </div>
 
             <div className="flex gap-1.5">
-              <button onClick={()=>useProjectStore.getState().clear()} className="flex-1 rounded border border-border py-1.5 text-xs hover:bg-muted inline-flex items-center justify-center gap-1"><Trash2 size={11} strokeWidth={1.6}/> Clear</button>
-              <button onClick={()=>{const b=new Blob([JSON.stringify(project,null,2)],{type:"application/json"}); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download=`${project.name}.json`; a.click(); URL.revokeObjectURL(u)}} className="flex-1 rounded bg-foreground py-1.5 text-xs font-medium text-background hover:opacity-90">Export</button>
+              <button type="button" onClick={()=>useProjectStore.getState().clear()} className="flex-1 rounded border border-border py-1.5 text-xs hover:bg-muted inline-flex items-center justify-center gap-1"><Trash2 size={11} strokeWidth={1.6}/> Clear</button>
+              <button type="button" onClick={()=>{const b=new Blob([JSON.stringify(project,null,2)],{type:"application/json"}); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download=`${project.name}.json`; a.click(); URL.revokeObjectURL(u)}} className="flex-1 rounded bg-foreground py-1.5 text-xs font-medium text-background hover:opacity-90">Export</button>
             </div>
           </div>
         )}

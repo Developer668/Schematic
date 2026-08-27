@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import HardwareCanvas from "../components/canvas/HardwareCanvas.tsx";
 import RightPanel from "../components/layout/RightPanel.tsx";
@@ -50,6 +50,7 @@ export default function StudioPage() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState("");
   const [runError, setRunError] = useState("");
+  const closeImport = useCallback(() => setShowImport(false), []);
 
   const [leftCollapsed, setLeftCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   const [rightCollapsed, setRightCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
@@ -146,12 +147,16 @@ export default function StudioPage() {
     }
   };
 
-  const onResizeStart = (e: React.MouseEvent) => {
+  const onResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
     isBottomResizingRef.current = true;
     const sy = e.clientY, sh = bottomHeight;
-    const onMove = (ev: MouseEvent) => { if (isBottomResizingRef.current) setBottomHeight(Math.min(360, Math.max(140, sh + (sy - ev.clientY)))); };
-    const onUp = () => { isBottomResizingRef.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    const onMove = (ev: PointerEvent) => { if (isBottomResizingRef.current) setBottomHeight(sh + (sy - ev.clientY)); };
+    const onUp = () => { isBottomResizingRef.current = false; document.body.style.cursor = ""; document.body.style.userSelect = ""; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   };
 
   const onRightResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -184,19 +189,19 @@ export default function StudioPage() {
             <span className="hidden text-[13px] font-semibold tracking-[-0.025em] sm:inline">Schematic</span>
           </Link>
           <span className="hidden h-4 w-px bg-border md:block" />
-          <div className="relative hidden min-w-0 shrink items-center gap-2 md:flex" ref={projectMenuRef}>
+          <div className="relative flex min-w-0 max-w-[min(42vw,250px)] shrink items-center gap-2" ref={projectMenuRef}>
             <button
               type="button"
               onClick={() => setShowProjectMenu((open) => !open)}
               aria-haspopup="menu"
               aria-expanded={showProjectMenu}
-              className="flex min-w-0 items-center gap-1 rounded px-1.5 py-1 text-xs font-medium hover:bg-muted"
+              className="flex min-w-0 max-w-full items-center gap-1 rounded px-1.5 py-1 text-xs font-medium hover:bg-muted"
               title="Switch project"
             >
-              <span className="max-w-[190px] truncate">{project.name}</span>
+              <span className="min-w-0 max-w-[min(34vw,190px)] flex-1 truncate">{project.name}</span>
               <ChevronDown size={11} className={`shrink-0 transition-transform ${showProjectMenu ? "rotate-180" : ""}`} />
             </button>
-            <span className="status-pill">Saved locally</span>
+            <span className="status-pill hidden sm:inline-flex">Saved locally</span>
             {showProjectMenu && (
               <div role="menu" className="absolute left-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-border bg-card shadow-xl">
                 <div className="flex items-center justify-between border-b border-border px-3 py-2">
@@ -245,13 +250,13 @@ export default function StudioPage() {
             )}
           </div>
           <div className="hidden items-center gap-1 lg:flex">
-            <button aria-label="Toggle component library" title="Toggle component library" onClick={() => setLeftCollapsed(v => !v)} className={`workspace-icon-button ${!leftCollapsed ? "is-active" : ""}`}>
+            <button type="button" aria-label="Toggle component library" title="Toggle component library" onClick={() => setLeftCollapsed(v => !v)} className={`workspace-icon-button ${!leftCollapsed ? "is-active" : ""}`}>
               <PanelLeft size={13} strokeWidth={1.8} />
             </button>
-            <button aria-label="Toggle code panel" title="Toggle code panel" onClick={() => setRightCollapsed(v => !v)} className={`workspace-icon-button hidden xl:grid ${!rightCollapsed ? "is-active" : ""}`}>
+            <button type="button" aria-label="Toggle code panel" title="Toggle code panel" onClick={() => setRightCollapsed(v => !v)} className={`workspace-icon-button hidden xl:grid ${!rightCollapsed ? "is-active" : ""}`}>
               <PanelRight size={13} strokeWidth={1.8} />
             </button>
-          <button aria-label="Toggle bottom panel" title="Toggle bottom panel" onClick={() => setBottomCollapsed(!bottomCollapsed)} className={`workspace-icon-button ${!bottomCollapsed ? "is-active" : ""}`}>
+            <button type="button" aria-label="Toggle bottom panel" title="Toggle bottom panel" onClick={() => setBottomCollapsed(!bottomCollapsed)} className={`workspace-icon-button ${!bottomCollapsed ? "is-active" : ""}`}>
               <PanelBottom size={13} strokeWidth={1.8} />
             </button>
           </div>
@@ -259,28 +264,34 @@ export default function StudioPage() {
 
         <div className="flex items-center gap-1.5">
           <span className="status-pill hidden lg:inline-flex"><Wifi size={11} /> WebMCP · {toolNames.length}</span>
-          <button aria-label="Toggle color theme" title="Toggle color theme" onClick={toggle} className="workspace-icon-button">
+          <button type="button" aria-label="Toggle color theme" title="Toggle color theme" onClick={toggle} className="workspace-icon-button">
             <ThemeIcon theme={theme} />
           </button>
+          <Link to="/settings" className="workspace-icon-button sm:hidden" aria-label="Open settings" title="Open settings">
+            <Settings size={12} strokeWidth={1.8} />
+          </Link>
           <Link to="/settings" className="secondary-button hidden sm:inline-flex">
             <Settings size={12} strokeWidth={1.8} /> Settings
+          </Link>
+          <Link to="/parts" className="workspace-icon-button md:hidden" aria-label="Open parts desk" title="Open parts desk">
+            <ShoppingCart size={12} strokeWidth={1.8} />
           </Link>
           <Link to="/parts" className="secondary-button hidden md:inline-flex">
             <ShoppingCart size={12} strokeWidth={1.8} /> Parts
           </Link>
-          <button onClick={() => setShowImport(true)} className="secondary-button hidden sm:inline-flex">Import</button>
-          <button onClick={() => triggerDownloadVlx(project.name)} className="secondary-button hidden md:inline-flex">
+          <button type="button" onClick={() => setShowImport(true)} className="secondary-button hidden sm:inline-flex">Import</button>
+          <button type="button" onClick={() => triggerDownloadVlx(project.name)} className="secondary-button hidden md:inline-flex">
             <Download size={12} strokeWidth={1.8} /> Export
           </button>
-          <button onClick={clear} className="workspace-icon-button hidden sm:grid" title="Clear workspace" aria-label="Clear workspace">
+          <button type="button" onClick={clear} className="workspace-icon-button hidden sm:grid" title="Clear workspace" aria-label="Clear workspace">
             <Trash2 size={12} strokeWidth={1.8} />
           </button>
           {running ? (
-            <button onClick={doStop} className="run-button is-running">
+            <button type="button" onClick={doStop} className="run-button is-running">
               <Square size={9} className="fill-white" /> Stop
             </button>
           ) : (
-            <button onClick={doRun} className="run-button">
+            <button type="button" onClick={doRun} className="run-button">
               <Play size={9} className="fill-current" /> Run
             </button>
           )}
@@ -307,7 +318,7 @@ export default function StudioPage() {
                   className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:border-foreground/30 focus:outline-none focus:ring-2 focus:ring-ring/10"
                 />
                 {query ? (
-                  <button onClick={() => handleSearch("")} className="absolute right-1 top-1/2 -translate-y-1/2 h-4 w-4 grid place-items-center rounded hover:bg-muted text-muted-foreground">
+                  <button type="button" onClick={() => handleSearch("")} className="absolute right-1 top-1/2 -translate-y-1/2 h-4 w-4 grid place-items-center rounded hover:bg-muted text-muted-foreground" aria-label="Clear component search">
                     <X size={10} strokeWidth={1.8} />
                   </button>
                 ) : (
@@ -342,7 +353,7 @@ export default function StudioPage() {
                 <div className="flex items-center gap-1">
                   {activeCat && <span className="inline-flex rounded border border-foreground bg-foreground text-background px-1 py-0 text-[10px] font-medium">{activeCat}</span>}
                   {orgFilter && <span className="inline-flex rounded border border-foreground bg-foreground text-background px-1 py-0 text-[10px] font-medium">{orgFilter}</span>}
-                  <button onClick={() => { setActiveCat(null); setCategory(null); setOrgFilter(null); handleSearch(""); }} className="ml-auto text-[11px] underline decoration-muted-foreground/30 underline-offset-2 hover:decoration-foreground">Reset</button>
+                  <button type="button" onClick={() => { setActiveCat(null); setCategory(null); setOrgFilter(null); handleSearch(""); }} className="ml-auto text-[11px] underline decoration-muted-foreground/30 underline-offset-2 hover:decoration-foreground">Reset</button>
                 </div>
               )}
             </div>
@@ -396,7 +407,7 @@ export default function StudioPage() {
         {/* CENTER */}
         <main className="flex flex-1 flex-col min-w-0 bg-background relative">
           {leftCollapsed && (
-            <button onClick={() => setLeftCollapsed(false)} className="absolute left-1.5 top-1.5 z-10 grid h-6 w-6 place-items-center rounded border border-border bg-card hover:bg-muted">
+            <button type="button" onClick={() => setLeftCollapsed(false)} className="absolute left-1.5 top-1.5 z-10 grid h-6 w-6 place-items-center rounded border border-border bg-card hover:bg-muted" aria-label="Open component library" title="Open component library">
               <PanelLeft size={11} strokeWidth={1.7} />
             </button>
           )}
@@ -404,7 +415,9 @@ export default function StudioPage() {
             <HardwareCanvas key={project.id} />
             {runError && <div className="run-error" role="alert">{runError}</div>}
           </div>
-          {!bottomCollapsed && <div onMouseDown={onResizeStart} className="h-px bg-border hover:bg-foreground/20 cursor-row-resize shrink-0" />}
+          {!bottomCollapsed && <div role="separator" aria-orientation="horizontal" aria-label="Resize bottom panel" aria-valuemin={140} aria-valuemax={360} aria-valuenow={Math.round(bottomHeight)} tabIndex={0} onPointerDown={onResizeStart} onKeyDown={(event) => { if (event.key === "ArrowUp") { event.preventDefault(); setBottomHeight(bottomHeight + 16); } if (event.key === "ArrowDown") { event.preventDefault(); setBottomHeight(bottomHeight - 16); } if (event.key === "Home") { event.preventDefault(); setBottomHeight(140); } if (event.key === "End") { event.preventDefault(); setBottomHeight(360); } }} className="flex h-2 shrink-0 cursor-row-resize items-center justify-center bg-border/40 hover:bg-foreground/20 focus-visible:bg-accent/10">
+            <span className="h-px w-10 rounded-full bg-muted-foreground/40" />
+          </div>}
           <BottomDock collapsed={bottomCollapsed} onToggleCollapse={() => setBottomCollapsed(!bottomCollapsed)} height={bottomHeight} />
         </main>
 
@@ -421,8 +434,11 @@ export default function StudioPage() {
               tabIndex={0}
               onPointerDown={onRightResizeStart}
               onKeyDown={(event) => {
+                if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) event.preventDefault();
                 if (event.key === "ArrowLeft") setRightPanelWidth(rightPanelWidth + 16);
                 if (event.key === "ArrowRight") setRightPanelWidth(rightPanelWidth - 16);
+                if (event.key === "Home") setRightPanelWidth(720);
+                if (event.key === "End") setRightPanelWidth(300);
               }}
               className="workbench-resize-handle hidden xl:flex"
               title="Drag to resize the code panel"
@@ -433,7 +449,7 @@ export default function StudioPage() {
           </>
         ) : (
           <div className="hidden xl:flex w-7 shrink-0 flex-col items-center gap-1.5 border-l border-border bg-card py-1.5">
-            <button onClick={() => setRightCollapsed(false)} className="grid h-6 w-6 place-items-center rounded bg-foreground text-background">
+            <button type="button" onClick={() => setRightCollapsed(false)} className="grid h-6 w-6 place-items-center rounded bg-foreground text-background" aria-label="Open code panel" title="Open code panel">
               <PanelRight size={11} strokeWidth={1.7} />
             </button>
           </div>
@@ -447,20 +463,20 @@ export default function StudioPage() {
             <div className="flex w-[84vw] max-w-[320px] flex-col border-l border-border bg-card">
               <div className="flex h-7 items-center justify-between border-b border-border px-2.5">
                 <span className="kicker">Inspector</span>
-                <button onClick={() => setRightCollapsed(true)} className="grid h-5 w-5 place-items-center rounded hover:bg-muted"><X size={11} strokeWidth={1.7} /></button>
+                <button type="button" onClick={() => setRightCollapsed(true)} className="grid h-7 w-7 place-items-center rounded hover:bg-muted" aria-label="Close workspace panel"><X size={12} strokeWidth={1.7} /></button>
               </div>
               <div className="min-h-0 flex-1 overflow-hidden"><RightPanel /></div>
             </div>
           </div>
         )}
         {rightCollapsed && (
-          <button onClick={() => setRightCollapsed(false)} className="fixed bottom-3 right-3 z-20 grid h-8 w-8 place-items-center rounded bg-foreground text-background shadow">
+          <button type="button" onClick={() => setRightCollapsed(false)} className="fixed bottom-3 right-3 z-20 grid h-9 w-9 place-items-center rounded bg-foreground text-background shadow" aria-label="Open code panel" title="Open code panel">
             <PanelRight size={12} strokeWidth={1.7} />
           </button>
         )}
       </div>
 
-      {showImport && <ImportDialog onClose={() => setShowImport(false)} />}
+      {showImport && <ImportDialog onClose={closeImport} />}
 
       <footer className="flex h-5 items-center gap-2 border-t border-border bg-muted/40 px-2.5 text-[10px] font-mono tabular-nums text-muted-foreground shrink-0">
         <span>{project.components.length}c · {project.connections.length}w</span>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useThemeStore } from "../store/useThemeStore.ts";
 import { useProjectStore } from "../store/useProjectStore.ts";
@@ -34,17 +34,29 @@ export default function SettingsPage() {
   const { showGrid: lineGrid, setShowGrid: setLineGrid, snapToGrid: snapGrid, setSnapToGrid: setSnapGrid, libraryDensity, setLibraryDensity, reducedMotion, setReducedMotion } = useWorkspaceStore();
   const [apiStatus, setApiStatus] = useState<"checking" | "ok" | "offline">("checking");
   const [enginesStatus, setEnginesStatus] = useState<any>(null);
+  const [notice, setNotice] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
+  const [clearArmed, setClearArmed] = useState(false);
   const toolCount = getRegisteredToolNames().length;
 
-  useEffect(() => {
-    fetch("/api/engines")
-      .then((r) => r.json())
-      .then((j) => {
-        setApiStatus("ok");
-        setEnginesStatus(j);
-      })
-      .catch(() => setApiStatus("offline"));
+  const checkApi = useCallback(async () => {
+    setApiStatus("checking");
+    try {
+      const response = await fetch("/api/engines");
+      if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) throw new Error("Backend returned a non-JSON response");
+      const payload = await response.json();
+      setApiStatus("ok");
+      setEnginesStatus(payload);
+      setNotice({ kind: "success", text: "Backend and engine status checked successfully." });
+    } catch (error) {
+      setApiStatus("offline");
+      setEnginesStatus(null);
+      setNotice({ kind: "error", text: `Backend check failed: ${(error as Error).message}` });
+    }
   }, []);
+
+  useEffect(() => { void checkApi(); }, [checkApi]);
 
   const handleExport = () => {
     const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
@@ -59,17 +71,34 @@ export default function SettingsPage() {
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const input = e.currentTarget;
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result as string);
         useProjectStore.getState().loadProject(data);
-        alert("Project imported");
+        setNotice({ kind: "success", text: "Project imported successfully." });
       } catch {
-        alert("Invalid JSON");
+        setNotice({ kind: "error", text: "This file is not valid project JSON." });
       }
+      input.value = "";
+    };
+    reader.onerror = () => {
+      setNotice({ kind: "error", text: "The project file could not be read." });
+      input.value = "";
     };
     reader.readAsText(file);
+  };
+
+  const handleClear = () => {
+    if (!clearArmed) {
+      setClearArmed(true);
+      setNotice({ kind: "info", text: "Clear is ready. Choose Confirm clear to remove this project's components, wires, and firmware." });
+      return;
+    }
+    clear();
+    setClearArmed(false);
+    setNotice({ kind: "success", text: "Project cleared. The project name was kept." });
   };
 
   return (
@@ -100,6 +129,7 @@ export default function SettingsPage() {
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="max-w-[1180px] w-full mx-auto p-4 md:p-6 space-y-4 animate-fadeIn">
+        {notice && <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs ${notice.kind === "error" ? "border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400" : notice.kind === "success" ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-border bg-muted text-muted-foreground"}`} role={notice.kind === "error" ? "alert" : "status"} aria-live="polite"><span className="mt-0.5 shrink-0">{notice.kind === "error" ? <AlertCircle size={13} /> : notice.kind === "success" ? <Check size={13} /> : <Info size={13} />}</span><span className="min-w-0 flex-1">{notice.text}</span><button type="button" onClick={() => setNotice(null)} className="shrink-0 rounded p-0.5 hover:bg-foreground/10" aria-label="Dismiss notification">×</button></div>}
         {/* Intro */}
         <div className="rounded-lg border border-border bg-card p-5 md:p-6 flex flex-col md:flex-row gap-4 items-start shadow-sm">
           <div className="w-11 h-11 rounded-md border border-border bg-muted flex items-center justify-center shrink-0">
@@ -139,6 +169,7 @@ export default function SettingsPage() {
                 <div className="text-xs font-medium mb-2">Theme</div>
                 <div className="grid grid-cols-2 gap-2">
                   <button
+                    type="button"
                     onClick={() => setTheme("dark")}
                     className={`p-3 rounded-md border text-center transition-all ${theme === "dark" ? "bg-primary text-primary-foreground border-primary shadow-sm" : "bg-card border-border hover:bg-muted"}`}
                   >
@@ -147,6 +178,7 @@ export default function SettingsPage() {
                     <div className="text-[10px] opacity-70">Black · default</div>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setTheme("light")}
                     className={`p-3 rounded-md border text-center transition-all ${theme === "light" ? "bg-primary text-primary-foreground border-primary shadow-sm" : "bg-card border-border hover:bg-muted"}`}
                   >
@@ -194,7 +226,7 @@ export default function SettingsPage() {
                     <div className="text-xs font-medium">Compact component library</div>
                     <div className="text-[11px] text-muted-foreground">Show more parts at once</div>
                   </div>
-                  <button aria-label="Toggle compact component library" aria-pressed={libraryDensity === "compact"} onClick={() => setLibraryDensity(libraryDensity === "compact" ? "comfortable" : "compact")} className={`w-10 h-6 rounded-full p-0.5 transition-colors ${libraryDensity === "compact" ? "bg-primary" : "bg-muted border border-border"}`}>
+                  <button type="button" aria-label="Toggle compact component library" aria-pressed={libraryDensity === "compact"} onClick={() => setLibraryDensity(libraryDensity === "compact" ? "comfortable" : "compact")} className={`w-10 h-6 rounded-full p-0.5 transition-colors ${libraryDensity === "compact" ? "bg-primary" : "bg-muted border border-border"}`}>
                     <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${libraryDensity === "compact" ? "translate-x-4" : "translate-x-0"}`} />
                   </button>
                 </div>
@@ -203,7 +235,7 @@ export default function SettingsPage() {
                     <div className="text-xs font-medium">Reduce motion</div>
                     <div className="text-[11px] text-muted-foreground">Disable non-essential interface movement</div>
                   </div>
-                  <button aria-label="Toggle reduced motion" aria-pressed={reducedMotion} onClick={() => setReducedMotion(!reducedMotion)} className={`w-10 h-6 rounded-full p-0.5 transition-colors ${reducedMotion ? "bg-primary" : "bg-muted border border-border"}`}>
+                  <button type="button" aria-label="Toggle reduced motion" aria-pressed={reducedMotion} onClick={() => setReducedMotion(!reducedMotion)} className={`w-10 h-6 rounded-full p-0.5 transition-colors ${reducedMotion ? "bg-primary" : "bg-muted border border-border"}`}>
                     <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${reducedMotion ? "translate-x-4" : "translate-x-0"}`} />
                   </button>
                 </div>
@@ -260,11 +292,7 @@ export default function SettingsPage() {
                 </ul>
               </div>
 
-              <button
-                onClick={() => {
-                  setApiStatus("checking");
-                  fetch("/api/engines").then((r) => r.json()).then((j) => { setApiStatus("ok"); setEnginesStatus(j); }).catch(() => setApiStatus("offline"));
-                }}
+              <button type="button" onClick={() => void checkApi()}
                 className="w-full text-xs py-2 rounded-xl border border-border hover:bg-muted flex items-center justify-center gap-1.5"
               >
                 <Zap size={12} /> Recheck connections
@@ -295,7 +323,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="flex gap-2">
-                <button onClick={handleExport} className="flex-1 text-xs py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center gap-1.5 font-medium">
+                <button type="button" onClick={handleExport} className="flex-1 text-xs py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center gap-1.5 font-medium">
                   <Download size={12} /> Export JSON
                 </button>
                 <label className="flex-1 text-xs py-2 rounded-xl border border-border hover:bg-muted flex items-center justify-center gap-1.5 cursor-pointer">
@@ -304,9 +332,12 @@ export default function SettingsPage() {
                 </label>
               </div>
 
-              <button onClick={() => { if (confirm("Clear project?")) clear(); }} className="w-full text-xs py-2 rounded-xl bg-red-500/10 hover:bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/20 flex items-center justify-center gap-1.5">
+              {clearArmed ? <div className="flex gap-2">
+                <button type="button" onClick={handleClear} className="flex-1 text-xs py-2 rounded-xl bg-red-500 text-white hover:bg-red-600 border border-red-600 flex items-center justify-center gap-1.5 font-medium"><Trash2 size={12} /> Confirm clear</button>
+                <button type="button" onClick={() => setClearArmed(false)} className="px-3 text-xs py-2 rounded-xl border border-border hover:bg-muted">Cancel</button>
+              </div> : <button type="button" onClick={handleClear} className="w-full text-xs py-2 rounded-xl bg-red-500/10 hover:bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/20 flex items-center justify-center gap-1.5">
                 <Trash2 size={12} /> Clear project
-              </button>
+              </button>}
 
               <div className="text-[11px] text-muted-foreground leading-snug p-2 rounded-xl bg-muted/20 border border-border">
                 Exports include components, wires & firmware targets. Import replaces current project.
