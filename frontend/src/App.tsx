@@ -1,10 +1,12 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import StudioPage from "./pages/StudioPage.tsx";
-import SettingsPage from "./pages/SettingsPage.tsx";
-import LandingPage from "./pages/LandingPage.tsx";
+import { lazy, Suspense, useEffect } from "react";
 import { registerWebMCPTools } from "./webmcp/tools.ts";
-import { useEffect } from "react";
 import "./store/useThemeStore.ts";
+
+const LandingPage = lazy(() => import("./pages/LandingPage.tsx"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage.tsx"));
+const PartsPage = lazy(() => import("./pages/PartsPage.tsx"));
 
 export default function App() {
   useEffect(() => {
@@ -17,11 +19,14 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/studio" element={<StudioPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-      </Routes>
+      <Suspense fallback={<div className="min-h-screen bg-background" />}>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/studio" element={<StudioPage />} />
+          <Route path="/parts" element={<PartsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import Inspector from "../inspector/Inspector.tsx";
-import MonacoWorkspace from "../editor/MonacoWorkspace.tsx";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
 import { catalog } from "../../data/catalog.ts";
-import { Code2, Eye, FolderKanban, Copy, Trash2 } from "lucide-react";
+import { Code2, Eye, FolderKanban, Copy, Trash2, ShoppingCart } from "lucide-react";
 import ComponentArtwork from "../ComponentArtwork.tsx";
+import ShoppingWorkspace from "../shopping/ShoppingWorkspace.tsx";
 
-type Tab = "code" | "inspect" | "project";
+const MonacoWorkspace = lazy(() => import("../editor/MonacoWorkspace.tsx"));
+
+type Tab = "code" | "inspect" | "project" | "shopping";
 
 export default function RightPanel() {
   const [tab, setTab] = useState<Tab>("code");
@@ -17,17 +19,20 @@ export default function RightPanel() {
 
   return (
     <div className="flex h-full flex-col bg-card">
-      <div className="flex h-7 items-center gap-0 border-b border-border px-2">
-        <button onClick={() => setTab("code")} className={`flex h-7 items-center gap-1.5 border-b-2 px-2.5 text-xs ${tab==="code" ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+      <div className="flex min-w-0 h-7 items-center gap-0 overflow-x-auto border-b border-border px-2">
+        <button type="button" aria-pressed={tab === "code"} onClick={() => setTab("code")} className={`flex h-7 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-xs ${tab==="code" ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
           <Code2 size={12} strokeWidth={1.6} /> Code
         </button>
-        <button onClick={() => setTab("inspect")} className={`flex h-7 items-center gap-1.5 border-b-2 px-2.5 text-xs ${tab==="inspect" ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+        <button type="button" aria-pressed={tab === "inspect"} onClick={() => setTab("inspect")} className={`flex h-7 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-xs ${tab==="inspect" ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
           <Eye size={12} strokeWidth={1.6} /> Inspect
         </button>
-        <button onClick={() => setTab("project")} className={`flex h-7 items-center gap-1.5 border-b-2 px-2.5 text-xs ${tab==="project" ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+        <button type="button" aria-pressed={tab === "project"} onClick={() => setTab("project")} className={`flex h-7 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-xs ${tab==="project" ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
           <FolderKanban size={12} strokeWidth={1.6} /> Project
         </button>
-        <button onClick={() => navigator.clipboard.writeText(JSON.stringify(project, null, 2))} className="ml-auto grid h-6 w-6 place-items-center rounded hover:bg-muted text-muted-foreground" title="Copy JSON">
+        <button type="button" aria-pressed={tab === "shopping"} onClick={() => setTab("shopping")} className={`flex h-7 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-xs ${tab==="shopping" ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+          <ShoppingCart size={12} strokeWidth={1.6} /> Parts
+        </button>
+        <button type="button" onClick={() => navigator.clipboard.writeText(JSON.stringify(project, null, 2))} className="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded hover:bg-muted text-muted-foreground" title="Copy JSON" aria-label="Copy project JSON">
           <Copy size={12} strokeWidth={1.6} />
         </button>
       </div>
@@ -35,8 +40,9 @@ export default function RightPanel() {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {tab === "code" && (
           <div className="flex flex-1 flex-col min-h-0">
-            <MonacoWorkspace />
-            {!active && <div className="border-t border-border bg-muted/30 px-2 py-1.5 text-[11px] text-muted-foreground">Select a board to bind firmware.</div>}
+            <Suspense fallback={<div className="flex h-full items-center justify-center bg-card text-xs text-muted-foreground">Loading firmware editor…</div>}>
+              <MonacoWorkspace />
+            </Suspense>
           </div>
         )}
         {tab === "inspect" && (
@@ -93,6 +99,7 @@ export default function RightPanel() {
             </div>
           </div>
         )}
+        {tab === "shopping" && <ShoppingWorkspace />}
       </div>
     </div>
   );

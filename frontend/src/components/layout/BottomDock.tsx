@@ -1,15 +1,18 @@
 import { useState, useRef, useEffect } from "react";
 import { useSimulationStore } from "../../store/useSimulationStore.ts";
 import { useProjectStore } from "../../store/useProjectStore.ts";
+import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
+import { useWebMCPStore } from "../../store/useWebMCPStore.ts";
+import { useValidationStore } from "../../store/useValidationStore.ts";
 import { getRegisteredToolNames } from "../../webmcp/tools.ts";
 import ValidationPanel from "../validation/ValidationPanel.tsx";
 import { Terminal, ChevronDown, Trash2 } from "lucide-react";
 
-type Tab = "webmcp" | "terminal" | "debug" | "validation";
-
 export default function BottomDock({ collapsed, onToggleCollapse, height }: { collapsed: boolean; onToggleCollapse: () => void; height: number }) {
-  const [tab, setTab] = useState<Tab>("webmcp");
-  const { running, serialOutput, pinStates, engineStatus } = useSimulationStore();
+  const tab = useWorkspaceStore((state) => state.bottomPanel);
+  const setTab = useWorkspaceStore((state) => state.setBottomPanel);
+  const { running, serialOutput, pinStates, engineStatus, lastRun } = useSimulationStore();
+  const { compile, codeIssues } = useValidationStore();
   const project = useProjectStore((s) => s.project);
   const toolNames = getRegisteredToolNames();
 
@@ -44,7 +47,7 @@ export default function BottomDock({ collapsed, onToggleCollapse, height }: { co
       <div className="flex-1 min-h-0 overflow-auto bg-card">
         {tab === "webmcp" && <WebMCPCLI toolNames={toolNames} />}
         {tab === "terminal" && <TerminalTab running={running} serialOutput={serialOutput} />}
-        {tab === "debug" && <DebugTab pinStates={pinStates} engineStatus={engineStatus} project={project} />}
+        {tab === "debug" && <DebugTab pinStates={pinStates} engineStatus={engineStatus} project={project} compile={compile} codeIssues={codeIssues} serialOutput={serialOutput} lastRun={lastRun} />}
         {tab === "validation" && <div className="p-2"><ValidationPanel embedded /></div>}
       </div>
     </div>
@@ -66,17 +69,19 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
   ]);
   const [input, setInput] = useState("");
   const [filter, setFilter] = useState("");
+  const activities = useWebMCPStore((state) => state.activities);
+  const clearActivities = useWebMCPStore((state) => state.clearActivities);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history, activities]);
 
   const filteredTools = toolNames.filter((t) => !filter || t.toLowerCase().includes(filter.toLowerCase()));
 
   const run = async () => {
     const raw = input.trim();
     if (!raw) return;
-    if (raw === "clear") { setHistory([]); setInput(""); return; }
+    if (raw === "clear") { setHistory([]); clearActivities(); setInput(""); return; }
     if (raw === "help" || raw === "list" || raw === "tools") {
       setHistory((h) => [...h, { cmd: raw, out: toolNames.join("\n") }]);
       setInput("");
@@ -109,12 +114,8 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
       return;
     }
     try {
-      const res = await fn(args);
-      const text = res?.content?.[0]?.text ?? JSON.stringify(res, null, 2);
-      setHistory((h) => [...h, { cmd: raw, out: text }]);
-    } catch (e: any) {
-      setHistory((h) => [...h, { cmd: raw, out: String(e?.message ?? e), isError: true }]);
-    }
+      await fn(args);
+    } catch {}
     setInput("");
   };
 
@@ -128,6 +129,18 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
               <span className="text-zinc-100 break-all">{h.cmd}</span>
             </div>
             <pre className={`ml-4 whitespace-pre-wrap break-words text-[11px] leading-relaxed ${h.isError ? "text-red-300" : "text-zinc-300"}`}>{h.out}</pre>
+          </div>
+        ))}
+        {[...activities].reverse().map((activity) => (
+          <div key={activity.id} className="space-y-1.5 border-t border-zinc-800 pt-1.5">
+            <div className="flex items-center gap-2">
+              <span className={activity.status === "error" ? "text-red-300" : activity.status === "running" ? "text-amber-300" : "text-emerald-400"}>{activity.status === "running" ? "·" : "✓"}</span>
+              <span className="text-zinc-100 break-all">{activity.name}</span>
+              <span className="ml-auto text-[10px] text-zinc-500">{activity.status}{activity.finishedAt ? ` · ${activity.finishedAt - activity.startedAt}ms` : ""}</span>
+            </div>
+            <pre className={`ml-4 whitespace-pre-wrap break-words text-[11px] leading-relaxed ${activity.status === "error" ? "text-red-300" : "text-zinc-300"}`}>
+              {JSON.stringify(activity.args)}{activity.resultText ? `\n${activity.resultText}` : ""}
+            </pre>
           </div>
         ))}
         <div ref={endRef} />
@@ -163,7 +176,7 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
           className="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
         />
         <button onClick={run} className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200">Run</button>
-        <button onClick={() => setHistory([])} className="text-xs px-2 py-1 rounded border border-zinc-700 hover:bg-zinc-800 text-zinc-400"><Trash2 size={11} /></button>
+        <button onClick={() => { setHistory([]); clearActivities(); }} className="text-xs px-2 py-1 rounded border border-zinc-700 hover:bg-zinc-800 text-zinc-400"><Trash2 size={11} /></button>
       </div>
       <div className="px-2 py-1 border-t border-zinc-800 bg-zinc-900 text-[11px] text-zinc-500 flex items-center gap-3">
         <span>Enter: run · Tab: autocomplete · clear: reset</span>
@@ -192,7 +205,7 @@ function TerminalTab({ running, serialOutput }: { running: boolean; serialOutput
   );
 }
 
-function DebugTab({ pinStates, engineStatus, project }: any) {
+function DebugTab({ pinStates, engineStatus, project, compile, codeIssues, serialOutput, lastRun }: any) {
   return (
     <div className="p-2 space-y-2 text-xs">
       <div className="grid grid-cols-2 gap-2">
@@ -219,6 +232,13 @@ function DebugTab({ pinStates, engineStatus, project }: any) {
       <div className="border border-border rounded p-2">
         <div className="font-medium mb-1">Project</div>
         <pre className="text-[11px] bg-muted p-2 rounded border border-border overflow-auto">{JSON.stringify({ id: project.id, components: project.components.length, connections: project.connections.length }, null, 2)}</pre>
+      </div>
+      <div className="border border-border rounded p-2">
+        <div className="font-medium mb-1">Firmware runtime</div>
+        <div className="flex items-center justify-between text-xs"><span className="text-muted-foreground">Compile</span><span className="font-mono">{compile.status}</span></div>
+        {compile.boardFqbn && <div className="mt-1 font-mono text-[10px] text-muted-foreground">{compile.boardFqbn}</div>}
+        <div className="mt-1 text-xs text-muted-foreground">{codeIssues.length} source diagnostic(s) · serial {serialOutput.length} chars</div>
+        {lastRun && <div className="mt-2 rounded border border-border bg-muted/20 p-2 text-[11px]"><div className="flex justify-between"><span className="text-muted-foreground">Last run</span><span className="font-mono">{lastRun.status}</span></div><div className="mt-1 text-muted-foreground">{lastRun.programs.length} firmware target(s) · {lastRun.events.length} signal event(s) · {lastRun.resolvedNets} net(s)</div></div>}
       </div>
     </div>
   );

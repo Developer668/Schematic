@@ -73,9 +73,9 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="settings-shell min-h-screen bg-background text-foreground flex flex-col overflow-y-auto">
+    <div className="settings-shell h-screen min-h-0 bg-background text-foreground flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="h-[52px] border-b border-border flex items-center justify-between px-4 bg-card/95 backdrop-blur-md sticky top-0 z-30">
+      <header className="h-[52px] shrink-0 border-b border-border flex items-center justify-between px-4 bg-card/95 backdrop-blur-md z-30">
         <div className="flex items-center gap-3">
           <Link to="/studio" className="w-8 h-8 rounded-lg border border-border hover:bg-muted flex items-center justify-center transition-colors">
             <ArrowLeft size={14} />
@@ -92,10 +92,14 @@ export default function SettingsPage() {
           <Link to="/studio" className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 font-medium">
             Back to Studio
           </Link>
+          <Link to="/parts" className="hidden text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted font-medium sm:inline-flex">
+            Parts
+          </Link>
         </div>
       </header>
 
-      <div className="flex-1 max-w-[1180px] w-full mx-auto p-4 md:p-6 space-y-4 animate-fadeIn">
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <div className="max-w-[1180px] w-full mx-auto p-4 md:p-6 space-y-4 animate-fadeIn">
         {/* Intro */}
         <div className="rounded-lg border border-border bg-card p-5 md:p-6 flex flex-col md:flex-row gap-4 items-start shadow-sm">
           <div className="w-11 h-11 rounded-md border border-border bg-muted flex items-center justify-center shrink-0">
@@ -161,6 +165,9 @@ export default function SettingsPage() {
                     <div className="text-[11px] text-muted-foreground">Subtle 24px lines in the world canvas</div>
                   </div>
                   <button
+                    type="button"
+                    aria-label="Toggle drafting line grid"
+                    aria-pressed={lineGrid}
                     onClick={() => setLineGrid(!lineGrid)}
                     className={`w-10 h-6 rounded-full p-0.5 transition-colors ${lineGrid ? "bg-primary" : "bg-muted border border-border"}`}
                   >
@@ -173,6 +180,9 @@ export default function SettingsPage() {
                     <div className="text-[11px] text-muted-foreground">Keeps components aligned</div>
                   </div>
                   <button
+                    type="button"
+                    aria-label="Toggle snap to grid"
+                    aria-pressed={snapGrid}
                     onClick={() => setSnapGrid(!snapGrid)}
                     className={`w-10 h-6 rounded-full p-0.5 transition-colors ${snapGrid ? "bg-primary" : "bg-muted border border-border"}`}
                   >
@@ -325,8 +335,8 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <Link to="/" className="flex-1 text-xs py-2 rounded-xl bg-card border border-border hover:bg-muted text-center">Open Studio</Link>
-                <a href="https://github.com/anomalyco/opencode" target="_blank" className="flex-1 text-xs py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-center">Feedback</a>
+                <Link to="/studio" className="flex-1 text-xs py-2 rounded-xl bg-card border border-border hover:bg-muted text-center">Open Studio</Link>
+                <a href="https://github.com/Developer668/Schematic" target="_blank" rel="noreferrer" className="flex-1 text-xs py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-center">Feedback</a>
               </div>
             </div>
           </div>
@@ -335,7 +345,8 @@ export default function SettingsPage() {
         <div className="text-center text-[11px] text-muted-foreground py-4">
           Dark black default · Animations on every panel · Dotted world · No emoji — lucide icons only.
         </div>
-      </div>
+        </div>
+      </main>
     </div>
   );
 }

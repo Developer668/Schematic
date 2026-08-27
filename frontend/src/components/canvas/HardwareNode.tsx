@@ -55,6 +55,7 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
     const entry = Object.entries(pinStates).find(([key]) => key.endsWith(`:${suffix}`));
     return typeof entry?.[1] === "number" ? entry[1] : fallback;
   };
+  const liveOutput = Object.entries(pinStates).some(([key, value]) => key.startsWith(`${data.instanceId}:`) && /:(IN|OUT|R|G|B|P\d+)$/.test(key) && value === true);
   const visualHeight = compact ? 108 : display ? Math.max(138, rows * 22 + 20) : Math.min(320, Math.max(142, rows * 22 + 30));
 
   return (
@@ -77,6 +78,7 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
         <div className="hardware-part-selection" />
         <div className="hardware-part-shadow" />
         <ComponentArtwork definition={def} className="hardware-part-artwork" />
+        {(def?.category === "actuator" || def?.id === "led" || def?.id === "active-buzzer" || def?.id === "buzzer") && <div className={`hardware-live-output ${liveOutput ? "is-on" : ""}`} aria-live="polite"><span className="hardware-live-output-dot" />{liveOutput ? "ACTIVE" : "IDLE"}</div>}
         {data.definitionId === "ssd1306" && (
           <div className={`hardware-live-display ${running ? "is-running" : ""}`} aria-live="polite">
             <header><span>ENVIRONMENT</span><b>{running ? "LIVE" : "STANDBY"}</b></header>

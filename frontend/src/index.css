@@ -191,6 +191,10 @@ body {
 .hardware-live-readings > span { color: #bfdbfe; font-size: 6px; line-height: 1.5; white-space: nowrap; }
 .hardware-live-readings footer { grid-column: 1 / -1; margin-top: 3px; color: #64748b; font-size: 5px; letter-spacing: .04em; }
 .hardware-live-standby { display: grid; height: calc(100% - 12px); place-items: center; color: #64748b; font-size: 7px; letter-spacing: .16em; }
+.hardware-live-output { position: absolute; z-index: 3; right: 28px; bottom: 16px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid hsl(var(--border)); border-radius: 999px; padding: 3px 5px; color: hsl(var(--muted-foreground)); background: hsl(var(--card) / .9); font: 700 7px/1 ui-monospace, monospace; letter-spacing: .08em; pointer-events: none; }
+.hardware-live-output-dot { width: 5px; height: 5px; border-radius: 50%; background: hsl(var(--muted-foreground) / .45); }
+.hardware-live-output.is-on { color: rgb(5 150 105); border-color: rgb(16 185 129 / .45); background: rgb(16 185 129 / .1); }
+.hardware-live-output.is-on .hardware-live-output-dot { background: rgb(16 185 129); box-shadow: 0 0 9px rgb(16 185 129 / .9); }
 .hardware-node:hover .hardware-part-artwork { transform: rotateX(1deg) translateY(-2px); filter: drop-shadow(0 10px 8px hsl(240 20% 4% / .30)); }
 .hardware-pin { position: absolute; z-index: 4; display: flex; align-items: center; transform: translateY(-50%); }
 .hardware-pin-left { left: 13px; flex-direction: row-reverse; }.hardware-pin-right { right: 13px; }
@@ -208,6 +212,10 @@ body {
 /* Quiet hardware drafting surface. */
 .world-grid { background-color: hsl(var(--background)); }
 .run-error { position: absolute; z-index: 7; left: 50%; bottom: 12px; max-width: min(560px, calc(100% - 30px)); transform: translateX(-50%); padding: 7px 10px; border: 1px solid rgb(239 68 68 / .35); border-radius: 6px; color: rgb(248 113 113); background: hsl(var(--card)); font-size: 11px; }
+.workbench-resize-handle { position: relative; width: 8px; flex: none; align-items: stretch; justify-content: center; cursor: col-resize; background: hsl(var(--border) / .35); touch-action: none; }
+.workbench-resize-handle::after { content: ""; width: 2px; height: 34px; align-self: center; border-radius: 999px; background: hsl(var(--muted-foreground) / .35); transition: background-color 120ms ease, height 120ms ease; }
+.workbench-resize-handle:hover, .workbench-resize-handle:focus-visible { background: hsl(var(--accent) / .1); outline: none; }
+.workbench-resize-handle:hover::after, .workbench-resize-handle:focus-visible::after { height: 52px; background: hsl(var(--accent)); }
 
 /* cursor fix */
 .react-flow__pane { cursor: grab }
@@ -337,3 +345,11 @@ html.light .react-flow__pane {
 
 /* monaco */
 .monaco-editor { --vscode-editor-background: transparent !important }
+
+@media print {
+  html, body { overflow: visible !important; background: white !important; color: #111827 !important; }
+  .parts-page, .parts-page-main, .parts-page-card, .parts-page-shopping { height: auto !important; min-height: 0 !important; overflow: visible !important; }
+  .parts-print-hidden { display: none !important; }
+  .parts-page .shopping-results-scroll { overflow: visible !important; }
+  .parts-page .bg-card { background: white !important; box-shadow: none !important; }
+}

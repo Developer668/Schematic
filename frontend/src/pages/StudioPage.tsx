@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import HardwareCanvas from "../components/canvas/HardwareCanvas.tsx";
 import RightPanel from "../components/layout/RightPanel.tsx";
@@ -14,7 +14,7 @@ import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { catalog, categories as allCategories } from "../data/catalog.ts";
 import ComponentArtwork from "../components/ComponentArtwork.tsx";
 import LogoMark from "../components/LogoMark.tsx";
-import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom } from "lucide-react";
+import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check } from "lucide-react";
 
 function ThemeIcon({ theme }: { theme: string }) {
   return theme === "dark" ? (
@@ -31,34 +31,94 @@ function ThemeIcon({ theme }: { theme: string }) {
 
 export default function StudioPage() {
   const { results, search, setCategory, category } = useComponentCatalogStore();
-  const { addComponent, project, clear } = useProjectStore();
+  const { addComponent, project, projects, activeProjectId, clear, createProject, duplicateProject, switchProject, deleteProject, renameProject } = useProjectStore();
   const running = useSimulationStore((state) => state.running);
   const { theme, toggle } = useThemeStore();
-  const libraryDensity = useWorkspaceStore((s) => s.libraryDensity);
+  const libraryDensity = useWorkspaceStore((state) => state.libraryDensity);
+  const bottomCollapsed = useWorkspaceStore((state) => state.bottomCollapsed);
+  const bottomHeight = useWorkspaceStore((state) => state.bottomHeight);
+  const rightPanelWidth = useWorkspaceStore((state) => state.rightPanelWidth);
+  const setBottomCollapsed = useWorkspaceStore((state) => state.setBottomCollapsed);
+  const setBottomHeight = useWorkspaceStore((state) => state.setBottomHeight);
+  const setRightPanelWidth = useWorkspaceStore((state) => state.setRightPanelWidth);
 
   const [query, setQuery] = useState("");
   const [activeCat, setActiveCat] = useState<string | null>(category);
   const [orgFilter, setOrgFilter] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showProjectMenu, setShowProjectMenu] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState("");
   const [runError, setRunError] = useState("");
 
   const [leftCollapsed, setLeftCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   const [rightCollapsed, setRightCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
-  const [bottomCollapsed, setBottomCollapsed] = useState(false);
-  const [bottomHeight, setBottomHeight] = useState(224);
-  const isResizingRef = useRef(false);
+  const isBottomResizingRef = useRef(false);
+  const isRightResizingRef = useRef(false);
+  const projectClickTimerRef = useRef<number | null>(null);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
   const toolNames = getRegisteredToolNames();
+
+  useEffect(() => {
+    if (!showProjectMenu) return;
+    const close = (event: MouseEvent) => {
+      if (!projectMenuRef.current?.contains(event.target as Node)) {
+        if (projectClickTimerRef.current !== null) window.clearTimeout(projectClickTimerRef.current);
+        projectClickTimerRef.current = null;
+        setShowProjectMenu(false);
+      }
+    };
+    window.addEventListener("mousedown", close);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      if (projectClickTimerRef.current !== null) window.clearTimeout(projectClickTimerRef.current);
+    };
+  }, [showProjectMenu]);
 
   const doRun = async () => {
     setRunError("");
-    const result = await invokeWebMCPTool("simulation.run", { durationMs: 1000 });
-    if (result?.isError) setRunError(result.content?.[0]?.text ?? "Simulation failed");
+    try {
+      const result = await invokeWebMCPTool("simulation.run", { durationMs: 1000 });
+      if (result?.isError) setRunError(result.content?.[0]?.text ?? "Simulation failed");
+    } catch (error) {
+      setRunError(`Simulation failed: ${(error as Error).message}`);
+    }
   };
 
-  const doStop = async () => { await invokeWebMCPTool("simulation.stop"); };
+  const doStop = async () => {
+    try { await invokeWebMCPTool("simulation.stop"); }
+    catch (error) { setRunError(`Could not stop simulation: ${(error as Error).message}`); }
+  };
 
   const handleSearch = (v: string) => { setQuery(v); search(v); };
   const handleCategory = (c: string | null) => { setActiveCat(c); setCategory(c); };
+
+  const beginProjectRename = (item: { id: string; name: string }) => {
+    if (projectClickTimerRef.current !== null) window.clearTimeout(projectClickTimerRef.current);
+    projectClickTimerRef.current = null;
+    setEditingProjectId(item.id);
+    setEditingProjectName(item.name);
+  };
+
+  const switchProjectFromMenu = (item: { id: string }) => {
+    if (projectClickTimerRef.current !== null) window.clearTimeout(projectClickTimerRef.current);
+    projectClickTimerRef.current = window.setTimeout(() => {
+      switchProject(item.id);
+      setShowProjectMenu(false);
+      projectClickTimerRef.current = null;
+    }, 220);
+  };
+
+  const cancelProjectRename = () => {
+    setEditingProjectId(null);
+    setEditingProjectName("");
+  };
+
+  const commitProjectRename = () => {
+    if (!editingProjectId) return;
+    if (editingProjectName.trim()) renameProject(editingProjectId, editingProjectName);
+    cancelProjectRename();
+  };
 
   const manufacturers = useMemo(() => {
     const m = new Map<string, number>();
@@ -87,25 +147,102 @@ export default function StudioPage() {
   };
 
   const onResizeStart = (e: React.MouseEvent) => {
-    isResizingRef.current = true;
+    isBottomResizingRef.current = true;
     const sy = e.clientY, sh = bottomHeight;
-    const onMove = (ev: MouseEvent) => { if (isResizingRef.current) setBottomHeight(Math.min(360, Math.max(140, sh + (sy - ev.clientY)))); };
-    const onUp = () => { isResizingRef.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    const onMove = (ev: MouseEvent) => { if (isBottomResizingRef.current) setBottomHeight(Math.min(360, Math.max(140, sh + (sy - ev.clientY)))); };
+    const onUp = () => { isBottomResizingRef.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+  };
+
+  const onRightResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    isRightResizingRef.current = true;
+    const startX = event.clientX;
+    const startWidth = rightPanelWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const onMove = (moveEvent: PointerEvent) => {
+      if (isRightResizingRef.current) setRightPanelWidth(startWidth + startX - moveEvent.clientX);
+    };
+    const onUp = () => {
+      isRightResizingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   };
 
   return (
     <div className="workbench flex h-screen flex-col overflow-hidden bg-background text-foreground select-none">
-      <header className="workbench-header h-11 shrink-0 border-b border-border px-3">
-        <div className="flex min-w-0 items-center gap-3">
+      <header className="workbench-header relative z-40 h-11 shrink-0 gap-2 border-b border-border px-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <Link to="/" className="flex items-center gap-1.5">
             <span className="brand-mark"><LogoMark /></span>
             <span className="hidden text-[13px] font-semibold tracking-[-0.025em] sm:inline">Schematic</span>
           </Link>
           <span className="hidden h-4 w-px bg-border md:block" />
-          <div className="hidden min-w-0 items-center gap-2 md:flex">
-            <span className="truncate text-xs font-medium">{project.name}</span>
+          <div className="relative hidden min-w-0 shrink items-center gap-2 md:flex" ref={projectMenuRef}>
+            <button
+              type="button"
+              onClick={() => setShowProjectMenu((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={showProjectMenu}
+              className="flex min-w-0 items-center gap-1 rounded px-1.5 py-1 text-xs font-medium hover:bg-muted"
+              title="Switch project"
+            >
+              <span className="max-w-[190px] truncate">{project.name}</span>
+              <ChevronDown size={11} className={`shrink-0 transition-transform ${showProjectMenu ? "rotate-180" : ""}`} />
+            </button>
             <span className="status-pill">Saved locally</span>
+            {showProjectMenu && (
+              <div role="menu" className="absolute left-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+                <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                  <div><div className="kicker">Projects</div><div className="text-[11px] text-muted-foreground">Double-click a name to rename</div></div>
+                  <span className="count-badge">{projects.length}</span>
+                </div>
+                <div className="max-h-[min(16rem,calc(100vh-10rem))] overflow-auto p-1">
+                  {projects.map((item) => editingProjectId === item.id ? (
+                    <div key={item.id} className="flex w-full items-center gap-2 rounded bg-muted px-2.5 py-2">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                      <input
+                        autoFocus
+                        value={editingProjectName}
+                        onChange={(event) => setEditingProjectName(event.target.value)}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") commitProjectRename();
+                          if (event.key === "Escape") cancelProjectRename();
+                        }}
+                        onBlur={commitProjectRename}
+                        aria-label={`Rename ${item.name}`}
+                        className="min-w-0 flex-1 select-text rounded border border-border bg-background px-1.5 py-1 text-xs font-medium outline-none focus:border-foreground/40 focus:ring-2 focus:ring-ring/10"
+                      />
+                      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={commitProjectRename} className="grid h-6 w-6 shrink-0 place-items-center rounded border border-border hover:bg-background" aria-label="Save project name"><Check size={12} /></button>
+                    </div>
+                  ) : (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => switchProjectFromMenu(item)}
+                      className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left hover:bg-muted ${item.id === activeProjectId ? "bg-muted" : ""}`}
+                    >
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${item.id === activeProjectId ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+                      <span className="min-w-0 flex-1" onDoubleClick={(event) => { event.stopPropagation(); beginProjectRename(item); }} title="Double-click to rename"><span className="block truncate text-xs font-medium">{item.name}</span><span className="block text-[10px] text-muted-foreground">{item.components.length} comps · {item.connections.length} wires</span></span>
+                      {item.id === activeProjectId && <span className="text-[10px] text-emerald-600 dark:text-emerald-400">active</span>}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-1 border-t border-border bg-muted/20 p-1.5">
+                  <button type="button" onClick={() => { createProject(`Project ${projects.length + 1}`); setShowProjectMenu(false); }} className="flex flex-1 items-center justify-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] hover:bg-muted"><Plus size={11} /> New</button>
+                  <button type="button" onClick={() => { duplicateProject(); setShowProjectMenu(false); }} className="flex flex-1 items-center justify-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] hover:bg-muted"><Copy size={11} /> Duplicate</button>
+                  <button type="button" disabled={projects.length <= 1} onClick={() => { deleteProject(); setShowProjectMenu(false); }} className="flex items-center justify-center rounded border border-border px-2 py-1.5 text-[11px] text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 dark:hover:bg-red-950/20" title="Delete current project"><Trash2 size={11} /></button>
+                </div>
+              </div>
+            )}
           </div>
           <div className="hidden items-center gap-1 lg:flex">
             <button aria-label="Toggle component library" title="Toggle component library" onClick={() => setLeftCollapsed(v => !v)} className={`workspace-icon-button ${!leftCollapsed ? "is-active" : ""}`}>
@@ -114,7 +251,7 @@ export default function StudioPage() {
             <button aria-label="Toggle code panel" title="Toggle code panel" onClick={() => setRightCollapsed(v => !v)} className={`workspace-icon-button hidden xl:grid ${!rightCollapsed ? "is-active" : ""}`}>
               <PanelRight size={13} strokeWidth={1.8} />
             </button>
-            <button aria-label="Toggle bottom panel" title="Toggle bottom panel" onClick={() => setBottomCollapsed(v => !v)} className={`workspace-icon-button ${!bottomCollapsed ? "is-active" : ""}`}>
+          <button aria-label="Toggle bottom panel" title="Toggle bottom panel" onClick={() => setBottomCollapsed(!bottomCollapsed)} className={`workspace-icon-button ${!bottomCollapsed ? "is-active" : ""}`}>
               <PanelBottom size={13} strokeWidth={1.8} />
             </button>
           </div>
@@ -127,6 +264,9 @@ export default function StudioPage() {
           </button>
           <Link to="/settings" className="secondary-button hidden sm:inline-flex">
             <Settings size={12} strokeWidth={1.8} /> Settings
+          </Link>
+          <Link to="/parts" className="secondary-button hidden md:inline-flex">
+            <ShoppingCart size={12} strokeWidth={1.8} /> Parts
           </Link>
           <button onClick={() => setShowImport(true)} className="secondary-button hidden sm:inline-flex">Import</button>
           <button onClick={() => triggerDownloadVlx(project.name)} className="secondary-button hidden md:inline-flex">
@@ -162,7 +302,7 @@ export default function StudioPage() {
                 <input
                   value={query}
                   onChange={(e) => handleSearch(e.target.value)}
-                  placeholder="Search 48+ parts and boards"
+                  placeholder="Search parts and boards"
                   aria-label="Search component library"
                   className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:border-foreground/30 focus:outline-none focus:ring-2 focus:ring-ring/10"
                 />
@@ -261,18 +401,36 @@ export default function StudioPage() {
             </button>
           )}
           <div className="relative min-h-0 flex-1">
-            <HardwareCanvas />
+            <HardwareCanvas key={project.id} />
             {runError && <div className="run-error" role="alert">{runError}</div>}
           </div>
           {!bottomCollapsed && <div onMouseDown={onResizeStart} className="h-px bg-border hover:bg-foreground/20 cursor-row-resize shrink-0" />}
-          <BottomDock collapsed={bottomCollapsed} onToggleCollapse={() => setBottomCollapsed(v => !v)} height={bottomHeight} />
+          <BottomDock collapsed={bottomCollapsed} onToggleCollapse={() => setBottomCollapsed(!bottomCollapsed)} height={bottomHeight} />
         </main>
 
         {/* RIGHT — compact 300px */}
         {!rightCollapsed ? (
-          <aside className="panel-enter hidden w-[360px] shrink-0 flex-col border-l border-border bg-card xl:flex">
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize code panel"
+              aria-valuemin={300}
+              aria-valuemax={720}
+              aria-valuenow={Math.round(rightPanelWidth)}
+              tabIndex={0}
+              onPointerDown={onRightResizeStart}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft") setRightPanelWidth(rightPanelWidth + 16);
+                if (event.key === "ArrowRight") setRightPanelWidth(rightPanelWidth - 16);
+              }}
+              className="workbench-resize-handle hidden xl:flex"
+              title="Drag to resize the code panel"
+            />
+            <aside style={{ width: `${rightPanelWidth}px` }} className="panel-enter hidden shrink-0 flex-col border-l border-border bg-card xl:flex">
             <RightPanel />
-          </aside>
+            </aside>
+          </>
         ) : (
           <div className="hidden xl:flex w-7 shrink-0 flex-col items-center gap-1.5 border-l border-border bg-card py-1.5">
             <button onClick={() => setRightCollapsed(false)} className="grid h-6 w-6 place-items-center rounded bg-foreground text-background">

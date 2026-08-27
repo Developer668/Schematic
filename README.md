@@ -8,7 +8,7 @@
   [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-f97316.svg)](LICENSE)
   [![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
   [![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688.svg)](https://fastapi.tiangolo.com/)
-  [![WebMCP](https://img.shields.io/badge/WebMCP-20_tools-8b5cf6.svg)](frontend/src/webmcp/tools.ts)
+  [![WebMCP](https://img.shields.io/badge/WebMCP-42_tools-8b5cf6.svg)](frontend/src/webmcp/tools.ts)
 </div>
 
 ---
@@ -21,7 +21,7 @@ Schematic combines a visual hardware canvas, component catalog, firmware editor,
 - Recognizable artwork for boards, sensors, displays, and modules
 - Firmware editing with Monaco
 - Inspector, project explorer, validation, terminal, and debug panels
-- 20 WebMCP tools for project, component, wiring, firmware, and simulation operations
+- 42 WebMCP tools for project, component, wiring, firmware, simulation, workspace, and parts procurement operations
 - FastAPI backend with honest local engine availability reporting
 - Portable JSON-based project format
 

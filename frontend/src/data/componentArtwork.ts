@@ -2,6 +2,7 @@ import type { CatalogComponent } from "./catalog.ts";
 
 const artworkAliases: Record<string, string> = {
   "esp32-s3": "esp32-devkit-v1.svg",
+  "active-buzzer": "buzzer.svg",
   esp32: "esp32-board.svg",
   "raspberry-pi-pico-w": "raspberry-pi-pico-w.svg",
   "raspberry-pi-pico": "raspberry-pi-pico.svg",

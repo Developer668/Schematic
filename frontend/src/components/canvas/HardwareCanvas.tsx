@@ -79,7 +79,9 @@ export default function HardwareCanvas() {
   const project = useProjectStore((s) => s.project);
   const connectPorts = useProjectStore((s) => s.connectPorts);
   const moveComponent = useProjectStore((s) => s.moveComponent);
-  const { showGrid, setShowGrid, snapToGrid } = useWorkspaceStore();
+  const showGrid = useWorkspaceStore((state) => state.showGrid);
+  const setShowGrid = useWorkspaceStore((state) => state.setShowGrid);
+  const snapToGrid = useWorkspaceStore((state) => state.snapToGrid);
   const { nodes: initialNodes, edges: initialEdges } = useMemo(() => projectToFlow(project), [project]);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -93,14 +95,12 @@ export default function HardwareCanvas() {
     if (!initialNodes.length) return;
     const timer = window.setTimeout(() => flowRef.current?.fitView({ padding: 0.16, maxZoom: 1 }), 120);
     return () => window.clearTimeout(timer);
-  }, [initialNodes.length]);
+  }, [project.id, initialNodes.length]);
 
-  if (nodes.length !== initialNodes.length || edges.length !== initialEdges.length) {
-    queueMicrotask(() => {
-      setNodes(initialNodes);
-      setEdges(initialEdges);
-    });
-  }
+  useEffect(() => {
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
 
   const onConnect = useCallback(
     (params: FlowConnection) => {
