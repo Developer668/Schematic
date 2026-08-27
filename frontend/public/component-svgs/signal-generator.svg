@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="40" viewBox="0 0 64 40" xmlns="http://www.w3.org/2000/svg" >
+
+  <defs>
+    <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.22"/>
+    </linearGradient>
+    <linearGradient id="leadGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#8a8a8a"/>
+      <stop offset="50%" stop-color="#e0e0e0"/>
+      <stop offset="100%" stop-color="#9a9a9a"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.2" stdDeviation="0.8" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <rect x="4" y="6" width="56" height="28" rx="2.2" fill="#111827" stroke="#1f2937" stroke-width="0.6" filter="url(#softShadow)"/>
+  <rect x="6" y="8" width="52" height="24" rx="1.4" fill="#1f2937"/>
+  <rect x="8" y="10" width="28" height="14" rx="1" fill="#000"/>
+  <path d="M10 18 C12 12 14 22 16 18 C18 14 20 22 22 18 C24 14 26 22 28 18 C30 14 32 22 34 18" fill="none" stroke="#22c55e" stroke-width="0.65" stroke-linecap="round"/>
+  <circle cx="46" cy="15" r="3.4" fill="#374151" stroke="#4b5563" stroke-width="0.35"/>
+  <circle cx="46" cy="15" r="0.9" fill="#e5e7eb"/>
+  <rect x="45.6" y="11.2" width="0.8" height="2" rx="0.3" fill="#f1f5f9"/>
+  <text x="46" y="28.5" text-anchor="middle" font-family="monospace" font-size="1.7" font-weight="600" fill="#e5e7eb">FREQ</text>
+  <circle cx="18" cy="31.5" r="1.8" fill="#e5e7eb" stroke="#6b7280" stroke-width="0.3"/>
+  <circle cx="26" cy="31.5" r="1.8" fill="#111" stroke="#374151" stroke-width="0.3"/>
+  <text x="18" y="36.5" text-anchor="middle" font-family="monospace" font-size="1.25" fill="#e2e8f0">OUT</text>
+  <text x="26" y="36.5" text-anchor="middle" font-family="monospace" font-size="1.25" fill="#e2e8f0">SYNC</text>
+</svg>

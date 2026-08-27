@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="56" viewBox="0 0 64 56" xmlns="http://www.w3.org/2000/svg" >
+
+  <defs>
+    <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.22"/>
+    </linearGradient>
+    <linearGradient id="leadGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#8a8a8a"/>
+      <stop offset="50%" stop-color="#e0e0e0"/>
+      <stop offset="100%" stop-color="#9a9a9a"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.2" stdDeviation="0.8" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <rect x="15.0" y="12.0" width="34" height="32" rx="1.6" fill="#0f1115" stroke="#1f2937" stroke-width="0.5"/>
+    <rect x="15.0" y="12.0" width="34" height="32" rx="1.6" fill="url(#bodyGrad)" opacity="0.18"/>
+    <rect x="16.2" y="13.8" width="31.6" height="1.2" rx="0.4" fill="#1f2937" opacity="0.9"/>
+  </g>
+  <rect x="9.0" y="14.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="49.0" y="14.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="9.0" y="18.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="49.0" y="18.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="9.0" y="22.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="49.0" y="22.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="9.0" y="26.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="49.0" y="26.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="9.0" y="30.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="49.0" y="30.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="9.0" y="34.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="49.0" y="34.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="9.0" y="38.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+<rect x="49.0" y="38.0" width="6" height="3.2" rx="0.5" fill="#c8c8c8" stroke="#8a8a8a" stroke-width="0.28"/>
+
+  <path d="M29.0 12.0 A3 3 0 0 0 35.0 12.0 Z" fill="#0f172a" opacity="0.95"/>
+<circle cx="18.2" cy="15.2" r="0.9" fill="#e5e7eb" opacity="0.95"/>
+  <text x="32.0" y="27.0" text-anchor="middle" font-family="monospace" font-size="3.2" font-weight="700" fill="#f3f4f6">74HC00</text>
+  <text x="32.0" y="32.5" text-anchor="middle" font-family="monospace" font-size="1.7" fill="#9ca3af">QUAD NAND</text>
+</svg>
