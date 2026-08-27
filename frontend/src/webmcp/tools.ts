@@ -323,7 +323,61 @@ const tools: ToolDef[] = [
 
 let controllers: AbortController[] = [];
 
+/** Chrome WebMCP Bridge reads navigator.modelContextTesting (consumer API). */
+function installModelContextTestingPolyfill() {
+  const nav = navigator as any;
+  if (nav.modelContextTesting?.listTools && nav.modelContextTesting?.executeTool) return;
+  Object.defineProperty(nav, "modelContextTesting", {
+    configurable: true,
+    value: {
+      listTools() {
+        return tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: JSON.stringify(t.inputSchema ?? { type: "object" }),
+        }));
+      },
+      async executeTool(toolName: string, inputArgsJson: string) {
+        const tool = tools.find((candidate) => candidate.name === toolName);
+        if (!tool) throw new Error(`Unknown WebMCP tool: ${toolName}`);
+        const args = inputArgsJson ? JSON.parse(inputArgsJson) : {};
+        const result = await tool.execute(args);
+        return typeof result === "string" ? result : JSON.stringify(result ?? null);
+      },
+      registerToolsChangedCallback(callback: () => void) {
+        callback();
+      },
+    },
+  });
+}
+
+function installModelContextProducerPolyfill() {
+  const doc = document as any;
+  const nav = navigator as any;
+  if (typeof doc.modelContext?.registerTool === "function" || typeof nav.modelContext?.registerTool === "function") return;
+  const registry = new Map<string, ToolDef>();
+  const mc = {
+    async registerTool(tool: ToolDef, options?: { signal?: AbortSignal }) {
+      registry.set(tool.name, tool);
+      options?.signal?.addEventListener("abort", () => registry.delete(tool.name));
+    },
+    async getTools() {
+      return [...registry.values()];
+    },
+    async executeTool(tool: string | { name: string }, args: Record<string, unknown> = {}) {
+      const name = typeof tool === "string" ? tool : tool.name;
+      const found = registry.get(name);
+      if (!found) throw new Error(`Unknown WebMCP tool: ${name}`);
+      return found.execute(args);
+    },
+  };
+  Object.defineProperty(doc, "modelContext", { configurable: true, value: mc });
+  Object.defineProperty(nav, "modelContext", { configurable: true, value: mc });
+}
+
 export async function registerWebMCPTools() {
+  installModelContextProducerPolyfill();
+  installModelContextTestingPolyfill();
   const mc: any = (document as any).modelContext ?? (navigator as any).modelContext;
   if (!mc || typeof mc.registerTool !== "function") {
     console.warn("[WebMCP] modelContext not available — run in Chrome ≥146 with #enable-webmcp-testing, or use demo shim. Tools still callable via window.__schematicTools");

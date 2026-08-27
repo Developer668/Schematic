@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "webmcp-server": {
+      "command": "/usr/local/bin/npx",
+      "args": ["-y", "webmcp-server"],
+      "env": {
+        "WEBMCP_BRIDGE_PORT": "12315"
+      }
+    }
+  }
+}
