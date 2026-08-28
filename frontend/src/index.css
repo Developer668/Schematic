@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@500;700&family=Geist+Mono:wght@500&family=Space+Grotesk:wght@500;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -307,8 +309,7 @@ html.light .react-flow__pane {
 .import-dropzone span { font-size: 11px; }
 
 /* Landing — premium editorial + ethereal glass */
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@500;700&family=Geist+Mono:wght@500&family=Space+Grotesk:wght@500;700&display=swap');
-.landing-shell { min-height: 100dvh; overflow-y: auto; background: #050508; color: #f5f6f8; font-family: 'Geist', 'Space Grotesk', system-ui, -apple-system, sans-serif; }
+.landing-shell { height: 100vh; height: 100dvh; min-height: 100dvh; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; background: #050508; color: #f5f6f8; font-family: 'Geist', 'Space Grotesk', system-ui, -apple-system, sans-serif; }
 .landing-shell a { color: inherit; text-decoration: none; }
 .landing-noise { position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.025; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E"); }
 .landing-mesh { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
@@ -384,8 +385,12 @@ html.light .react-flow__pane {
 .landing-board:hover img { transform: translateY(-3px) scale(1.02); }
 .landing-board span { padding: 4px 8px; border-radius: 999px; background: rgb(255 255 255 / .08); border: 1px solid rgb(255 255 255 / .06); backdrop-filter: blur(8px); font-size: 9px; letter-spacing: 0.04em; }
 .board-main { left: 14%; top: 34%; }.board-sensor { right: 8%; top: 12%; }.board-display { right: 7%; bottom: 10%; }
-.landing-wire { position: absolute; z-index: 1; width: 44%; height: 28%; border-top: 2px solid #60a5fa; border-right: 2px solid #60a5fa; border-radius: 0 20px 0 0; opacity: 0.9; filter: drop-shadow(0 2px 6px rgb(96 165 250 / .3)); }
-.wire-one { left: 34%; top: 36%; }.wire-two { left: 34%; top: 54%; border-color: #a1a1aa; opacity: 0.6; transform: scaleY(-1); }
+.landing-connections, .showcase-connections { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.landing-connection, .showcase-connection { fill: none; stroke-linecap: round; stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.landing-connection-signal, .showcase-connection-signal { stroke: #60a5fa; filter: drop-shadow(0 0 4px rgb(96 165 250 / .38)); }
+.landing-connection-power, .showcase-connection-power { stroke: #f59e0b; filter: drop-shadow(0 0 4px rgb(245 158 11 / .32)); }
+.landing-connection-dot { stroke: #0c0e12; stroke-width: 0.7; vector-effect: non-scaling-stroke; }
+.landing-connection-dot-main { fill: #60a5fa; }.landing-connection-dot-device { fill: #f59e0b; }
 .visual-caption { margin-top: 10px; text-align: center; color: #71717a; font: 500 11px 'Geist Mono', monospace; letter-spacing: 0.02em; }
 .landing-section { position: relative; z-index: 1; width: min(1160px, calc(100% - 32px)); margin: 0 auto; padding: 96px 0; border-top: 1px solid rgb(255 255 255 / .06); content-visibility: auto; contain-intrinsic-size: 800px; }
 .landing-section-head { max-width: 640px; }
@@ -422,10 +427,6 @@ html.light .react-flow__pane {
 .showcase-canvas { position: relative; height: 340px; background: #0c0e12; background-image: linear-gradient(rgb(255 255 255 / .03) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / .03) 1px, transparent 1px); background-size: 24px 24px; overflow: hidden; }
 .showcase-canvas img { position: absolute; width: 96px; height: 84px; object-fit: contain; filter: drop-shadow(0 12px 16px rgb(0 0 0 / .5)); transition: transform 400ms cubic-bezier(0.32,0.72,0,1); }
 .showcase-canvas img:hover { transform: scale(1.04) translateY(-2px); }
-.showcase-wire { position: absolute; border-top: 2px solid #60a5fa; border-right: 2px solid #60a5fa; border-radius: 0 16px 0 0; opacity: 0.8; }
-.showcase-wire.w1 { left: 30%; top: 32%; width: 38%; height: 26%; }
-.showcase-wire.w2 { left: 32%; top: 58%; width: 34%; height: 22%; border-color: #a1a1aa; opacity: 0.5; transform: scaleY(-1); }
-.showcase-wire.w3 { left: 48%; top: 44%; width: 22%; height: 18%; border-color: #22c55e; opacity: 0.5; }
 .showcase-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-top: 1px solid rgb(255 255 255 / .06); color: #71717a; font: 500 11px 'Geist Mono', monospace; }
 .mini-cta { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: #fff; color: #050508; font-weight: 700; font-size: 11px; }
 .showcase-side { display: grid; gap: 12px; }

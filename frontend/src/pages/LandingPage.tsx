@@ -120,8 +120,10 @@ export default function LandingPage() {
             </span>
           </Link>
           <button
+            type="button"
             aria-label={menuOpen ? "Close menu" : "Open menu"}
             aria-expanded={menuOpen}
+            aria-controls="landing-menu"
             onClick={() => setMenuOpen((v) => !v)}
             className="hamburger"
           >
@@ -132,7 +134,7 @@ export default function LandingPage() {
       </nav>
 
       {menuOpen && (
-        <div className="landing-menu">
+        <div id="landing-menu" className="landing-menu">
           <a href="#platform" onClick={() => setMenuOpen(false)} style={{ transitionDelay: "60ms" }}>
             Platform
           </a>
@@ -224,8 +226,20 @@ export default function LandingPage() {
                     </div>
                   </div>
                   <div className="landing-canvas">
-                    <div className="landing-wire wire-one" />
-                    <div className="landing-wire wire-two" />
+                    <svg className="landing-connections" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                      <path className="landing-connection landing-connection-power" d="M43 47 C 51 47, 53 22, 63 22" />
+                      <path className="landing-connection landing-connection-signal" d="M43 51 C 51 51, 54 29, 63 29" />
+                      <path className="landing-connection landing-connection-signal" d="M43 55 C 52 55, 55 72, 63 72" />
+                      <path className="landing-connection landing-connection-power" d="M43 59 C 52 59, 56 79, 63 79" />
+                      <circle className="landing-connection-dot landing-connection-dot-main" cx="43" cy="47" r="1.1" />
+                      <circle className="landing-connection-dot landing-connection-dot-main" cx="43" cy="51" r="1.1" />
+                      <circle className="landing-connection-dot landing-connection-dot-main" cx="43" cy="55" r="1.1" />
+                      <circle className="landing-connection-dot landing-connection-dot-main" cx="43" cy="59" r="1.1" />
+                      <circle className="landing-connection-dot landing-connection-dot-device" cx="63" cy="22" r="1.1" />
+                      <circle className="landing-connection-dot landing-connection-dot-device" cx="63" cy="29" r="1.1" />
+                      <circle className="landing-connection-dot landing-connection-dot-device" cx="63" cy="72" r="1.1" />
+                      <circle className="landing-connection-dot landing-connection-dot-device" cx="63" cy="79" r="1.1" />
+                    </svg>
                     <div className="landing-board board-main">
                       <img src="/component-svgs/esp32-board.svg" alt="" loading="lazy" />
                       <span>ESP32-C3 • 3V3/SDA/SCL</span>
@@ -344,9 +358,16 @@ export default function LandingPage() {
                 <img src="/component-svgs/mpu6050.svg" alt="" loading="lazy" style={{ left: "8%", top: "62%" }} />
                 <img src="/component-svgs/pir-motion-sensor.svg" alt="" loading="lazy" style={{ right: "12%", top: "14%" }} />
                 <img src="/component-svgs/ssd1306.svg" alt="" loading="lazy" style={{ right: "10%", bottom: "14%" }} />
-                <span className="showcase-wire w1" />
-                <span className="showcase-wire w2" />
-                <span className="showcase-wire w3" />
+                <svg className="showcase-connections" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  <path className="showcase-connection showcase-connection-signal" d="M34 40 C 48 40, 57 26, 72 26" />
+                  <path className="showcase-connection showcase-connection-signal" d="M24 74 C 41 74, 57 73, 74 73" />
+                  <path className="showcase-connection showcase-connection-power" d="M34 46 C 48 46, 58 73, 74 73" />
+                  <circle className="showcase-connection-dot" cx="34" cy="40" r="1.1" />
+                  <circle className="showcase-connection-dot" cx="24" cy="74" r="1.1" />
+                  <circle className="showcase-connection-dot" cx="34" cy="46" r="1.1" />
+                  <circle className="showcase-connection-dot" cx="72" cy="26" r="1.1" />
+                  <circle className="showcase-connection-dot" cx="74" cy="73" r="1.1" />
+                </svg>
               </div>
               <div className="showcase-foot">
                 <span>500 defs • all visible (no 80 cap) • search “bme280” → 1 result</span>
