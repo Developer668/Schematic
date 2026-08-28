@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "board": { "name": "ESP32 Dev Module", "fqbn": "esp32:esp32:esp32", "framework": "arduino" },
+  "firmware": { "contract": "button-led-contract", "entrypoint": "src/main.cpp" },
+  "pins": { "button": 4, "led": 2, "buttonMode": "INPUT_PULLUP", "activeWhen": "LOW" }
+}

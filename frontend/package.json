@@ -4,12 +4,16 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "predev": "pnpm --filter @schematic/firmware-harness verify:wasm",
     "dev": "vite",
+    "prebuild": "pnpm --filter @schematic/firmware-harness verify:wasm",
     "build": "vite build",
+    "prebuild:docker": "pnpm --filter @schematic/firmware-harness verify:wasm",
     "build:docker": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "pretest": "pnpm --filter @schematic/firmware-harness verify:wasm",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

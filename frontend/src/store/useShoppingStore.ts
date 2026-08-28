@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { getCurrentUserId } from "../auth/session.ts";
+import { getCatalogComponent } from "../data/catalog.ts";
 
 export interface PartOffer {
   id: string;
@@ -10,6 +11,14 @@ export interface PartOffer {
   url: string;
   availability?: string;
   fetchedAt: string;
+  provider: string;
+}
+
+export interface AgentProvenance {
+  source: "webmcp-agent";
+  provider: string;
+  agentId: string;
+  publishedAt: string;
 }
 
 export interface AlternativePart {
@@ -24,13 +33,21 @@ export interface ShoppingResult {
   catalogId: string;
   title: string;
   manufacturer?: string;
-  partNumber?: string;
+  partNumber: string;
   requestedQuantity: number;
   exactMatch: boolean;
   matchNote?: string;
   offers: PartOffer[];
   alternatives: AlternativePart[];
   updatedAt: string;
+  provenance: AgentProvenance;
+}
+
+export interface AgentPublication {
+  authenticated: true;
+  agentId: string;
+  provider: string;
+  publishedAt: string;
 }
 
 export interface CartLine {
@@ -45,9 +62,11 @@ export interface ShoppingState {
   cart: CartLine[];
   budget: number | null;
   lastSearchAt: number | null;
+  publicationError: string | null;
   undoStack: CartLine[][];
   setQuery: (query: string) => void;
   setResults: (results: ShoppingResult[]) => void;
+  publishAgentResults: (results: unknown, publication: AgentPublication) => { accepted: boolean; rejected: number; message?: string };
   addToCart: (resultId: string, quantity?: number) => void;
   removeFromCart: (resultId: string) => void;
   setQuantity: (resultId: string, quantity: number) => void;
@@ -64,6 +83,45 @@ const ANONYMOUS_STORAGE_KEY = "schematic-shopping";
 const shoppingChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("schematic-shopping-sync") : null;
 type PersistedShopping = Pick<ShoppingState, "query" | "results" | "cart" | "budget" | "lastSearchAt">;
 
+function validTimestamp(value: unknown) {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function validUrl(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch { return false; }
+}
+
+function validCurrency(value: unknown) {
+  return typeof value === "string" && /^[A-Z]{3}$/.test(value);
+}
+
+function validListing(value: unknown): value is ShoppingResult {
+  if (!value || typeof value !== "object") return false;
+  const result = value as ShoppingResult;
+  if (!result.id || !result.title || !getCatalogComponent(result.catalogId) || !result.partNumber || result.exactMatch !== true || !validTimestamp(result.updatedAt)) return false;
+  if (!result.provenance || result.provenance.source !== "webmcp-agent" || !result.provenance.agentId || !result.provenance.provider || !validTimestamp(result.provenance.publishedAt)) return false;
+  if (!Number.isInteger(result.requestedQuantity) || result.requestedQuantity < 1 || !Array.isArray(result.offers) || result.offers.length === 0) return false;
+  const retailers = new Set<string>();
+  return result.offers.every((offer) => {
+    if (!offer || typeof offer !== "object") return false;
+    const candidate = offer as Partial<PartOffer>;
+    if (typeof candidate.retailer !== "string" || typeof candidate.title !== "string" || typeof candidate.provider !== "string") return false;
+    const retailer = candidate.retailer.trim().toLowerCase();
+    const validPrice = candidate.price === null || (typeof candidate.price === "number" && Number.isFinite(candidate.price) && candidate.price >= 0);
+    if (retailers.has(retailer)) return false;
+    retailers.add(retailer);
+    return Boolean(candidate.id && candidate.retailer && candidate.title && candidate.provider === result.provenance.provider && validPrice && validCurrency(candidate.currency) && validUrl(candidate.url) && validTimestamp(candidate.fetchedAt));
+  });
+}
+
+function validPublication(value: AgentPublication) {
+  return Boolean(getCurrentUserId()) && value?.authenticated === true && Boolean(value.agentId?.trim()) && Boolean(value.provider?.trim()) && validTimestamp(value.publishedAt);
+}
+
 function storageKey() {
   const userId = getCurrentUserId();
   return userId && userId !== "local-development" ? ANONYMOUS_STORAGE_KEY + ":" + userId : ANONYMOUS_STORAGE_KEY;
@@ -77,7 +135,11 @@ function readState(): PersistedShopping {
   const fallback: PersistedShopping = { query: "", results: [], cart: [], budget: null, lastSearchAt: null };
   try {
     const raw = typeof localStorage !== "undefined" ? JSON.parse(localStorage.getItem(storageKey()) ?? "null") : null;
-    return raw && typeof raw === "object" ? { ...fallback, ...raw, results: Array.isArray(raw.results) ? raw.results : [], cart: Array.isArray(raw.cart) ? raw.cart : [] } : fallback;
+    const results = raw && typeof raw === "object" && Array.isArray(raw.results) ? raw.results.filter(validListing) : [];
+    const cart = raw && typeof raw === "object" && Array.isArray(raw.cart)
+      ? raw.cart.filter((line: CartLine) => results.some((result: ShoppingResult) => result.id === line.resultId))
+      : [];
+    return raw && typeof raw === "object" ? { ...fallback, ...raw, results, cart } : fallback;
   } catch { return fallback; }
 }
 
@@ -101,9 +163,36 @@ function cheapest(result: ShoppingResult) {
 const initial = readState();
 export const useShoppingStore = create<ShoppingState>((set, get) => ({
   ...initial,
+  publicationError: null,
   undoStack: [],
   setQuery(query) { set({ query }); persist(get()); },
-  setResults(results) { set({ results, lastSearchAt: Date.now() }); persist(get()); },
+  setResults() {
+    set({ results: [], cart: [], lastSearchAt: null, publicationError: "Parts shopping requires a connected, authenticated WebMCP agent. Unpublished or fallback listings were blocked." });
+    persist(get());
+  },
+  publishAgentResults(rawResults, publication) {
+    const results = Array.isArray(rawResults) ? rawResults : [];
+    if (!validPublication(publication)) {
+      set({ results: [], cart: [], lastSearchAt: null, publicationError: "Listing publication rejected: the WebMCP agent authentication or provider provenance is missing or invalid." });
+      persist(get());
+      return { accepted: false, rejected: results.length, message: get().publicationError ?? undefined };
+    }
+    const publishedAt = publication.publishedAt;
+    const normalized = results.filter((result): result is ShoppingResult => {
+      if (!validListing(result) || !result.provenance) return false;
+      return result.provenance.agentId === publication.agentId && result.provenance.provider === publication.provider && result.provenance.publishedAt === publishedAt;
+    });
+    const rejected = results.length - normalized.length;
+    if (normalized.length === 0) {
+      const message = "Listing publication rejected: every listing needs a canonical catalogId, exactMatch=true, part number, valid retailer URL, timestamp, currency, and provider provenance.";
+      set({ results: [], cart: [], lastSearchAt: null, publicationError: message });
+      persist(get());
+      return { accepted: false, rejected, message };
+    }
+    set({ results: normalized, cart: [], lastSearchAt: Date.now(), publicationError: rejected ? `${rejected} malformed listing${rejected === 1 ? " was" : "s were"} rejected; showing only authenticated exact listings.` : null });
+    persist(get());
+    return { accepted: true, rejected };
+  },
   addToCart(resultId, quantity = 1) {
     set((state) => {
       if (!state.results.some((result) => result.id === resultId && result.exactMatch)) return state;

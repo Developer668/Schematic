@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
-import { ExternalLink, RotateCcw, Search, ShoppingCart, Sparkles, Trash2, Undo2 } from "lucide-react";
+import { ExternalLink, RotateCcw, Search, ShoppingCart, Trash2, Undo2 } from "lucide-react";
 import { getCatalogComponent } from "../../data/catalog.ts";
-import { invokeWebMCPTool } from "../../webmcp/tools.ts";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useShoppingStore, type PartOffer, type ShoppingResult, type ShoppingState } from "../../store/useShoppingStore.ts";
 
@@ -53,7 +52,7 @@ function ResultCard({ result, cartLine, onAdd, onRemove, onQuantity, onOffer, on
           <button type="button" onClick={onAdd} disabled={!result.exactMatch} className="shrink-0 rounded bg-foreground px-2 py-1 text-[10px] font-semibold text-background hover:opacity-85 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground" title={result.exactMatch ? "Add exact catalog match" : "Review the part number before adding this listing"}>{result.exactMatch ? "Add" : "Review"}</button>
         )}
       </div>
-      <div className="border-t border-border bg-muted/20 px-2 py-1 text-[10px] leading-snug text-muted-foreground">{result.matchNote}</div>
+      {result.matchNote && <div className="border-t border-border bg-muted/20 px-2 py-1 text-[10px] leading-snug text-muted-foreground">{result.matchNote}</div>}
       <div className="border-t border-border">
         {result.offers.slice(0, 3).map((offer) => <OfferRow key={offer.id} offer={offer} selected={cartLine?.selectedOfferId === offer.id} onSelect={() => onOffer(offer.id)} />)}
       </div>
@@ -95,36 +94,23 @@ function CartSummary({ shopping, quote, onReset, detailed = false }: { shopping:
 export default function ShoppingWorkspace({ fullPage = false }: { fullPage?: boolean }) {
   const project = useProjectStore((state) => state.project);
   const shopping = useShoppingStore();
-  const [query, setQuery] = useState(shopping.query);
-  const [searching, setSearching] = useState(false);
   const [message, setMessage] = useState("");
+  const query = shopping.query;
 
   const cartResults = useMemo(() => new Map(shopping.cart.map((line) => [line.resultId, line])), [shopping.cart]);
   const quote = shopping.getQuote();
   const requiredIds = useMemo(() => project.components.map((component) => component.definitionId), [project.components]);
 
-  const search = async (value = query) => {
-    setSearching(true);
-    setMessage("");
-    try {
-      const result: any = await invokeWebMCPTool("shopping.search", { query: value, quantity: 1 });
-      if (result?.isError) setMessage(result.content?.[0]?.text ?? "Part search failed.");
-      else if (result.data?.source === "webmcp-agent") setMessage(result.data?.liveOffers ? "Agent listings updated with live offers." : "Agent listings loaded. Prices marked live only when supplied by the agent.");
-      else setMessage(result.data?.liveOffers ? "Live offers updated by the connected parts provider." : "Catalog matches ready. Ask the agent for live prices or open a retailer link.");
-    } catch (error) {
-      setMessage(`Part search failed: ${(error as Error).message}`);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const resetToProject = async () => {
+  const resetToProject = () => {
     if (!requiredIds.length) {
       shopping.resetCart();
       setMessage("Add components to the project, then search build parts.");
       return;
     }
-    if (requiredIds.some((catalogId) => !shopping.results.some((result) => result.catalogId === catalogId))) await search("");
+    if (requiredIds.some((catalogId) => !shopping.results.some((result) => result.catalogId === catalogId))) {
+      setMessage("Connect an authenticated WebMCP agent and ask it to publish the required part listings before resetting the cart.");
+      return;
+    }
     shopping.resetCart(requiredIds);
     setMessage("Cart reset to one of every part required by the project.");
   };
@@ -133,18 +119,22 @@ export default function ShoppingWorkspace({ fullPage = false }: { fullPage?: boo
     <div className="flex h-full min-h-0 flex-col bg-card text-xs">
       <div className="shrink-0 border-b border-border bg-muted/20 px-2.5 py-2">
         <div className="flex items-center gap-1.5"><ShoppingCart size={13} /><span className="font-semibold">Parts desk</span><span className="ml-auto rounded border border-border px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">{shopping.cart.length} in cart</span></div>
-        <p className="mt-1 text-[10px] leading-snug text-muted-foreground">Search exact identities for this build. The agent can attach three current retailer offers and context-aware alternatives.</p>
-        <div className="mt-2 flex gap-1.5">
-          <div className="relative min-w-0 flex-1"><Search size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void search(); }} placeholder="ESP32, pushbutton, 1N4007…" aria-label="Search exact parts" className="h-8 w-full rounded border border-border bg-background pl-7 pr-2 text-xs outline-none focus:border-foreground/30 focus:ring-2 focus:ring-ring/10" /></div>
-          <button type="button" onClick={() => void search()} disabled={searching} className="inline-flex h-8 items-center gap-1 rounded bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-wait disabled:opacity-60"><Sparkles size={11} />{searching ? "Searching" : "Search"}</button>
+        <p className="mt-1 text-[10px] leading-snug text-muted-foreground">Parts shopping is WebMCP-only. A connected, authenticated agent must publish verified listings before they appear or can be added.</p>
+        <div className="mt-2">
+          <div className="relative min-w-0"><Search size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={query} onChange={(event) => shopping.setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") setMessage("Ask the connected WebMCP agent to call shopping.search with this query and its sourced listings."); }} placeholder="ESP32, pushbutton, 1N4007…" aria-label="Search exact parts" className="h-8 w-full rounded border border-border bg-background pl-7 pr-20 text-xs outline-none focus:border-foreground/30 focus:ring-2 focus:ring-ring/10" /><span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Agent only</span></div>
         </div>
-        {message && <div className="mt-1.5 text-[10px] text-muted-foreground" role="status">{message}</div>}
+        {(message || shopping.publicationError) && <div className="mt-1.5 text-[10px] text-amber-600 dark:text-amber-400" role="status">{shopping.publicationError ?? message}</div>}
       </div>
 
       <div className={`${fullPage ? "flex flex-1 min-h-0 flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_340px]" : "flex min-h-0 flex-1 flex-col"}`}>
         <div className="shopping-results-scroll min-h-0 flex-1 overflow-y-auto px-2 py-2">
           {shopping.results.length === 0 ? (
-            <div className="rounded border border-dashed border-border px-3 py-8 text-center"><ShoppingCart size={18} className="mx-auto text-muted-foreground" /><p className="mt-2 text-xs font-medium">No part listings yet</p><p className="mt-1 text-[10px] leading-snug text-muted-foreground">Search for a part or ask the WebMCP agent to call <span className="font-mono">shopping.search</span> with live listings.</p></div>
+            <div className="rounded-lg border border-dashed border-border bg-muted/10 px-3 py-5" aria-live="polite">
+              <div className="flex items-center gap-2"><div className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-card"><ShoppingCart size={15} className="text-muted-foreground" /></div><div><p className="text-xs font-semibold">Waiting for the WebMCP agent</p><span className="font-mono text-[9px] uppercase tracking-wide text-amber-600 dark:text-amber-400">Agent publication required</span></div></div>
+              <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">This space is intentionally empty until the connected, authenticated agent finds and publishes exact parts. No local catalog links, guessed prices, or retailer fallbacks are inserted.</p>
+              <div className="mt-3 rounded border border-border bg-card px-2.5 py-2.5 text-left"><div className="kicker">Agent handoff</div><ol className="mt-1.5 list-inside list-decimal space-y-1 text-[10px] leading-snug text-muted-foreground"><li>Search the exact manufacturer part or board identity.</li><li>Attach up to three sourced retailer offers with URLs, currency, price, and fetch time.</li><li>Call <span className="font-mono text-foreground">shopping.search</span> with the listings and publication provenance.</li></ol></div>
+              <div className="mt-2 flex items-center justify-between gap-2 rounded border border-border px-2.5 py-2 text-[10px]"><span className="text-muted-foreground">Requested search</span><code className="min-w-0 truncate font-mono text-foreground">{query || "Enter a part or board"}</code></div>
+            </div>
           ) : (
             <div className="space-y-2">
               {shopping.results.map((result) => {

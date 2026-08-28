@@ -1,11 +1,51 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { useProjectStore } from "../store/useProjectStore.ts";
 import { useSimulationStore } from "../store/useSimulationStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { useValidationStore } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
 import { useShoppingStore } from "../store/useShoppingStore.ts";
+import { hasPortableButtonLedContract } from "../simulation/portableHarness.ts";
 import { getRegisteredToolNames, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools, WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
+
+const AGENT_PUBLICATION = {
+  authenticated: true as const,
+  agentId: "webmcp:local:local-development",
+  provider: "Digi-Key",
+  publishedAt: "2026-08-28T12:00:00.000Z",
+};
+
+function validAgentListing(catalogId: string, overrides: Record<string, unknown> = {}) {
+  const isEsp32 = catalogId === "esp32-s3";
+  const title = isEsp32 ? "ESP32-S3 DevKit" : catalogId === "arduino-uno-r3" ? "Arduino Uno R3" : "LED";
+  const partNumber = isEsp32 ? "ESP32-S3-DevKitC-1" : catalogId === "arduino-uno-r3" ? "A000066" : "LED-5MM";
+  const prices = isEsp32 ? [8.5, 9.1, 10.2] : [22];
+  return {
+    id: `listing-${catalogId}`,
+    catalogId,
+    title,
+    manufacturer: isEsp32 ? "Espressif" : undefined,
+    partNumber,
+    requestedQuantity: 1,
+    exactMatch: true,
+    offers: prices.map((price, index) => ({
+      id: `offer-${catalogId}-${index}`,
+      retailer: ["Digi-Key", "Mouser", "Newark"][index] ?? "Digi-Key",
+      title,
+      price,
+      currency: "USD",
+      url: `https://example.com/${catalogId}/${index}`,
+      fetchedAt: AGENT_PUBLICATION.publishedAt,
+      provider: AGENT_PUBLICATION.provider,
+    })),
+    alternatives: [],
+    updatedAt: AGENT_PUBLICATION.publishedAt,
+    provenance: { source: "webmcp-agent" as const, provider: AGENT_PUBLICATION.provider, agentId: AGENT_PUBLICATION.agentId, publishedAt: AGENT_PUBLICATION.publishedAt },
+    ...overrides,
+  };
+}
 
 describe("WebMCP tools", () => {
   beforeEach(() => useProjectStore.getState().clear());
@@ -167,21 +207,10 @@ describe("WebMCP tools", () => {
     const shopping = await call("shopping.search", {
       query: "esp32",
       quantity: 2,
+      publication: AGENT_PUBLICATION,
       listings: [
-        {
-          catalogId: "esp32-s3",
-          title: "ESP32-S3 DevKit",
-          manufacturer: "Espressif",
-          partNumber: "ESP32-S3-DevKitC-1",
-          exactMatch: true,
-          alternatives: [{ catalogId: "arduino-uno-r3", title: "Arduino Uno R3", reason: "Compatible controller alternative for a simpler GPIO build." }],
-          offers: [
-            { retailer: "Digi-Key", price: 8.5, currency: "USD", url: "https://www.digikey.com/" },
-            { retailer: "Mouser", price: 9.1, currency: "USD", url: "https://www.mouser.com/" },
-            { retailer: "Newark", price: 10.2, currency: "USD", url: "https://www.newark.com/" },
-          ],
-        },
-        { catalogId: "arduino-uno-r3", title: "Arduino Uno R3", exactMatch: true, offers: [] },
+        validAgentListing("esp32-s3", { alternatives: [{ catalogId: "arduino-uno-r3", title: "Arduino Uno R3", reason: "Compatible controller alternative for a simpler GPIO build.", resultId: "listing-arduino-uno-r3" }] }),
+        validAgentListing("arduino-uno-r3"),
       ],
     });
     const shoppingResultId = shopping.data.results[0].id;
@@ -203,8 +232,16 @@ describe("WebMCP tools", () => {
   });
 
   it("runs an agent-authored button-to-LED build and exposes failures in diagnostics", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("backend is not connected"); }));
-    useShoppingStore.setState({ query: "", results: [], cart: [], budget: null, lastSearchAt: null, undoStack: [] });
+    const firmwareGenerated = resolve(process.cwd(), "../packages/firmware-harness/generated");
+    const wasmBytes = readFileSync(resolve(firmwareGenerated, "button-led.wasm"));
+    const wasmMetadata = readFileSync(resolve(firmwareGenerated, "button-led.wasm.json"));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("button-led.wasm")) return new Response(wasmBytes, { status: 200, headers: { "content-type": "application/wasm" } });
+      if (url.endsWith("button-led.wasm.json")) return new Response(wasmMetadata, { status: 200, headers: { "content-type": "application/json" } });
+      throw new Error("backend is not connected");
+    }));
+    useShoppingStore.setState({ query: "", results: [], cart: [], budget: null, lastSearchAt: null, publicationError: null, undoStack: [] });
 
     const board: any = await invokeWebMCPTool("component.add", { componentId: "esp32-devkit-v1", x: 40, y: 40 });
     const button: any = await invokeWebMCPTool("component.add", { componentId: "pushbutton", x: 280, y: 40 });
@@ -215,7 +252,7 @@ describe("WebMCP tools", () => {
 
     await invokeWebMCPTool("connection.connect", { sourceComponentId: boardId, sourcePortId: "GPIO18", targetComponentId: buttonId, targetPortId: "A" });
     await invokeWebMCPTool("connection.connect", { sourceComponentId: boardId, sourcePortId: "GPIO19", targetComponentId: ledId, targetPortId: "IN" });
-    const source = "constexpr int BUTTON_PIN = 18; constexpr int LED_PIN = 19; void setup() {} void loop() { bool pressed = digitalRead(BUTTON_PIN) == LOW; digitalWrite(LED_PIN, pressed); delay(10); }";
+    const source = "constexpr int BUTTON_PIN = 18; constexpr int LED_PIN = 19; void setup() { pinMode(BUTTON_PIN, INPUT_PULLUP); pinMode(LED_PIN, OUTPUT); } void loop() { bool pressed = digitalRead(BUTTON_PIN) == LOW; digitalWrite(LED_PIN, pressed); delay(10); }";
     await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: source }] });
     await invokeWebMCPTool("validation.check");
     expect(useValidationStore.getState().valid).toBe(true);
@@ -223,12 +260,34 @@ describe("WebMCP tools", () => {
     await invokeWebMCPTool("simulation.set_input", { componentId: buttonId, key: "pressed", value: true });
     const pressed: any = await invokeWebMCPTool("simulation.run", { durationMs: 50 });
     expect(pressed.data.runtime).toBe("browser");
+    expect(pressed.data.harness.contract).toBe("button-led");
+    expect(pressed.data.harness.executionEngine).toBe("c-wasm");
+    expect(pressed.data.harness.abiVersion).toBe(2);
+    expect(pressed.data.harness.artifactSha256).toMatch(/^[0-9a-f]{64}$/i);
+    expect(pressed.data.harness.capabilities).toEqual(expect.arrayContaining(["compiled-c-wasm", "browser-contract", "deterministic-virtual-io"]));
+    expect(pressed.data.harness.capabilities).not.toContain("portable-c-abi");
+    expect(pressed.data.harness.note).toMatch(/compiled C\/WASM.*executed/i);
     expect(pressed.data.outputs[`${ledId}:IN`]).toBe(true);
     expect(useSimulationStore.getState().lastRun?.outputs[`${ledId}:IN`]).toBe(true);
 
     await invokeWebMCPTool("simulation.set_input", { componentId: buttonId, key: "pressed", value: false });
     const released: any = await invokeWebMCPTool("simulation.run", { durationMs: 50 });
     expect(released.data.outputs[`${ledId}:IN`]).toBe(false);
+
+    const unsafeSource = source.replace("digitalWrite(LED_PIN, pressed)", "digitalWrite(LED_PIN, LOW)");
+    await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: unsafeSource }] });
+    expect(hasPortableButtonLedContract(useProjectStore.getState().project)).toBe(false);
+    const unsafeRun: any = await invokeWebMCPTool("simulation.run", { durationMs: 1 });
+    expect(unsafeRun.data.executionEngine).toBe("browser-interpreter");
+
+    const deadCodeSource = "constexpr int BUTTON_PIN = 18; constexpr int LED_PIN = 19; void setup() { pinMode(BUTTON_PIN, INPUT_PULLUP); pinMode(LED_PIN, OUTPUT); }\n#if 0\nvoid loop() { bool pressed = digitalRead(BUTTON_PIN) == LOW; digitalWrite(LED_PIN, pressed); }\n#endif";
+    await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: deadCodeSource }] });
+    expect(hasPortableButtonLedContract(useProjectStore.getState().project)).toBe(false);
+
+    const macroSource = "#define BUTTON_PIN 18\n#define LED_PIN 19\n#define digitalWrite(pin, value) digitalWrite(pin, LOW)\nvoid setup() { pinMode(BUTTON_PIN, INPUT_PULLUP); pinMode(LED_PIN, OUTPUT); }\nvoid loop() { bool pressed = digitalRead(BUTTON_PIN) == LOW; digitalWrite(LED_PIN, pressed); }";
+    await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: macroSource }] });
+    expect(hasPortableButtonLedContract(useProjectStore.getState().project)).toBe(false);
+
     await invokeWebMCPTool("workspace.set_panel", { panel: "debug" });
     const workspace: any = await invokeWebMCPTool("workspace.get_state");
     expect(workspace.data.panel).toBe("debug");
@@ -241,32 +300,34 @@ describe("WebMCP tools", () => {
     const badCart: any = await invokeWebMCPTool("shopping.cart_add", { resultId: "missing-result", quantity: 1 });
     expect(badCart.isError).toBe(true);
 
-    const fallbackShopping: any = await invokeWebMCPTool("shopping.search", { query: "pushbutton", quantity: 1 });
-    expect(fallbackShopping.data.source).toBe("catalog-links");
-    expect(fallbackShopping.data.results.some((result: any) => result.catalogId === "pushbutton")).toBe(true);
-    expect(fallbackShopping.data.liveOffers).toBe(false);
+    const noAgentShopping: any = await invokeWebMCPTool("shopping.search", { query: "pushbutton", quantity: 1 });
+    expect(noAgentShopping.isError).toBe(true);
+    expect(noAgentShopping.data.source).toBe("webmcp-agent-required");
+    expect(noAgentShopping.data.results).toHaveLength(0);
 
     const unmatched: any = await invokeWebMCPTool("shopping.search", {
       query: "mystery module",
+      publication: AGENT_PUBLICATION,
       listings: [{ catalogId: "unknown-module", title: "Mystery module", exactMatch: false, offers: [] }],
     });
-    expect(unmatched.data.results[0].exactMatch).toBe(false);
-    const refusedUnmatched: any = await invokeWebMCPTool("shopping.cart_add", { resultId: unmatched.data.results[0].id });
-    expect(refusedUnmatched.isError).toBe(true);
+    expect(unmatched.isError).toBe(true);
+    expect(unmatched.data.results).toHaveLength(0);
 
     const omittedMatch: any = await invokeWebMCPTool("shopping.search", {
       query: "esp32",
+      publication: AGENT_PUBLICATION,
       listings: [{ catalogId: "esp32-devkit-v1", title: "ESP32 DevKit", offers: [] }],
     });
-    expect(omittedMatch.data.results[0].exactMatch).toBe(false);
-    expect((await invokeWebMCPTool("shopping.cart_add", { resultId: omittedMatch.data.results[0].id }) as any).isError).toBe(true);
+    expect(omittedMatch.isError).toBe(true);
+    expect(omittedMatch.data.results).toHaveLength(0);
 
     const misleadingMatch: any = await invokeWebMCPTool("shopping.search", {
       query: "esp32",
+      publication: AGENT_PUBLICATION,
       listings: [{ catalogId: "wrong-catalog-id", title: "ESP32 DevKit", exactMatch: true, offers: [] }],
     });
-    expect(misleadingMatch.data.results[0].exactMatch).toBe(false);
-    expect((await invokeWebMCPTool("shopping.cart_add", { resultId: misleadingMatch.data.results[0].id }) as any).isError).toBe(true);
+    expect(misleadingMatch.isError).toBe(true);
+    expect(misleadingMatch.data.results).toHaveLength(0);
 
     await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: "void setup() {" }] });
     const diagnostics: any = await invokeWebMCPTool("firmware.check", { componentId: boardId });
@@ -280,25 +341,15 @@ describe("WebMCP tools", () => {
     const shopping: any = await invokeWebMCPTool("shopping.search", {
       query: "ESP32-S3",
       quantity: 2,
+      publication: AGENT_PUBLICATION,
       listings: [
-        {
-          catalogId: "esp32-s3",
-          title: "ESP32-S3 DevKit",
-          manufacturer: "Espressif",
-          partNumber: "ESP32-S3-DevKitC-1",
-          exactMatch: true,
-          alternatives: [{ catalogId: "arduino-uno-r3", title: "Arduino Uno R3", reason: "Lower-cost GPIO alternative for this simple build." }],
-          offers: [
-            { retailer: "Digi-Key", price: 8.5, currency: "USD", url: "https://www.digikey.com/" },
-            { retailer: "Mouser", price: 9.1, currency: "USD", url: "https://www.mouser.com/" },
-            { retailer: "Newark", price: 10.2, currency: "USD", url: "https://www.newark.com/" },
-          ],
-        },
-        { catalogId: "arduino-uno-r3", title: "Arduino Uno R3", exactMatch: true, offers: [{ retailer: "Digi-Key", price: 22, currency: "USD", url: "https://www.digikey.com/" }] },
+        validAgentListing("esp32-s3", { provenance: { source: "webmcp-agent", provider: "Digi-Key", agentId: "caller-controlled-spoof", publishedAt: AGENT_PUBLICATION.publishedAt }, alternatives: [{ catalogId: "arduino-uno-r3", title: "Arduino Uno R3", reason: "Lower-cost GPIO alternative for this simple build.", resultId: "listing-arduino-uno-r3" }] }),
+        validAgentListing("arduino-uno-r3"),
       ],
     });
     expect(shopping.data.source).toBe("webmcp-agent");
     expect(shopping.data.results[0].offers).toHaveLength(3);
+    expect(shopping.data.results[0].provenance.agentId).toBe("webmcp:local:local-development");
     const resultId = shopping.data.results[0].id;
     await invokeWebMCPTool("shopping.cart_add", { resultId, quantity: 2 });
     await invokeWebMCPTool("shopping.cart_set_budget", { budget: 20 });

@@ -1,4 +1,5 @@
 import type { HardwarePort } from "@schematic/hardware-graph";
+import { capabilityAdapterId, type CapabilityAdapterId } from "./capabilityRegistry.ts";
 
 /**
  * The support contract shown to people and agents before a part is used.
@@ -33,6 +34,7 @@ export interface ComponentModelContract {
   verified: boolean;
   source: "family-template" | "catalog-model" | "vendor-reference" | "none";
   modelId: string;
+  adapterId: CapabilityAdapterId;
   reason?: string;
 }
 
@@ -104,6 +106,13 @@ const BEHAVIORAL_ADC_SOURCE_IDS = new Set([
   "uv-sensor-guva-s12sd",
 ]);
 
+const BEHAVIORAL_I2C_DISPLAY_IDS = new Set([
+  "ssd1306",
+  "ssd1306-i2c-4pin",
+  "ssd1306-128x32",
+  "ssd1306-0-96-blue",
+]);
+
 function isDs3231(definition: ModelDescriptor) {
   return /^ds3231(?:-\d+)?$/i.test(definition.id) || definition.tags?.some((tag) => /^ds3231$/i.test(tag)) === true;
 }
@@ -126,6 +135,7 @@ function contract(
     verified,
     source,
     modelId,
+    adapterId: capabilityAdapterId(family, support, definition.id),
     reason,
   };
 }
@@ -160,7 +170,11 @@ export function inferModelContract(definition: ModelDescriptor): ComponentModelC
   }
 
   if (definition.category === "display" || /(oled|lcd|epaper|e-paper|tft|matrix|ht16k33|tm1637)/.test(text)) {
-    if (hasPort(definition, "i2c")) return contract("i2c-display", "validation", ["i2c", "display-state"], definition, "none", "A device-specific display protocol model has not been assigned yet.");
+    if (hasPort(definition, "i2c")) {
+      return BEHAVIORAL_I2C_DISPLAY_IDS.has(definition.id)
+        ? contract("i2c-display", "behavioral", ["i2c", "display-state", "display-text"], definition, "catalog-model", "Deterministic printable-text capture over I²C; pixels and controller timing are not emulated.", "i2c-display-text:v1", false)
+        : contract("i2c-display", "validation", ["i2c", "display-state"], definition, "none", "A device-specific display protocol model has not been assigned yet.");
+    }
     if (hasPort(definition, "spi")) return contract("spi-device", "validation", ["spi", "display-state"], definition, "none", "A device-specific display protocol model has not been assigned yet.");
   }
 

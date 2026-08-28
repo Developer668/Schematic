@@ -1,0 +1,3 @@
+# The verified browser artifact and its manifest are release inputs. Rebuild
+# them with `pnpm build:wasm` when the portable C sources change, then run
+# `pnpm verify:wasm` before publishing.

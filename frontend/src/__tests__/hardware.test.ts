@@ -50,7 +50,7 @@ describe("shared hardware resolvers", () => {
   it("marks unimplemented protocol parts as validation-only", () => {
     expect(getCatalogComponent("ds3231")?.model).toMatchObject({ support: "behavioral", modelId: "ds3231-register-read:v1" });
     expect(getCatalogComponent("bmp280")?.model.support).toBe("validation");
-    expect(getCatalogComponent("ssd1306")?.model.support).toBe("validation");
+    expect(getCatalogComponent("ssd1306")?.model).toMatchObject({ support: "behavioral", adapterId: "i2c-display-text" });
   });
 
   it("keeps device-specific ports and bus identities physically truthful", () => {

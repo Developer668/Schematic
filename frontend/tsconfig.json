@@ -23,7 +23,8 @@
       "@/*": ["src/*"],
       "@schematic/hardware-graph": ["../packages/hardware-graph/src"],
       "@schematic/validation": ["../packages/validation/src"],
-      "@schematic/component-format": ["../packages/component-format/src"]
+      "@schematic/component-format": ["../packages/component-format/src"],
+      "@schematic/firmware-harness": ["../packages/firmware-harness/src/index.ts"]
     }
   },
   "include": ["src"],

@@ -14,6 +14,9 @@ export interface RuntimeEvent {
 export interface RuntimeResult {
   status: "completed" | "completed-with-warnings" | "no-firmware" | "invalid-target" | "unsupported-api";
   runtime: "browser" | "remote";
+  executionEngine?: "browser-interpreter" | "c-wasm" | "remote";
+  abiVersion?: number;
+  artifactSha256?: string;
   durationMs: number;
   outputs: Record<string, RuntimeValue>;
   events: RuntimeEvent[];
@@ -271,6 +274,11 @@ function evaluateExpression(expression: string, context: ExpressionContext, dept
   if (/^!/.test(raw)) return !evaluateExpression(raw.slice(1), context, depth + 1);
   if (/^(true|HIGH)$/i.test(raw)) return true;
   if (/^(false|LOW)$/i.test(raw)) return false;
+  const character = raw.match(/^'([^'\\]|\\.)'$/);
+  if (character) {
+    const value = character[1];
+    return value.length === 2 && value[0] === "\\" ? value.charCodeAt(1) : value.charCodeAt(0);
+  }
   if (/^-?(?:\d+(?:\.\d+)?|0x[\da-f]+)$/i.test(raw)) return /^0x/i.test(raw) ? Number.parseInt(raw, 16) : Number(raw);
   if (context.variables.has(raw)) return context.variables.get(raw)!;
   if (context.constants.has(raw)) return context.constants.get(raw)!;
@@ -599,6 +607,7 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
   return {
     status,
     runtime: "browser",
+    executionEngine: "browser-interpreter",
     durationMs: duration,
     outputs,
     events,

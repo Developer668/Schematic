@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "manager": "arduino-library-manager",
+  "libraries": [],
+  "note": "The example uses only the board framework; no third-party library is required."
+}

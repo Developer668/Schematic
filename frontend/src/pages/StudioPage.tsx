@@ -15,7 +15,7 @@ import { catalog, categories as allCategories, getCatalogComponent } from "../da
 import ComponentArtwork from "../components/ComponentArtwork.tsx";
 import LogoMark from "../components/LogoMark.tsx";
 import { useAuth, signOut, getCurrentUserId } from "../auth/session.ts";
-import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User } from "lucide-react";
+import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User, Menu } from "lucide-react";
 
 function ThemeIcon({ theme }: { theme: string }) {
   return theme === "dark" ? (
@@ -36,18 +36,18 @@ function UserRoomBadge() {
   const shortRoom = roomId.slice(0, 10);
   if (!session) {
     return (
-      <Link to="/auth" className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
-        <User size={12} /> Sign in for your room
+      <Link to="/auth" className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-300 sm:px-2.5" aria-label="Sign in for your room">
+        <User size={12} /> <span className="hidden sm:inline">Sign in for your room</span><span className="sm:hidden">Sign in</span>
       </Link>
     );
   }
   return (
-    <div className="hidden sm:flex items-center gap-1.5">
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300" title={`Room ${roomId} — stored on your device, isolated per user. WebMCP mutates only this room.`}>
+    <div className="flex items-center gap-1.5">
+      <span className="hidden items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300 sm:inline-flex" title={`Room ${roomId} — stored on your device, isolated per user. WebMCP mutates only this room.`}>
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
         Room {shortRoom} • {session.email || "local"}
       </span>
-      <button onClick={() => signOut()} className="grid h-7 w-7 place-items-center rounded-full border border-border hover:bg-muted" title="Sign out of the workspace">
+      <button onClick={() => signOut()} className="grid h-7 w-7 place-items-center rounded-full border border-border hover:bg-muted" title="Sign out of the workspace" aria-label="Sign out of the workspace">
         <LogOut size={12} />
       </button>
     </div>
@@ -72,6 +72,7 @@ export default function StudioPage() {
   const [orgFilter, setOrgFilter] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showProjectMenu, setShowProjectMenu] = useState(false);
+  const [showOverflowMenu, setShowOverflowMenu] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState("");
   const [runError, setRunError] = useState("");
@@ -81,25 +82,35 @@ export default function StudioPage() {
   const [rightCollapsed, setRightCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
   const isBottomResizingRef = useRef(false);
   const isRightResizingRef = useRef(false);
-  const projectClickTimerRef = useRef<number | null>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
   const toolNames = getRegisteredToolNames();
 
   useEffect(() => {
-    if (!showProjectMenu) return;
+    if (!showProjectMenu && !showOverflowMenu) return;
     const close = (event: MouseEvent) => {
       if (!projectMenuRef.current?.contains(event.target as Node)) {
-        if (projectClickTimerRef.current !== null) window.clearTimeout(projectClickTimerRef.current);
-        projectClickTimerRef.current = null;
         setShowProjectMenu(false);
       }
+      if (!overflowMenuRef.current?.contains(event.target as Node)) setShowOverflowMenu(false);
     };
     window.addEventListener("mousedown", close);
     return () => {
       window.removeEventListener("mousedown", close);
-      if (projectClickTimerRef.current !== null) window.clearTimeout(projectClickTimerRef.current);
     };
-  }, [showProjectMenu]);
+  }, [showProjectMenu, showOverflowMenu]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setShowProjectMenu(false);
+      setShowOverflowMenu(false);
+      setEditingProjectId(null);
+      setEditingProjectName("");
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
 
   const doRun = async () => {
     setRunError("");
@@ -120,19 +131,12 @@ export default function StudioPage() {
   const handleCategory = (c: string | null) => { setActiveCat(c); setCategory(c); };
 
   const beginProjectRename = (item: { id: string; name: string }) => {
-    if (projectClickTimerRef.current !== null) window.clearTimeout(projectClickTimerRef.current);
-    projectClickTimerRef.current = null;
     setEditingProjectId(item.id);
     setEditingProjectName(item.name);
   };
 
   const switchProjectFromMenu = (item: { id: string }) => {
-    if (projectClickTimerRef.current !== null) window.clearTimeout(projectClickTimerRef.current);
-    projectClickTimerRef.current = window.setTimeout(() => {
-      switchProject(item.id);
-      setShowProjectMenu(false);
-      projectClickTimerRef.current = null;
-    }, 400);
+    switchProject(item.id);
   };
 
   const cancelProjectRename = () => {
@@ -206,14 +210,14 @@ export default function StudioPage() {
 
   return (
     <div className="workbench flex h-screen flex-col overflow-hidden bg-background text-foreground select-none">
-      <header className="workbench-header relative z-40 h-11 shrink-0 gap-2 border-b border-border px-3">
+      <header className="workbench-header relative z-40 h-11 shrink-0 gap-2 overflow-visible border-b border-border px-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <Link to="/" className="flex items-center gap-1.5">
             <span className="brand-mark"><LogoMark /></span>
             <span className="hidden text-[13px] font-semibold tracking-[-0.025em] sm:inline">Schematic</span>
           </Link>
           <span className="hidden h-4 w-px bg-border md:block" />
-          <div className="relative flex min-w-0 max-w-[min(42vw,250px)] shrink items-center gap-2" ref={projectMenuRef}>
+          <div className="relative z-[60] flex min-w-0 max-w-[min(42vw,250px)] shrink items-center gap-2" ref={projectMenuRef}>
             <button
               type="button"
               onClick={() => setShowProjectMenu((open) => !open)}
@@ -227,7 +231,7 @@ export default function StudioPage() {
             </button>
             <span className="status-pill hidden sm:inline-flex">Saved locally</span>
             {showProjectMenu && (
-              <div role="menu" className="absolute left-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+              <div role="menu" aria-label="Projects" className="absolute left-0 top-[calc(100%+0.5rem)] z-[70] w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border-2 border-border bg-background opacity-100 shadow-2xl ring-4 ring-foreground/5">
                 <div className="flex items-center justify-between border-b border-border px-3 py-2">
                   <div><div className="kicker">Projects</div><div className="text-[11px] text-muted-foreground">Double-click a name to rename</div></div>
                   <span className="count-badge">{projects.length}</span>
@@ -257,10 +261,11 @@ export default function StudioPage() {
                       type="button"
                       role="menuitem"
                       onClick={() => switchProjectFromMenu(item)}
+                      onDoubleClick={(event) => { event.stopPropagation(); beginProjectRename(item); }}
                       className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left hover:bg-muted ${item.id === activeProjectId ? "bg-muted" : ""}`}
                     >
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${item.id === activeProjectId ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
-                      <span className="min-w-0 flex-1" onDoubleClick={(event) => { event.stopPropagation(); beginProjectRename(item); }} title="Double-click to rename"><span className="block truncate text-xs font-medium">{item.name}</span><span className="block text-[10px] text-muted-foreground">{item.components.length} comps · {item.connections.length} wires</span></span>
+                      <span className="min-w-0 flex-1" title="Double-click to rename"><span className="block truncate text-xs font-medium">{item.name}</span><span className="block text-[10px] text-muted-foreground">{item.components.length} comps · {item.connections.length} wires</span></span>
                       {item.id === activeProjectId && <span className="text-[10px] text-emerald-600 dark:text-emerald-400">active</span>}
                     </button>
                   ))}
@@ -273,43 +278,16 @@ export default function StudioPage() {
               </div>
             )}
           </div>
-          <div className="hidden items-center gap-1 lg:flex">
-            <button type="button" aria-label="Toggle component library" title="Toggle component library" onClick={() => setLeftCollapsed(v => !v)} className={`workspace-icon-button ${!leftCollapsed ? "is-active" : ""}`}>
-              <PanelLeft size={13} strokeWidth={1.8} />
-            </button>
-            <button type="button" aria-label="Toggle code panel" title="Toggle code panel" onClick={() => setRightCollapsed(v => !v)} className={`workspace-icon-button hidden xl:grid ${!rightCollapsed ? "is-active" : ""}`}>
-              <PanelRight size={13} strokeWidth={1.8} />
-            </button>
-            <button type="button" aria-label="Toggle bottom panel" title="Toggle bottom panel" onClick={() => setBottomCollapsed(!bottomCollapsed)} className={`workspace-icon-button ${!bottomCollapsed ? "is-active" : ""}`}>
-              <PanelBottom size={13} strokeWidth={1.8} />
-            </button>
-          </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 shrink items-center justify-end gap-1.5">
           <span className="status-pill hidden lg:inline-flex"><Wifi size={11} /> WebMCP · {toolNames.length}</span>
-          <button type="button" aria-label="Toggle color theme" title="Toggle color theme" onClick={toggle} className="workspace-icon-button">
-            <ThemeIcon theme={theme} />
-          </button>
-          <Link to="/settings" className="workspace-icon-button sm:hidden" aria-label="Open settings" title="Open settings">
-            <Settings size={12} strokeWidth={1.8} />
-          </Link>
-          <Link to="/settings" className="secondary-button hidden sm:inline-flex">
-            <Settings size={12} strokeWidth={1.8} /> Settings
-          </Link>
           <Link to="/parts" className="workspace-icon-button md:hidden" aria-label="Open parts desk" title="Open parts desk">
             <ShoppingCart size={12} strokeWidth={1.8} />
           </Link>
           <Link to="/parts" className="secondary-button hidden md:inline-flex">
             <ShoppingCart size={12} strokeWidth={1.8} /> Parts
           </Link>
-          <button type="button" onClick={() => setShowImport(true)} className="secondary-button hidden sm:inline-flex">Import</button>
-          <button type="button" onClick={() => triggerDownloadVlx(project.name)} className="secondary-button hidden md:inline-flex">
-            <Download size={12} strokeWidth={1.8} /> Export
-          </button>
-          <button type="button" onClick={clear} className="workspace-icon-button hidden sm:grid" title="Clear workspace" aria-label="Clear workspace">
-            <Trash2 size={12} strokeWidth={1.8} />
-          </button>
           {running ? (
             <button type="button" onClick={doStop} className="run-button is-running">
               <Square size={9} className="fill-white" /> Stop
@@ -320,6 +298,24 @@ export default function StudioPage() {
             </button>
           )}
           <UserRoomBadge />
+          <div className="relative z-[60]" ref={overflowMenuRef}>
+            <button type="button" onClick={() => setShowOverflowMenu((open) => !open)} aria-haspopup="menu" aria-expanded={showOverflowMenu} aria-label="Open workspace menu" title="More workspace actions" className="workspace-icon-button">
+              <Menu size={14} strokeWidth={1.8} />
+            </button>
+            {showOverflowMenu && (
+              <div role="menu" aria-label="Workspace actions" className="absolute right-0 top-[calc(100%+0.5rem)] z-[70] w-56 overflow-hidden rounded-lg border-2 border-border bg-background p-1.5 opacity-100 shadow-2xl ring-4 ring-foreground/5">
+                <button type="button" role="menuitem" onClick={() => { toggle(); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><ThemeIcon theme={theme} /> {theme === "dark" ? "Use light theme" : "Use dark theme"}</button>
+                <Link role="menuitem" to="/settings" onClick={() => setShowOverflowMenu(false)} className="flex items-center gap-2 rounded px-2.5 py-2 text-xs hover:bg-muted"><Settings size={13} /> Settings</Link>
+                <button type="button" role="menuitem" onClick={() => { setShowImport(true); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><Download size={13} /> Import design</button>
+                <button type="button" role="menuitem" onClick={() => { triggerDownloadVlx(project.name); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><Download size={13} /> Export project</button>
+                <div className="my-1 border-t border-border" />
+                <button type="button" role="menuitem" onClick={() => { setLeftCollapsed((value) => !value); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><PanelLeft size={13} /> {leftCollapsed ? "Show components" : "Hide components"}</button>
+                <button type="button" role="menuitem" onClick={() => { setRightCollapsed((value) => !value); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><PanelRight size={13} /> {rightCollapsed ? "Show code panel" : "Hide code panel"}</button>
+                <button type="button" role="menuitem" onClick={() => { setBottomCollapsed(!bottomCollapsed); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><PanelBottom size={13} /> {bottomCollapsed ? "Show bottom panel" : "Hide bottom panel"}</button>
+                <button type="button" role="menuitem" onClick={() => { clear(); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/20"><Trash2 size={13} /> Clear workspace</button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -377,7 +373,6 @@ export default function StudioPage() {
               {(activeCat || orgFilter || query) && (
                 <div className="flex items-center gap-1">
                   {activeCat && <span className="inline-flex rounded border border-foreground bg-foreground text-background px-1 py-0 text-[10px] font-medium">{activeCat}</span>}
-                  {orgFilter && <span className="inline-flex rounded border border-foreground bg-foreground text-background px-1 py-0 text-[10px] font-medium">{orgFilter}</span>}
                   <button type="button" onClick={() => { setActiveCat(null); setCategory(null); setOrgFilter(null); handleSearch(""); }} className="ml-auto text-[11px] underline decoration-muted-foreground/30 underline-offset-2 hover:decoration-foreground">Reset</button>
                 </div>
               )}

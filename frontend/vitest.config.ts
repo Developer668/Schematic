@@ -11,6 +11,7 @@ export default defineConfig({
       "@schematic/hardware-graph": path.resolve(__dirname, "../packages/hardware-graph/src"),
       "@schematic/validation": path.resolve(__dirname, "../packages/validation/src"),
       "@schematic/component-format": path.resolve(__dirname, "../packages/component-format/src"),
+      "@schematic/firmware-harness": path.resolve(__dirname, "../packages/firmware-harness/src"),
     },
   },
 });

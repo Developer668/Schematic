@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "abiVersion": 2,
+  "artifact": "button-led.wasm",
+  "byteLength": 400,
+  "sha256": "21c84bd5238ad840c7d8026087f184e2f44dd722486dd3cdb4a07fc232671bd4",
+  "sourceSha256": "117cc32630f6bf7a0792e782539a17a8bb436c2026414e0e9ac53c0d683ef196",
+  "toolchain": {
+    "compiler": "/opt/homebrew/opt/llvm/bin/clang",
+    "compilerVersion": "Homebrew clang version 23.1.0",
+    "linker": "/opt/homebrew/opt/lld/bin/wasm-ld",
+    "linkerVersion": "Homebrew LLD 23.1.0"
+  },
+  "optimization": [
+    "-Oz",
+    "-flto",
+    "--strip-all"
+  ],
+  "source": [
+    "firmware/src/button_led.c",
+    "firmware/src/wasm_button_led.c",
+    "firmware/include/firmware_harness.h"
+  ]
+}

@@ -26,6 +26,7 @@ export default defineConfig({
         include: ['zustand', 'zod', '@xyflow/react'],
     },
     build: {
+        assetsInlineLimit: 0,
         chunkSizeWarningLimit: 8000,
         rollupOptions: {
             output: {

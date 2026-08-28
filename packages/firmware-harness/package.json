@@ -1,0 +1,23 @@
+{
+  "name": "@schematic/firmware-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "node scripts/build-wasm.mjs && tsc -b",
+    "pretest": "node scripts/check-wasm.mjs",
+    "test": "vitest run --passWithNoTests && node scripts/check-native.mjs && node scripts/check-wasm.mjs",
+    "test:browser": "vitest run",
+    "test:native": "node scripts/check-native.mjs",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:wasm:required": "node scripts/build-wasm.mjs --required",
+    "verify:wasm": "node scripts/check-wasm.mjs",
+    "test:toolchain": "node scripts/build-wasm.mjs --required && node scripts/check-wasm.mjs",
+    "test:wasm": "node scripts/check-wasm.mjs"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

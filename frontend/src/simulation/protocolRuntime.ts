@@ -1,5 +1,6 @@
 import type { HardwarePort } from "@schematic/hardware-graph";
 import { getCatalogComponent, type CatalogComponent } from "../data/catalog.ts";
+import { capabilityRegistryEntry, type CapabilityAdapterId } from "./capabilityRegistry.ts";
 
 export type ProtocolValue = boolean | number;
 
@@ -25,6 +26,7 @@ export interface DeviceRuntimeState {
   definitionId: string;
   family: string;
   modelId: string;
+  adapterId: CapabilityAdapterId;
   support: string;
   status: "active" | "unwired" | "unsupported";
   values: Record<string, ProtocolValue | string | number[]>;
@@ -184,6 +186,7 @@ function connectedProtocolTarget(
 
 function initialDeviceState(component: RuntimeProject["components"][number], definition: CatalogComponent): DeviceRuntimeState {
   const model = definition.model;
+  const adapter = capabilityRegistryEntry(model.adapterId);
   const values: DeviceRuntimeState["values"] = {};
   if (model.family === "digital-input") values.input = false;
   if (model.family === "adc-source") values.value = 0;
@@ -199,8 +202,9 @@ function initialDeviceState(component: RuntimeProject["components"][number], def
     definitionId: component.definitionId,
     family: model.family,
     modelId: model.modelId,
+    adapterId: adapter.adapterId,
     support: model.support,
-    status: ["behavioral", "engine-backed"].includes(model.support) ? "unwired" : "unsupported",
+    status: adapter.support === "behavioral" || adapter.support === "engine-backed" ? "unwired" : "unsupported",
     values,
   };
 }
@@ -300,6 +304,7 @@ export function createProtocolRuntime(project: RuntimeProject, dsu: RuntimeDisjo
     if (!candidate || !definition) return undefined;
     const device = state.deviceStates.get(candidate.id);
     if (!device || !["i2c-register", "i2c-display"].includes(device.family)) return undefined;
+    if (!["behavioral", "engine-backed"].includes(definition.model.support)) return undefined;
     updateClock(candidate.id);
     return { component: candidate, definition, state: device };
   }
@@ -407,16 +412,19 @@ export function createProtocolRuntime(project: RuntimeProject, dsu: RuntimeDisjo
       const target = transaction.deviceId ? { component: componentFor(project, transaction.deviceId), definition: definitionFor(componentFor(project, transaction.deviceId)) } : undefined;
       const acknowledged = Boolean(target?.component && target.definition);
       if (target?.component && target.definition && transaction.bytes.length > 0) {
+        const displayPayload = target.definition.model.adapterId === "i2c-display-text";
         const pointer = transaction.bytes[0] & 0xff;
-        state.registerPointers.set(target.component.id, pointer);
+        if (!displayPayload) state.registerPointers.set(target.component.id, pointer);
         transaction.pointer = pointer;
-        if (isDs3231Definition(target.definition)) {
+        if (displayPayload) {
+          updateDisplay(target.component.id, transaction.bytes);
+        } else if (isDs3231Definition(target.definition)) {
           if (transaction.bytes.length > 1) warn("DS3231_REGISTER_WRITE_UNSUPPORTED", "The DS3231 model supports deterministic register reads only; control/time register writes were not applied.", { componentId: target.component.id, controllerId });
         } else {
           const registers = registerFile(target.component.id);
           for (const [index, byte] of transaction.bytes.slice(1).entries()) registers[(pointer + index) & 0xff] = byte;
         }
-        updateDisplay(target.component.id, transaction.bytes.slice(1));
+        if (!displayPayload) updateDisplay(target.component.id, transaction.bytes.slice(1));
         markConnected(target.component.id, true);
       }
       events.push({ kind: "i2c", timeMs: state.cursorMs, controllerId, deviceId: target?.component?.id, address: transaction.address, operation: "write", register: transaction.bytes[0], data: [...transaction.bytes], acknowledged });

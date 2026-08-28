@@ -9,9 +9,10 @@ import { useSelectionStore } from "../store/useSelectionStore.ts";
 import { useWorkspaceStore, type BottomPanel } from "../store/useWorkspaceStore.ts";
 import { useValidationStore, validateFirmwareFiles, validateProject } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
-import { useShoppingStore, type PartOffer, type ShoppingResult } from "../store/useShoppingStore.ts";
+import { useShoppingStore, type AgentPublication, type PartOffer, type ShoppingResult } from "../store/useShoppingStore.ts";
 import { runFirmwareRuntime } from "../simulation/runtime.ts";
-import { catalog, getCatalogComponent, searchCatalog } from "../data/catalog.ts";
+import { hasPortableButtonLedContract, PortableHarnessUnavailableError, runPortableButtonLedHarness } from "../simulation/portableHarness.ts";
+import { getCatalogComponent, searchCatalog } from "../data/catalog.ts";
 import { isBoardDefinition, resolveFirmwareBinding } from "../data/hardware.ts";
 import { apiUrl, getAuthHeaders, getAuthSession } from "../auth/session.ts";
 import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.json";
@@ -29,6 +30,12 @@ type ApiJsonResult = {
   data: any;
   available: boolean;
   error?: string;
+};
+
+type TrustedToolContext = {
+  authenticated: true;
+  subject: string;
+  environment: string;
 };
 
 const BLUEPRINTS: Record<string, unknown> = { "meta-glasses": metaGlassesBlueprint };
@@ -106,9 +113,62 @@ export function browserCompilePreflight(files: { name: string; content: string }
   };
 }
 
-function runBrowserSimulation(project: ReturnType<typeof useProjectStore.getState>["project"], inputs: Record<string, boolean | number>, durationMs: number) {
+async function runBrowserSimulation(project: ReturnType<typeof useProjectStore.getState>["project"], inputs: Record<string, boolean | number>, durationMs: number) {
   const boundedDurationMs = Math.max(0, Math.min(Number.isFinite(durationMs) ? durationMs : 1000, 86_400_000));
-  const runtime = runFirmwareRuntime(project, inputs, boundedDurationMs);
+  let portable;
+  try {
+    portable = await runPortableButtonLedHarness(project, inputs, boundedDurationMs);
+  } catch (error) {
+    if (!(error instanceof PortableHarnessUnavailableError)) throw error;
+    const runtime: import("../simulation/runtime.ts").RuntimeResult = {
+      status: "unsupported-api",
+      runtime: "browser",
+      executionEngine: "c-wasm",
+      durationMs: boundedDurationMs,
+      outputs: {},
+      events: [],
+      programs: [],
+      resolvedNets: new Set(project.connections.map((connection) => `${connection.source.componentId}:${connection.source.portId}|${connection.target.componentId}:${connection.target.portId}`)).size,
+      serialOutput: "",
+      targetIssues: [{ componentId: error.componentId, code: error.code, message: error.message }],
+      protocolEvents: [],
+      deviceStates: [],
+      warnings: [],
+      unsupportedApis: ["compiled-c-wasm"],
+      note: "The recognized portable firmware contract was not executed because its verified C/WASM artifact is unavailable or invalid. Rebuild the firmware-harness package before running this project.",
+    };
+    return finalizeBrowserSimulation(project, runtime, boundedDurationMs);
+  }
+  const runtime: import("../simulation/runtime.ts").RuntimeResult = portable
+    ? {
+        status: "completed" as const,
+        runtime: "browser" as const,
+        executionEngine: "c-wasm" as const,
+        abiVersion: portable.abiVersion,
+        ...(portable.artifactSha256 ? { artifactSha256: portable.artifactSha256 } : {}),
+        durationMs: portable.durationMs,
+        outputs: portable.outputs,
+        events: portable.events,
+        programs: [{ componentId: portable.boardId, writes: portable.events.length, executions: portable.steps, sourceFiles: portable.sourceFiles }],
+        resolvedNets: new Set(project.connections.map((connection) => `${connection.source.componentId}:${connection.source.portId}|${connection.target.componentId}:${connection.target.portId}`)).size,
+        serialOutput: "",
+        targetIssues: [],
+        protocolEvents: [],
+        deviceStates: [],
+        warnings: [],
+        unsupportedApis: [],
+        note: portable.note,
+      }
+    : runFirmwareRuntime(project, inputs, boundedDurationMs);
+  return finalizeBrowserSimulation(project, runtime, boundedDurationMs, portable);
+}
+
+function finalizeBrowserSimulation(
+  project: ReturnType<typeof useProjectStore.getState>["project"],
+  runtime: import("../simulation/runtime.ts").RuntimeResult,
+  boundedDurationMs: number,
+  portable?: Awaited<ReturnType<typeof runPortableButtonLedHarness>>,
+) {
   const timeNs = BigInt(Math.round(boundedDurationMs * 1_000_000));
   const outputs = runtime.outputs;
   const simulation = useSimulationStore.getState();
@@ -116,12 +176,13 @@ function runBrowserSimulation(project: ReturnType<typeof useProjectStore.getStat
   for (const [portId, value] of Object.entries(outputs)) simulation.setPin(portId, value);
   simulation.setLastRun(runtime);
   const trace = runtime.events.slice(0, 8).map((event) => `${event.endpoint}=${event.value}`).join("  ");
-  simulation.appendSerial(`[${project.name}] browser firmware runtime · t=${timeNs}ns${trace ? `  ${trace}` : ""}\n${runtime.serialOutput}`);
+  simulation.appendSerial(`[${project.name}] browser ${runtime.executionEngine ?? "runtime"} · t=${timeNs}ns${trace ? `  ${trace}` : ""}\n${runtime.serialOutput}`);
   simulation.stop();
   return {
     ...runtime,
     time_ns: timeNs.toString(),
     snapshot: runtime.outputs,
+    ...(portable ? { harness: portable } : {}),
   };
 }
 
@@ -139,6 +200,7 @@ function normalizeRemoteRun(result: any): import("../simulation/runtime.ts").Run
   return {
     status: result.status,
     runtime: "remote",
+    executionEngine: "remote",
     durationMs: Number(result.duration_ms ?? Number(result.duration_ns ?? 0) / 1_000_000),
     outputs: result.outputs ?? {},
     events,
@@ -154,98 +216,34 @@ function normalizeRemoteRun(result: any): import("../simulation/runtime.ts").Run
   };
 }
 
-const SHOPPING_RETAILERS = [
-  { name: "Digi-Key", url: "https://www.digikey.com/en/products/result?keywords=" },
-  { name: "Mouser", url: "https://www.mouser.com/c/?q=" },
-  { name: "Newark", url: "https://www.newark.com/search?st=" },
-];
-
-function retailerSearchUrl(retailer: string, title: string, partNumber?: string) {
-  const query = encodeURIComponent(partNumber ? `${partNumber} ${title}` : title);
-  return SHOPPING_RETAILERS.find((item) => item.name.toLowerCase() === retailer.toLowerCase())?.url.concat(query) ?? `https://www.google.com/search?q=${query}+electronics`;
-}
-
-function fallbackShoppingResults(query: string, quantity: number, project: HardwareGraph): ShoppingResult[] {
-  const base = query.trim() ? searchCatalog(query).slice(0, 12) : project.components.map((component) => getCatalogComponent(component.definitionId)).filter(Boolean).slice(0, 12) as typeof catalog;
-  const requested = [...new Map([...base, ...base.flatMap((definition) => searchCatalog("", { category: definition.category }).filter((candidate) => candidate.id !== definition.id).slice(0, 2))].map((definition) => [definition.id, definition])).values()].slice(0, 24);
-  return requested.map((definition) => {
-    const partNumber = definition.partNumber ?? definition.id;
-    const alternatives = searchCatalog("", { category: definition.category }).filter((candidate) => candidate.id !== definition.id).slice(0, 2).map((candidate) => ({
-      catalogId: candidate.id,
-      title: candidate.title,
-      reason: candidate.category === definition.category ? "Same component role; verify footprint and electrical limits." : "Related catalog match; verify the interface before substituting.",
-    }));
-    return {
-      id: `shopping-${definition.id}`,
-      catalogId: definition.id,
-      title: definition.title,
-      manufacturer: definition.manufacturer,
-      partNumber,
-      requestedQuantity: quantity,
-      exactMatch: Boolean(query.trim() && `${definition.id} ${definition.title} ${partNumber}`.toLowerCase().includes(query.trim().toLowerCase())),
-      matchNote: "Catalog identity confirmed. Live offers are supplied by the shopping agent or connected parts provider.",
-      offers: SHOPPING_RETAILERS.map((retailer) => ({
-        id: `${definition.id}-${retailer.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-        retailer: retailer.name,
-        title: `${definition.title} · ${partNumber}`,
-        price: null,
-        currency: "USD",
-        url: retailerSearchUrl(retailer.name, definition.title, partNumber),
-        availability: "Live quote required",
-        fetchedAt: new Date().toISOString(),
-      })),
-      alternatives,
-      updatedAt: new Date().toISOString(),
-    };
-  });
-}
-
-function normalizeShoppingResults(raw: unknown, query: string, quantity: number): ShoppingResult[] {
+function normalizeShoppingResults(raw: unknown, _query: string, quantity: number): ShoppingResult[] {
   const entries = Array.isArray(raw) ? raw : [];
-  return entries.slice(0, 24).map((entry, index) => {
+  return entries.slice(0, 24).map((entry) => {
     const item = entry && typeof entry === "object" ? entry as Record<string, any> : {};
-    const catalogId = String(item.catalogId ?? item.componentId ?? item.id ?? `agent-part-${index + 1}`);
-    // A title search is useful for displaying an agent result, but it must not
-    // silently turn an approximate or malformed listing into a purchasable
-    // catalog item. Only an explicit exactMatch=true plus a known catalog id
-    // can authorize a cart add.
+    // This is intentionally a shape conversion only. It never invents a
+    // catalog identity, retailer, URL, price, timestamp, or provenance. The
+    // shopping store rejects incomplete records before they reach the UI.
+    const catalogId = String(item.catalogId ?? item.componentId ?? "").trim();
     const catalogDefinition = getCatalogComponent(catalogId);
-    const definition = catalogDefinition ?? searchCatalog(String(item.title ?? item.partNumber ?? query))[0];
     const exactMatch = item.exactMatch === true && Boolean(catalogDefinition);
-    const title = String(item.title ?? definition?.title ?? catalogId);
-    const partNumber = item.partNumber ? String(item.partNumber) : definition?.partNumber ?? definition?.id;
+    const title = String(item.title ?? "").trim();
+    const partNumber = String(item.partNumber ?? "").trim();
     const rawOffers = Array.isArray(item.offers) ? item.offers : [];
-    const offersByRetailer = new Map<string, PartOffer>();
-    for (const rawOffer of rawOffers) {
-      if (!rawOffer || typeof rawOffer !== "object") continue;
-      const offer = rawOffer as Record<string, any>;
-      const retailer = String(offer.retailer ?? offer.source ?? "").trim();
-      if (!retailer || offersByRetailer.has(retailer) || offersByRetailer.size >= 3) continue;
+    const offers = rawOffers.slice(0, 3).map((rawOffer: any) => {
+      const offer = rawOffer && typeof rawOffer === "object" ? rawOffer as Record<string, any> : {};
       const parsedPrice = typeof offer.price === "number" ? offer.price : typeof offer.price === "string" && offer.price.trim() ? Number(offer.price) : null;
-      offersByRetailer.set(retailer, {
-        id: String(offer.id ?? `${catalogId}-${retailer.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`),
-        retailer,
-        title: String(offer.title ?? title),
+      return {
+        id: String(offer.id ?? "").trim(),
+        retailer: String(offer.retailer ?? offer.source ?? "").trim(),
+        title: String(offer.title ?? "").trim(),
         price: typeof parsedPrice === "number" && Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : null,
-        currency: String(offer.currency ?? "USD"),
-        url: String(offer.url ?? retailerSearchUrl(retailer, title, partNumber)),
+        currency: String(offer.currency ?? "").trim(),
+        url: String(offer.url ?? "").trim(),
         availability: offer.availability ? String(offer.availability) : undefined,
-        fetchedAt: String(offer.fetchedAt ?? new Date().toISOString()),
-      });
-    }
-    for (const retailer of SHOPPING_RETAILERS) {
-      if (offersByRetailer.size >= 3 || [...offersByRetailer.keys()].some((name) => name.toLowerCase() === retailer.name.toLowerCase())) continue;
-      offersByRetailer.set(retailer.name, {
-        id: `${catalogId}-${retailer.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-        retailer: retailer.name,
-        title: `${title}${partNumber ? ` · ${partNumber}` : ""}`,
-        price: null,
-        currency: "USD",
-        url: retailerSearchUrl(retailer.name, title, partNumber),
-        availability: "Live quote required",
-        fetchedAt: new Date().toISOString(),
-      });
-    }
+        fetchedAt: String(offer.fetchedAt ?? "").trim(),
+        provider: String(offer.provider ?? "").trim(),
+      } satisfies PartOffer;
+    });
     const alternatives = (Array.isArray(item.alternatives) ? item.alternatives : []).slice(0, 3).map((alternative: any) => ({
       catalogId: String(alternative.catalogId ?? alternative.id ?? ""),
       title: String(alternative.title ?? alternative.name ?? "Alternative part"),
@@ -253,23 +251,40 @@ function normalizeShoppingResults(raw: unknown, query: string, quantity: number)
       resultId: alternative.resultId ? String(alternative.resultId) : undefined,
     })).filter((alternative: { catalogId: string }) => alternative.catalogId);
     return {
-      id: String(item.resultId ?? `shopping-${catalogId}-${index}`),
+      id: String(item.resultId ?? item.id ?? "").trim(),
       catalogId,
       title,
-      manufacturer: item.manufacturer ? String(item.manufacturer) : definition?.manufacturer,
+      manufacturer: item.manufacturer ? String(item.manufacturer).trim() : catalogDefinition?.manufacturer,
       partNumber,
       requestedQuantity: Math.max(1, Math.round(Number(item.requestedQuantity ?? quantity))),
       exactMatch,
-      matchNote: item.matchNote ? String(item.matchNote) : exactMatch
-        ? "Agent listing explicitly verified against the Schematic catalog."
-        : definition
-          ? "Agent listing was not explicitly verified as an exact catalog match; verify the exact part number before buying."
-          : "Agent listing could not be matched to the Schematic catalog; verify the exact part number before buying.",
-      offers: [...offersByRetailer.values()],
+      matchNote: item.matchNote ? String(item.matchNote) : undefined,
+      offers,
       alternatives,
-      updatedAt: String(item.updatedAt ?? new Date().toISOString()),
+      updatedAt: String(item.updatedAt ?? "").trim(),
+      provenance: item.provenance && typeof item.provenance === "object" ? {
+        source: item.provenance.source,
+        provider: String(item.provenance.provider ?? "").trim(),
+        agentId: String(item.provenance.agentId ?? "").trim(),
+        publishedAt: String(item.provenance.publishedAt ?? "").trim(),
+      } : { source: "webmcp-agent", provider: "", agentId: "", publishedAt: "" },
     };
   });
+}
+
+function bindShoppingPublication(results: ShoppingResult[], publication: AgentPublication, trustedAuth: TrustedToolContext) {
+  // The agent supplies sourcing provenance, while identity is bound to the
+  // session that invoked the tool. Never require or trust a caller-provided
+  // user/agent id; that would make the publication boundary self-asserted.
+  return results.map((result) => ({
+    ...result,
+    provenance: {
+      source: "webmcp-agent" as const,
+      provider: publication.provider,
+      agentId: `webmcp:${trustedAuth.environment}:${trustedAuth.subject}`,
+      publishedAt: publication.publishedAt,
+    },
+  }));
 }
 
 const tools: ToolDef[] = [
@@ -732,6 +747,17 @@ const tools: ToolDef[] = [
       const project = useProjectStore.getState().project;
       const inputs = useSimulationStore.getState().pinStates;
       useSimulationStore.getState().start();
+      // The bounded portable contract is deliberately browser-first so a
+      // connected backend cannot silently replace the C/WASM trace with a
+      // different interpreter. More complex projects retain the remote-first
+      // path and fall back to the explicit browser interpreter when offline.
+      if (hasPortableButtonLedContract(project)) {
+        const res = await runBrowserSimulation(project, inputs, durationMs ?? 1000);
+        if (res.status === "unsupported-api") {
+          return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res, isError: true };
+        }
+        return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
+      }
       const sessionId = useSimulationStore.getState().remoteSessionId;
       const result = await fetchJson("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, inputs, duration_ns: (durationMs ?? 1000) * 1e6, ...(sessionId ? { session_id: sessionId } : {}) }) });
       const remotePayload = result.available && result.response?.ok && result.data && typeof result.data === "object" && result.data.runtime === "remote" && result.data.execution_mode === "behavioral";
@@ -750,7 +776,7 @@ const tools: ToolDef[] = [
         return { content: [{ type: "text", text: JSON.stringify(contractError, null, 2) }], data: contractError, isError: true };
       }
       if (!remote) {
-        const res = runBrowserSimulation(project, inputs, durationMs ?? 1000);
+        const res = await runBrowserSimulation(project, inputs, durationMs ?? 1000);
         const reason = result.available && !result.response?.ok ? ` Backend HTTP ${result.response?.status ?? "unknown"};` : "";
         res.note = `${res.note}${reason} Browser runtime is the active execution path.`;
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
@@ -872,39 +898,98 @@ const tools: ToolDef[] = [
   },
   {
     name: "shopping.search",
-    description: "Find exact parts for the current build. Agent-supplied listings may include up to three live offers per part; offline fallback keeps honest retailer links with prices marked unavailable.",
+    description: "Publish exact part listings found by an authenticated WebMCP shopping agent. The UI and frontend never generate fallback listings or retailer links.",
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string", description: "Exact part, board, manufacturer, or catalog id" },
         quantity: { type: "number", description: "Required quantity" },
-        listings: { type: "array", description: "Optional agent/web results with title, partNumber, exactMatch, offers, and alternatives" },
+        listings: {
+          type: "array",
+          minItems: 1,
+          description: "Agent-found listings only; every item must identify one canonical catalog part and its exact sourced offers.",
+          items: {
+            type: "object",
+            required: ["id", "catalogId", "title", "partNumber", "requestedQuantity", "exactMatch", "offers", "updatedAt"],
+            properties: {
+              id: { type: "string" },
+              catalogId: { type: "string", description: "Schematic catalog id; do not invent one" },
+              title: { type: "string" },
+              partNumber: { type: "string", description: "Manufacturer or distributor part number" },
+              requestedQuantity: { type: "integer", minimum: 1 },
+              exactMatch: { const: true },
+              updatedAt: { type: "string", format: "date-time" },
+              offers: {
+                type: "array",
+                minItems: 1,
+                maxItems: 3,
+                items: {
+                  type: "object",
+                  required: ["id", "retailer", "title", "price", "currency", "url", "fetchedAt", "provider"],
+                  properties: {
+                    id: { type: "string" }, retailer: { type: "string" }, title: { type: "string" },
+                    price: { anyOf: [{ type: "number", minimum: 0 }, { type: "null" }] },
+                    currency: { type: "string", pattern: "^[A-Z]{3}$" }, url: { type: "string", format: "uri" },
+                    fetchedAt: { type: "string", format: "date-time" }, provider: { type: "string" },
+                  },
+                },
+              },
+              alternatives: { type: "array", description: "Optional context-aware alternatives; publish each alternative as its own exact listing too." },
+            },
+          },
+        },
+        publication: { type: "object", description: "Sourcing provenance supplied by the agent. Authentication and agent identity come from the verified WebMCP session, not from these fields.", properties: { provider: { type: "string" }, publishedAt: { type: "string" } }, required: ["provider", "publishedAt"] },
       },
+      required: ["listings", "publication"],
     },
-    execute: async ({ query = "", quantity = 1, listings }) => {
-      const project = useProjectStore.getState().project;
+    execute: async ({ query = "", quantity = 1, listings, publication, __trustedAuth }) => {
       const requestedQuantity = Math.max(1, Math.min(999, Math.round(Number(quantity) || 1)));
       const searchQuery = String(query ?? "");
-      let source = "catalog-links";
-      let results: ShoppingResult[];
-      if (Array.isArray(listings)) {
-        results = normalizeShoppingResults(listings, searchQuery, requestedQuantity);
-        source = "webmcp-agent";
-      } else {
-        const remote = await fetchJson(`/api/parts/search?query=${encodeURIComponent(searchQuery)}&quantity=${requestedQuantity}`);
-        const remoteListings = remote.available && remote.response?.ok ? remote.data?.results ?? remote.data?.listings ?? remote.data?.items : null;
-        if (Array.isArray(remoteListings)) {
-          results = normalizeShoppingResults(remoteListings, searchQuery, requestedQuantity);
-          source = "parts-provider";
-        } else {
-          results = fallbackShoppingResults(searchQuery, requestedQuantity, project);
-        }
+      const shopping = useShoppingStore.getState();
+      shopping.setQuery(searchQuery);
+      if (!Array.isArray(listings) || listings.length === 0) {
+        shopping.setResults([]);
+        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true };
+        return { content: [{ type: "text", text: "Parts shopping requires a connected, authenticated WebMCP agent to publish listings. No local or provider fallback was used." }], data, isError: true };
       }
-      useShoppingStore.getState().setQuery(searchQuery);
-      useShoppingStore.getState().setResults(results);
+      const trustedAuth = __trustedAuth as TrustedToolContext | undefined;
+      if (!trustedAuth?.authenticated || !trustedAuth.subject) {
+        shopping.setResults([]);
+        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true };
+        return { content: [{ type: "text", text: "Listing publication was rejected because no trusted WebMCP session was present." }], data, isError: true };
+      }
+      const requestedPublication = publication && typeof publication === "object" ? publication as Record<string, unknown> : {};
+      const provider = String(requestedPublication.provider ?? "").trim();
+      const publishedAt = String(requestedPublication.publishedAt ?? "").trim();
+      if (!provider || !publishedAt) {
+        shopping.setResults([]);
+        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true };
+        return { content: [{ type: "text", text: "Each WebMCP publication must include the parts provider and the time the agent sourced the listings." }], data, isError: true };
+      }
+      const trustedPublication: AgentPublication = {
+        authenticated: true,
+        agentId: `webmcp:${trustedAuth.environment}:${trustedAuth.subject}`,
+        provider,
+        publishedAt,
+      };
+      const normalized = bindShoppingPublication(normalizeShoppingResults(listings, searchQuery, requestedQuantity), trustedPublication, trustedAuth);
+      const publicationResult = shopping.publishAgentResults(normalized, trustedPublication);
+      const results = useShoppingStore.getState().results;
+      const data = {
+        query: searchQuery,
+        source: "webmcp-agent",
+        liveOffers: results.some((result) => result.offers.some((offer) => offer.price !== null)),
+        accepted: publicationResult.accepted,
+        rejected: publicationResult.rejected,
+        results,
+        requiresWebMCPAgent: true,
+      };
+      if (!publicationResult.accepted) {
+        return { content: [{ type: "text", text: publicationResult.message ?? "The WebMCP agent publication was rejected." }], data, isError: true };
+      }
       return {
-        content: [{ type: "text", text: JSON.stringify({ query: searchQuery, source, liveOffers: results.some((result) => result.offers.some((offer) => offer.price !== null)), results }, null, 2) }],
-        data: { query: searchQuery, source, liveOffers: results.some((result) => result.offers.some((offer) => offer.price !== null)), results },
+        content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        data,
       };
     },
   },
@@ -1032,7 +1117,8 @@ async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> 
     // surface. Local development has the explicit development session; hosted
     // builds must have a platform-verified identity before any agent action.
     const hosted = typeof window !== "undefined" && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
-    if (hosted && !(await getAuthSession())) {
+    const session = await getAuthSession();
+    if (hosted && !session) {
       const denied = {
         content: [{ type: "text", text: "Sign in to use Schematic WebMCP tools; project state is scoped to your verified account." }],
         isError: true,
@@ -1040,7 +1126,10 @@ async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> 
       useWebMCPStore.getState().finishTool(activityId, denied, true);
       return denied;
     }
-    const result = await tool.execute(args);
+    const trustedAuth: TrustedToolContext | undefined = session
+      ? { authenticated: true, subject: session.subject, environment: session.environment }
+      : undefined;
+    const result = await tool.execute({ ...args, __trustedAuth: trustedAuth });
     useWebMCPStore.getState().finishTool(activityId, result);
     return result;
   } catch (e) {

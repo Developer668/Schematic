@@ -28,18 +28,21 @@ export default defineConfig(async () => {
   return {
     root: path.resolve(__dirname),
     publicDir: path.resolve(__dirname, "../frontend/public"),
+    assetsInclude: ["**/*.wasm"],
     resolve: {
       alias: {
         "@": path.resolve(__dirname),
         "@schematic/hardware-graph": path.resolve(__dirname, "../packages/hardware-graph/src"),
         "@schematic/validation": path.resolve(__dirname, "../packages/validation/src"),
         "@schematic/component-format": path.resolve(__dirname, "../packages/component-format/src"),
+        "@schematic/firmware-harness": path.resolve(__dirname, "../packages/firmware-harness/src/index.ts"),
         "@schematic/session": path.resolve(__dirname, "../functions/_auth.ts"),
       },
     },
     define: {
       "import.meta.env.VITE_BACKEND_URL": JSON.stringify(apiOrigin.replace(/\/+$/, "")),
     },
+    build: { assetsInlineLimit: 0 },
     server: { fs: { allow: [path.resolve(__dirname, ".."), path.resolve(__dirname)] } },
     plugins: [
       vinext(),
