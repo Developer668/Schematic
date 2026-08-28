@@ -24,18 +24,30 @@ export default defineConfig({
   },
   assetsInclude: ['**/*.wasm'],
   optimizeDeps: {
-    include: ['zustand', 'zod', '@xyflow/react'],
+    include: ['zustand', 'zod', '@xyflow/react', 'lucide-react'],
+    esbuildOptions: { target: 'esnext' },
   },
+  esbuild: { target: 'esnext', legalComments: 'none' },
   build: {
+    target: 'esnext',
+    cssCodeSplit: true,
+    sourcemap: false,
+    cssMinify: true,
+    minify: 'esbuild',
     chunkSizeWarningLimit: 8000,
+    reportCompressedSize: false,
     rollupOptions: {
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'xyflow': ['@xyflow/react'],
           'monaco': ['monaco-editor', '@monaco-editor/react'],
+          'lucide': ['lucide-react'],
+          'zustand': ['zustand'],
         },
+        compact: true,
       },
     },
   },
+  preview: { port: 4173, host: "0.0.0.0" },
 });
