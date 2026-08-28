@@ -15,6 +15,14 @@ export type CatalogCategory =
   | "analog"
   | "passive";
 
+export interface CatalogProperty {
+  name: string;
+  type?: string;
+  control?: string;
+  defaultValue?: unknown;
+  description?: string;
+}
+
 export interface CatalogComponent {
   id: string;
   title: string;
@@ -26,6 +34,9 @@ export interface CatalogComponent {
   models: Record<string, { engine: string; file: string; fidelity: string; verified: boolean }>;
   thumbnail?: string;
   tags?: string[];
+  tagName?: string;
+  properties?: CatalogProperty[];
+  defaultValues?: Record<string, unknown>;
 }
 
 type RawComponent = {
@@ -36,6 +47,9 @@ type RawComponent = {
   thumbnail?: string;
   tags?: string[];
   pinCount?: number;
+  tagName?: string;
+  properties?: CatalogProperty[];
+  defaultValues?: Record<string, unknown>;
 };
 
 function port(id: string, domain: HardwarePort["domain"], direction: HardwarePort["direction"] = "bidirectional"): HardwarePort {
@@ -522,6 +536,9 @@ function fromRaw(item: RawComponent): CatalogComponent {
     models: {},
     thumbnail: item.thumbnail,
     tags,
+    tagName: item.tagName,
+    properties: item.properties,
+    defaultValues: item.defaultValues,
   };
 }
 
@@ -571,6 +588,13 @@ const loaded = (metadata.components as RawComponent[]).map(fromRaw);
 const seen = new Set(loaded.map((c) => c.id));
 export const catalog: CatalogComponent[] = [...loaded, ...extras.filter((c) => !seen.has(c.id))];
 
+/** O(1) definition lookup for graph, editor, inspector, and WebMCP operations. */
+export const catalogById = new Map(catalog.map((component) => [component.id, component] as const));
+
+export function getCatalogComponent(id: string | undefined) {
+  return id ? catalogById.get(id) : undefined;
+}
+
 export const categories: CatalogCategory[] = [...new Set(catalog.map((c) => c.category))].sort();
 
 export function searchCatalog(query: string, filters?: { category?: string; domain?: string }): CatalogComponent[] {
@@ -579,7 +603,7 @@ export function searchCatalog(query: string, filters?: { category?: string; doma
     if (filters?.category && c.category !== filters.category) return false;
     if (filters?.domain && !c.ports.some((p) => p.domain === filters.domain)) return false;
     if (!q) return true;
-    const hay = [c.id, c.title, c.manufacturer, c.description, ...(c.tags ?? [])].filter(Boolean).join(" ").toLowerCase();
+    const hay = [c.id, c.title, c.tagName, c.manufacturer, c.description, ...(c.tags ?? [])].filter(Boolean).join(" ").toLowerCase();
     return hay.includes(q);
   });
 }
