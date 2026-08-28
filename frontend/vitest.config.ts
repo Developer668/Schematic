@@ -12,6 +12,7 @@ export default defineConfig({
       "@schematic/validation": path.resolve(__dirname, "../packages/validation/src"),
       "@schematic/component-format": path.resolve(__dirname, "../packages/component-format/src"),
       "@schematic/firmware-harness": path.resolve(__dirname, "../packages/firmware-harness/src"),
+      "@schematic/project-storage": path.resolve(__dirname, "../packages/project-storage/src"),
     },
   },
 });

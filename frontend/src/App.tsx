@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { registerWebMCPTools } from "./webmcp/tools.ts";
 import "./store/useThemeStore.ts";
 import { useAuth, getCurrentUserId } from "./auth/session.ts";
+import { startProjectPersistence } from "./store/projectPersistence.ts";
 
 const LandingPage = lazy(() => import("./pages/LandingPage.tsx"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage.tsx"));
@@ -37,6 +38,8 @@ export default function App() {
     // Expose per-user room id for debugging and for WebMCP to verify isolation
     (window as any).__schematicRoom = () => getCurrentUserId() || "global";
   }, []);
+
+  useEffect(() => startProjectPersistence(), []);
 
   return (
     <BrowserRouter>

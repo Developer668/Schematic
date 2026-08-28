@@ -64,9 +64,10 @@ export default function Inspector() {
         <div className="font-medium mb-1.5 text-xs">Execution coverage</div>
         <ul className="space-y-1 text-xs">
           <li className={`flex items-center gap-1.5 px-2 py-1 rounded border ${executionClasses}`}>
-            {executable ? <Check size={11} /> : <X size={11} />} Browser runtime {executable ? "supported" : "not assigned"}
+            {executable ? <Check size={11} /> : <X size={11} />} Browser execution {executable ? "supported" : "unavailable"}
           </li>
           <li className="flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-muted text-muted-foreground"><Check size={11} /> Typed graph validation</li>
+          {!executable && <li className="flex items-center gap-1.5 px-2 py-1 rounded border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200"><Check size={11} /> Source export and physical-board testing available</li>}
           <li className="flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-muted text-muted-foreground"><X size={11} /> Physical hardware validation</li>
         </ul>
       </div>

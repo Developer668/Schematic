@@ -18,6 +18,42 @@ const project: HardwareGraph = {
 };
 
 describe("browser hardware runtime", () => {
+  it("keeps topology checks and source handoff available when firmware execution is unavailable", () => {
+    const result = runFirmwareRuntime({ ...project, firmwareTargets: [] }, {}, 50);
+
+    expect(result.status).toBe("no-firmware");
+    expect(result.connectionCheck?.status).toBe("completed");
+    expect(result.connectionCheck?.connectionsChecked).toBe(project.connections.length);
+    expect(result.connectionCheck?.resolvedNets).toBe(result.resolvedNets);
+    expect(result.codeExecution?.status).toBe("unavailable");
+    expect(result.note).toContain("Connection topology was checked");
+    expect(result.codeExecution?.physicalHardwareNextStep).toContain("actual hardware");
+  });
+
+  it("checks wiring for a validation-only board without claiming browser code execution", () => {
+    const validationOnly: HardwareGraph = {
+      ...project,
+      components: project.components.map((component) => component.id === "board-1" ? { ...component, definitionId: "arduino-mega" } : component),
+      connections: project.connections.map((connection, index) => ({
+        ...connection,
+        source: { componentId: "board-1", portId: index === 0 ? "D18" : "D19" },
+      })),
+      firmwareTargets: [{
+        ...project.firmwareTargets[0],
+        definitionId: "arduino-mega",
+        boardFqbn: "arduino:avr:mega",
+      }],
+    };
+
+    const result = runFirmwareRuntime(validationOnly, {}, 50);
+    expect(result.status).toBe("invalid-target");
+    expect(result.targetIssues.some((issue) => issue.code === "UNSUPPORTED_BOARD_MODEL")).toBe(true);
+    expect(result.connectionCheck?.status).toBe("completed");
+    expect(result.connectionCheck?.connectionsChecked).toBe(2);
+    expect(result.codeExecution?.status).toBe("unavailable");
+    expect(result.note).toContain("editable and exportable");
+  });
+
   it("propagates a button program through an ESP32 net to an LED", () => {
     const pressed = runFirmwareRuntime(project, { "button-1:pressed": true }, 50);
     expect(pressed.status).toBe("completed");

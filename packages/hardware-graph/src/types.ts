@@ -215,7 +215,18 @@ export interface ValidationIssue {
   autoFix?: { description: string; action: string; params?: Record<string, unknown> };
 }
 
+/** Optional source-level diagnostics returned alongside hardware issues. */
+export interface ValidationCodeIssue {
+  id: string;
+  severity: "error" | "warning" | "info";
+  code: string;
+  message: string;
+  file?: string;
+  line?: number;
+}
+
 export interface ValidationResult {
   valid: boolean;
   issues: ValidationIssue[];
+  codeIssues?: ValidationCodeIssue[];
 }

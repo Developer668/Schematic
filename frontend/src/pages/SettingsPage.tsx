@@ -160,7 +160,7 @@ export default function SettingsPage() {
           <div className="flex-1">
             <h1 className="text-lg font-bold tracking-tight">Workspace Settings</h1>
             <p className="text-sm text-muted-foreground mt-1 leading-snug">
-              Tune appearance, canvas, and connectivity. Preferences stay in <code className="bg-muted px-1 rounded">localStorage</code>; the app checks its API boundary when available and keeps the browser runtime local.
+              Tune appearance, canvas, and connectivity. Projects are saved in browser <code className="bg-muted px-1 rounded">IndexedDB</code> with localStorage compatibility migration; the app keeps editing, validation, and source export local even when its optional API boundary is offline.
             </p>
             <div className="flex flex-wrap gap-2 mt-3">
               <span className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1.5 ${apiStatus === "ok" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" : apiStatus === "offline" ? "bg-amber-500/10 text-amber-600 border-amber-500/20" : "bg-muted text-muted-foreground border-border"}`}>

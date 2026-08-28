@@ -7,6 +7,7 @@ import ImportDialog from "../components/import/ImportDialog.tsx";
 import { useComponentCatalogStore } from "../store/useComponentCatalogStore.ts";
 import { useProjectStore } from "../store/useProjectStore.ts";
 import { useSimulationStore } from "../store/useSimulationStore.ts";
+import { useValidationStore, validateProject } from "../store/useValidationStore.ts";
 import { getRegisteredToolNames, invokeWebMCPTool } from "../webmcp/tools.ts";
 import { triggerDownloadVlx } from "../utils/vllxFile.ts";
 import { useThemeStore } from "../store/useThemeStore.ts";
@@ -76,6 +77,7 @@ export default function StudioPage() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState("");
   const [runError, setRunError] = useState("");
+  const [runNotice, setRunNotice] = useState("");
   const closeImport = useCallback(() => setShowImport(false), []);
 
   const [leftCollapsed, setLeftCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
@@ -114,9 +116,17 @@ export default function StudioPage() {
 
   const doRun = async () => {
     setRunError("");
+    setRunNotice("");
     try {
+      // Topology checks are independent from firmware execution. Always run
+      // them before the optional browser/remote runtime so a missing board
+      // model never hides useful wiring feedback.
+      const validation = validateProject(useProjectStore.getState().project);
+      useValidationStore.getState().setResult(validation);
       const result = await invokeWebMCPTool("simulation.run", { durationMs: 1000 });
       if (result?.isError) setRunError(result.content?.[0]?.text ?? "Simulation failed");
+      else if (result?.data?.codeExecution?.status === "unavailable") setRunNotice(result.data.note ?? result.data.codeExecution.physicalHardwareNextStep ?? "Browser firmware execution is unavailable. Source export and physical-board testing remain available.");
+      else if (validation.issues.some((issue) => issue.severity === "error")) setRunNotice(`Connection checks completed with ${validation.issues.filter((issue) => issue.severity === "error").length} error(s). See Problems; code editing and export remain available.`);
     } catch (error) {
       setRunError(`Simulation failed: ${(error as Error).message}`);
     }
@@ -434,6 +444,7 @@ export default function StudioPage() {
           <div className="relative min-h-0 flex-1">
             <HardwareCanvas key={project.id} />
             {runError && <div className="run-error" role="alert">{runError}</div>}
+            {runNotice && <div role="status" className="absolute bottom-3 left-3 right-3 z-10 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/80 dark:text-amber-100">{runNotice}</div>}
           </div>
           {!bottomCollapsed && <div role="separator" aria-orientation="horizontal" aria-label="Resize bottom panel" aria-valuemin={140} aria-valuemax={360} aria-valuenow={Math.round(bottomHeight)} tabIndex={0} onPointerDown={onResizeStart} onKeyDown={(event) => { if (event.key === "ArrowUp") { event.preventDefault(); setBottomHeight(bottomHeight + 16); } if (event.key === "ArrowDown") { event.preventDefault(); setBottomHeight(bottomHeight - 16); } if (event.key === "Home") { event.preventDefault(); setBottomHeight(140); } if (event.key === "End") { event.preventDefault(); setBottomHeight(360); } }} className="flex h-2 shrink-0 cursor-row-resize items-center justify-center bg-border/40 hover:bg-foreground/20 focus-visible:bg-accent/10">
             <span className="h-px w-10 rounded-full bg-muted-foreground/40" />

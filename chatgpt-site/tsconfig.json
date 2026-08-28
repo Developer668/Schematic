@@ -22,6 +22,7 @@
       "@schematic/validation": ["../packages/validation/src"],
       "@schematic/component-format": ["../packages/component-format/src"],
       "@schematic/firmware-harness": ["../packages/firmware-harness/src/index.ts"],
+      "@schematic/project-storage": ["../packages/project-storage/src/index.ts"],
       "@schematic/session": ["../functions/_auth.ts"]
     }
   },

@@ -54,6 +54,10 @@ export default function ValidationPanel({ embedded = false }: { embedded?: boole
             </li>
           ))}
           {compile.status !== "idle" && <li className="rounded border border-border bg-muted/20 px-2 py-2 text-xs"><div className="font-medium">Compile · <span className="font-mono">{compile.status}</span></div>{compile.boardFqbn && <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{compile.boardFqbn}</div>}</li>}
+          {compile.status === "unavailable" && <li role="status" className="rounded border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+            <div className="font-medium">Browser firmware execution is unavailable</div>
+            <div className="mt-1 leading-snug">Your code is still saved, editable, validated, and exportable. Compile and test it on the actual board with its normal toolchain. Wiring checks and supported browser simulations remain available.</div>
+          </li>}
           {valid === null && <li className="text-muted-foreground text-xs p-2 rounded border border-dashed border-border bg-muted/20">Click Validate to run checks: voltage, ground, I2C, pull-ups…</li>}
           {valid !== null && issues.length === 0 && codeIssues.length === 0 && <li className="text-muted-foreground text-xs p-2 rounded border border-dashed border-border bg-muted/20">No hardware or firmware diagnostics.</li>}
         </ul>

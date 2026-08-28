@@ -11,6 +11,19 @@ export interface RuntimeEvent {
   reason: string;
 }
 
+export interface RuntimeConnectionCheck {
+  status: "completed";
+  connectionsChecked: number;
+  resolvedNets: number;
+  note: string;
+}
+
+export interface RuntimeCodeExecution {
+  status: "executed" | "partial" | "unavailable";
+  reason?: string;
+  physicalHardwareNextStep: string;
+}
+
 export interface RuntimeResult {
   status: "completed" | "completed-with-warnings" | "no-firmware" | "invalid-target" | "unsupported-api";
   runtime: "browser" | "remote";
@@ -29,6 +42,10 @@ export interface RuntimeResult {
   warnings: ProtocolWarning[];
   unsupportedApis: string[];
   note: string;
+  /** Topology/protocol analysis is independent from firmware execution. */
+  connectionCheck?: RuntimeConnectionCheck;
+  /** Explicitly separates source editing/export from executable simulation. */
+  codeExecution?: RuntimeCodeExecution;
 }
 
 type Endpoint = { componentId: string; portId: string };
@@ -604,10 +621,23 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
   for (const [key, value] of Object.entries(inputs)) outputs[key] ??= value;
   const unsupportedApis = [...runtimeUnsupported];
   const status = programs.length > 0 ? runtimeUnsupported.size > 0 ? "unsupported-api" : protocol.warnings.length > 0 ? "completed-with-warnings" : "completed" : targetIssues.length > 0 ? "invalid-target" : "no-firmware";
+  const codeExecution: RuntimeCodeExecution = programs.length > 0
+    ? {
+        status: runtimeUnsupported.size > 0 ? "partial" : "executed",
+        ...(runtimeUnsupported.size > 0 ? { reason: `Unsupported calls were not executed: ${unsupportedApis.join(", ")}.` } : {}),
+        physicalHardwareNextStep: "The source remains available for export and testing with the target board’s toolchain.",
+      }
+    : {
+        status: "unavailable",
+        reason: targetIssues.length > 0
+          ? "This board or firmware target has no verified executable model in the browser runtime."
+          : "No firmware target is attached to this project.",
+        physicalHardwareNextStep: "Edit or export the source, then compile and test it on the actual hardware.",
+      };
   return {
     status,
     runtime: "browser",
-    executionEngine: "browser-interpreter",
+    ...(programs.length > 0 ? { executionEngine: "browser-interpreter" as const } : {}),
     durationMs: duration,
     outputs,
     events,
@@ -626,7 +656,14 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
           ? `Firmware executed with ${protocol.warnings.length} protocol warning(s). Review device wiring and model coverage before treating the result as valid.`
         : "Firmware executed in the browser runtime. Control flow, reads, writes, delays, serial output, protocol transactions, and connected nets were evaluated together."
       : targetIssues.length > 0
-        ? "Firmware targets were found but could not be executed until their board bindings or source files are corrected."
-        : "No firmware target is attached to this project, so only input signals were observed.",
+        ? "Connection topology was checked, but firmware execution is unavailable for this board/model in the browser. Your source remains editable and exportable; compile and test it on the actual hardware."
+        : "Connection topology was checked. No firmware target is attached, so code execution is unavailable; you can still edit/export the design and test source on the actual hardware.",
+    connectionCheck: {
+      status: "completed",
+      connectionsChecked: project.connections.length,
+      resolvedNets: dsu.size(),
+      note: "The browser resolved connected nets and ran available protocol checks independently of firmware execution.",
+    },
+    codeExecution,
   };
 }

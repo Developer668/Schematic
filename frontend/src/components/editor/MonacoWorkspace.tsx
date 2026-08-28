@@ -128,6 +128,7 @@ export default function MonacoWorkspace() {
         </div>
       </div>
       <div className="flex-1 min-h-[120px] relative"><Editor height="100%" theme={isDark ? "vs-dark" : "light"} language={binding?.targetConfig?.editorLanguage ?? "cpp"} value={code} onChange={(value) => handleCodeChange(value ?? "")} options={EDITOR_OPTIONS} /></div>
+      {compile.status === "unavailable" && <div role="status" className="border-t border-amber-200 bg-amber-50 px-2 py-2 text-[11px] leading-snug text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">Browser compilation is not available for this board in this Site. Your source is saved and can be exported, compiled with the board’s normal toolchain, and tested on the actual hardware.</div>}
       {compile.log && compile.status !== "idle" && (
         <div className="border-t border-border max-h-[140px] flex flex-col shrink-0">
           <div className="h-6 flex items-center justify-between px-2 bg-[#0a0a0a] border-b border-zinc-800"><span className="text-[11px] font-mono text-zinc-400">Output · {compile.status}</span><button type="button" onClick={() => setCompile({ status: "idle" })} className="text-zinc-400 hover:text-white p-1" aria-label="Clear compile output" title="Clear compile output"><Trash2 size={10} /></button></div>

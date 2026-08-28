@@ -1,0 +1,15 @@
+import {
+  PROJECT_EXPORT_FORMAT,
+  PROJECT_EXPORT_VERSION,
+  PROJECT_STORAGE_SCHEMA_VERSION,
+} from "./types";
+
+export const PROJECT_STORAGE_DB_NAME = "schematic-project-storage";
+export const PROJECT_STORAGE_DB_VERSION = 1;
+export const PROJECT_STORAGE_STORE_NAME = "workspaces";
+
+export {
+  PROJECT_EXPORT_FORMAT,
+  PROJECT_EXPORT_VERSION,
+  PROJECT_STORAGE_SCHEMA_VERSION,
+};

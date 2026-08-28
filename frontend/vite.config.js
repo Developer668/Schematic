@@ -9,6 +9,7 @@ export default defineConfig({
             '@schematic/hardware-graph': path.resolve(__dirname, '../packages/hardware-graph/src'),
             '@schematic/validation': path.resolve(__dirname, '../packages/validation/src'),
             '@schematic/component-format': path.resolve(__dirname, '../packages/component-format/src'),
+            '@schematic/project-storage': path.resolve(__dirname, '../packages/project-storage/src'),
         },
     },
     server: {
