@@ -1,6 +1,6 @@
 # ChatGPT Site implementation progress
 
-Last updated: 2026-08-28 (release candidate validation; deployment pending)
+Last updated: 2026-08-28 (ChatGPT Site version 8 deployed and verified)
 Owner: Codex; Sol (gpt-5.6-sol, medium) is the architecture and release authority.
 
 ## Scope
@@ -23,7 +23,7 @@ Shopping must be agent-only: the UI must not generate, crawl, or fall back to re
 - [completed] Genuine C→WASM browser target (Luna: Maxwell; optimized C module, configurable pin ABI v2, hash metadata, loader, and production build prerequisites are wired and tested).
 - [completed] Explicit device behavior coverage audit for common portable protocols: registry/adapters and deterministic display text capture added; unsupported boundaries remain explicit.
 - [completed] ChatGPT Site/auth/WebMCP/performance verification (Luna: McClintock; read-only).
-- [completed locally] Integration tests, OpenCode Muse adversarial review, and Sol’s release-candidate validation are complete; the deployed Site still needs the final acceptance pass.
+- [completed] Integration tests, OpenCode Muse adversarial review, Sol’s release-candidate validation, and the deployed Site acceptance pass are complete for the scoped implementation.
 
 ## Acceptance gates
 
@@ -32,7 +32,7 @@ Shopping must be agent-only: the UI must not generate, crawl, or fall back to re
 - [completed] Unsupported firmware/library behavior fails explicitly.
 - [completed] Shopping displays no listings before an agent publishes exact, provenance-backed results.
 - [completed] Project selector/rename/nav/copy behavior passes interaction tests at desktop and narrow widths.
-- [partial] ChatGPT Site auth redirect, WebMCP registration/invocation, API, production build, asset delivery, and WASM HTTP execution pass locally. The current published version is still the older build whose missing API routes fall through to SPA HTML; redeploy and authenticated HTTPS acceptance are required. The publication does not declare a native Site MCP server; that is distinct from the client-side WebMCP surface shipped in the app.
+- [partial] ChatGPT Site auth redirect, API, production build, asset delivery, WASM HTTP execution, and browser WebMCP compatibility bridge pass in production. Native WebMCP discovery by an external connected ChatGPT agent was not available in the verification browser and is not claimed. The publication does not declare a native Site MCP server; that is distinct from the client-side WebMCP surface shipped in the app.
 
 ## Handoff notes
 
@@ -42,7 +42,7 @@ This file is the continuation record. Update it after each meaningful implementa
 
 Homebrew LLVM 23.1.0 and LLD 23.1.0 are installed at `/opt/homebrew/opt/llvm` and `/opt/homebrew/opt/lld`; the initial Apple Clang target/linker limitation is bypassed with explicit tool paths. The required package build produces a 400-byte optimized C→WASM module with ABI v2 and SHA-256 metadata. The browser artifact and metadata are release inputs now, and site builds verify them without requiring a compiler; rebuilding after C-source changes remains a deliberate developer/toolchain step.
 
-The compiled browser path is intentionally limited to the exact button-led contract. Arbitrary C/C++, MCU-specific libraries, analog/RF/power behavior, and unsupported device models still use the interpreter/transport path or return an explicit unsupported result. A physical ESP32 toolchain/device was not available in this pass. The new same-origin ChatGPT Site API is validated locally; the deployed Site must be updated before HTTPS API behavior can be claimed.
+The compiled browser path is intentionally limited to the exact button-led contract. Arbitrary C/C++, MCU-specific libraries, analog/RF/power behavior, and unsupported device models still use the interpreter/transport path or return an explicit unsupported result. A physical ESP32 toolchain/device was not available in this pass. The same-origin ChatGPT Site API is deployed and validated over HTTPS. The remaining verification boundary is native external-agent WebMCP discovery/invocation, which requires a browser/ChatGPT environment that exposes the native producer API.
 
 ### Simulation coverage audit (2026-08-28)
 
@@ -56,7 +56,7 @@ Focused checks: capability registry, runtime, and hardware tests pass (26/26 in 
 - WASM and metadata are independent bundler URLs, so fingerprinting does not turn the metadata request into `button-led-<hash>.wasm.json`.
 - Vite and Vinext production outputs emit explicit hashed WASM and metadata files (400-byte WASM plus 687-byte metadata); the runtime uses streaming-first for unverified generic loads and a hash-before-instantiation buffered path for the verified bundled artifact.
 - The local Vinext Node server serves the WASM with `application/octet-stream`; the loader’s buffered fallback was exercised successfully, and Pages `_headers` now declares `application/wasm` for the deployed asset path.
-- The published ChatGPT Site now serves the current build. Its studio route redirects unauthenticated users to ChatGPT sign-in, its session endpoint returns the ChatGPT Site envelope, and its hashed WASM/metadata assets are delivered over HTTPS.
+- The published ChatGPT Site serves version 8 from commit `22e867503afcdf9a72b64409a8a159fa1ea5962c`. Its studio route redirects unauthenticated users to ChatGPT sign-in, its session endpoint issues the ChatGPT Site session under platform identity, and its hashed WASM/metadata assets are delivered over HTTPS.
 
 ### Adversarial review handoff
 
@@ -85,5 +85,7 @@ Focused checks: capability registry, runtime, and hardware tests pass (26/26 in 
 
 ### Production release evidence
 
-- Previous deployment evidence is stale for this release candidate. Do not treat the live URL as updated until the source commit is pushed, the ChatGPT Site version is saved/deployed, and the authenticated HTTPS acceptance matrix passes.
-- Target URL after deployment: `https://schematic-hardware-workspace.decipherer71.chatgpt.site`.
+- GitHub `main` contains commit `22e867503afcdf9a72b64409a8a159fa1ea5962c`; ChatGPT Site version 8 was saved from that same source commit and deployment `appgdep_6a9207d62e308191af9eda4dc5dfab4f` succeeded.
+- Production URL: `https://schematic-hardware-workspace.decipherer71.chatgpt.site`.
+- HTTPS `/api/health` returned 200 JSON with `api_boundary: same-origin`; `/api/docs` returned 200 JSON; the live Settings page showed `API connected`, `/api · same-origin API`, and 5 engines reported.
+- Live browser verification found the project selector/menu, component search (ESP32 results), Parts navigation/agent-only gate, workspace menu, and both resize separators. The browser rendered the WebMCP compatibility bridge; native WebMCP was not available in that session and is not represented as proven.
