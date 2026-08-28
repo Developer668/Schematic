@@ -111,7 +111,7 @@ export function useAuth() {
 // Mock login for when supertokens-core is not running (still gives per-user room on device)
 // This is used on the deployed Pages site until a dedicated core is provisioned.
 // It creates a deterministic userId from email and stores it in localStorage.
-export async function mockSignIn(email: string, password: string) {
+export async function mockSignIn(email: string, _password: string) {
   // Simple deterministic userId (hash of email)
   let hash = 0;
   for (let i = 0; i < email.length; i++) hash = ((hash << 5) - hash + email.charCodeAt(i)) | 0;

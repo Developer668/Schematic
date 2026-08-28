@@ -1,7 +1,7 @@
 import { Handle, NodeToolbar, Position, type NodeProps } from "@xyflow/react";
 import { CircuitBoard, Trash2 } from "lucide-react";
 import ComponentArtwork from "../ComponentArtwork.tsx";
-import { catalog } from "../../data/catalog.ts";
+import { getCatalogComponent } from "../../data/hardware.ts";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useSimulationStore } from "../../store/useSimulationStore.ts";
 
@@ -34,15 +34,19 @@ function Pin({ port, side, index, total }: { port: HardwareNodeData["ports"][num
   const top = `${((index + 1) / (total + 1)) * 100}%`;
   return (
     <div className={`hardware-pin hardware-pin-${side}`} style={{ top }} title={`${port.id} · ${port.domain} · ${port.direction}`}>
-      <Handle type="source" position={position} id={port.id} style={{ background: color, borderColor: "hsl(var(--background))" }} />
-      <Handle type="target" position={position} id={port.id} style={{ background: color, borderColor: "hsl(var(--background))" }} />
+      {port.direction === "output" || port.direction === "bidirectional" || port.direction === "power"
+        ? <Handle type="source" position={position} id={port.id} style={{ background: color, borderColor: "hsl(var(--background))" }} />
+        : null}
+      {port.direction === "input" || port.direction === "bidirectional" || port.direction === "power"
+        ? <Handle type="target" position={position} id={port.id} style={{ background: color, borderColor: "hsl(var(--background))" }} />
+        : null}
       <span className="hardware-pin-label"><b style={{ background: color }} />{port.id}</span>
     </div>
   );
 }
 
 export default function HardwareNode({ id, data, selected }: NodeProps & { data: HardwareNodeData }) {
-  const def = catalog.find((definition) => definition.id === data.definitionId);
+  const def = getCatalogComponent(data.definitionId);
   const leftPorts = data.ports.filter((_, index) => index % 2 === 0);
   const rightPorts = data.ports.filter((_, index) => index % 2 === 1);
   const rows = Math.max(leftPorts.length, rightPorts.length, 4);

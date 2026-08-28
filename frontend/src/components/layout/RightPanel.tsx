@@ -2,7 +2,7 @@ import { lazy, Suspense, useState } from "react";
 import Inspector from "../inspector/Inspector.tsx";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
-import { catalog } from "../../data/catalog.ts";
+import { getCatalogComponent } from "../../data/catalog.ts";
 import { Code2, Eye, FolderKanban, Copy, Trash2, ShoppingCart, Check } from "lucide-react";
 import ComponentArtwork from "../ComponentArtwork.tsx";
 import ShoppingWorkspace from "../shopping/ShoppingWorkspace.tsx";
@@ -85,7 +85,7 @@ export default function RightPanel() {
               <div className="border-b border-border bg-muted/30 px-2 py-1.5 kicker">Components</div>
               <div className="max-h-[200px] overflow-auto divide-y divide-border">
                 {project.components.length === 0 ? <div className="p-4 text-center text-xs text-muted-foreground">No components</div> : project.components.map((c) => {
-                  const d = catalog.find(x=>x.id===c.definitionId);
+                  const d = getCatalogComponent(c.definitionId);
                   const isActive = c.id===activeId;
                   return (
                     <button type="button" key={c.id} onClick={()=>useSelectionStore.getState().setActive(c.id)} className={`flex w-full gap-2 px-2 py-2 text-left hover:bg-muted ${isActive?"bg-muted":""}`}>

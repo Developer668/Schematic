@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ExternalLink, RotateCcw, Search, ShoppingCart, Sparkles, Trash2, Undo2 } from "lucide-react";
-import { catalog } from "../../data/catalog.ts";
+import { getCatalogComponent } from "../../data/catalog.ts";
 import { invokeWebMCPTool } from "../../webmcp/tools.ts";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useShoppingStore, type PartOffer, type ShoppingResult, type ShoppingState } from "../../store/useShoppingStore.ts";
@@ -29,7 +29,7 @@ function OfferRow({ offer, selected, onSelect }: { offer: PartOffer; selected: b
 }
 
 function ResultCard({ result, cartLine, onAdd, onRemove, onQuantity, onOffer, onAlternative }: { result: ShoppingResult; cartLine?: { resultId: string; quantity: number; selectedOfferId?: string }; onAdd: () => void; onRemove: () => void; onQuantity: (quantity: number) => void; onOffer: (offerId: string) => void; onAlternative: (catalogId: string) => void }) {
-  const alternatives = result.alternatives.filter((alternative) => catalog.some((definition) => definition.id === alternative.catalogId));
+  const alternatives = result.alternatives.filter((alternative) => Boolean(getCatalogComponent(alternative.catalogId)));
   return (
     <article className="rounded-md border border-border bg-card">
       <div className="flex items-start gap-2 px-2.5 py-2">

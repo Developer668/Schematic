@@ -55,6 +55,9 @@ export function validateProject(project: HardwareProject, lookup: ComponentDefLo
     if (src.direction === "output" && tgt.direction === "output") {
       issues.push({ id: `out-out-${conn.id}`, severity: "error", code: "OUTPUT_TO_OUTPUT", message: `Output ${srcKey} connected to output ${tgtKey}`, affectedConnections: [conn.id] });
     }
+    if (src.direction === "input" && tgt.direction === "input") {
+      issues.push({ id: `in-in-${conn.id}`, severity: "error", code: "INPUT_TO_INPUT", message: `Input ${srcKey} connected to input ${tgtKey}`, affectedConnections: [conn.id] });
+    }
     // TX→TX (UART)
     if (src.domain === "uart" && tgt.domain === "uart" && src.name.includes("TX") && tgt.name.includes("TX")) {
       issues.push({ id: `uart-tx-${conn.id}`, severity: "error", code: "UART_TX_TO_TX", message: `UART TX→TX illegal: ${srcKey} → ${tgtKey}`, affectedConnections: [conn.id] });
@@ -162,6 +165,7 @@ export function explainIssue(issue: ValidationIssue): string {
   const fixes: Record<string, string> = {
     VOLTAGE_MISMATCH: "Use a level shifter or choose a voltage-compatible variant. Check datasheet max ratings.",
     OUTPUT_TO_OUTPUT: "Outputs must drive inputs. Swap one side or insert buffer.",
+    INPUT_TO_INPUT: "Connect a driving output to the input, or use a bidirectional port.",
     UART_TX_TO_TX: "Connect TX→RX and RX→TX (cross-over).",
     I2C_ADDRESS_COLLISION: "Change one device's address jumper or use I2C mux.",
     MISSING_PULLUP: "Add 4.7kΩ pull-ups to VCC on SDA/SCL (or enable internal pull-ups if supported).",

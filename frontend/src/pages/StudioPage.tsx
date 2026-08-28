@@ -11,7 +11,7 @@ import { getRegisteredToolNames, invokeWebMCPTool } from "../webmcp/tools.ts";
 import { triggerDownloadVlx } from "../utils/vllxFile.ts";
 import { useThemeStore } from "../store/useThemeStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
-import { catalog, categories as allCategories } from "../data/catalog.ts";
+import { catalog, categories as allCategories, getCatalogComponent } from "../data/catalog.ts";
 import ComponentArtwork from "../components/ComponentArtwork.tsx";
 import LogoMark from "../components/LogoMark.tsx";
 import { useAuth, mockSignOut, getCurrentUserId } from "../auth/supertokens.ts";
@@ -160,7 +160,7 @@ export default function StudioPage() {
   const handleDragStart = (e: React.DragEvent, compId: string) => {
     e.dataTransfer.setData("application/x-schematic-component", compId);
     e.dataTransfer.effectAllowed = "copy";
-    const def = catalog.find((c) => c.id === compId);
+    const def = getCatalogComponent(compId);
     if (def?.thumbnail) {
       const div = document.createElement("div");
       div.innerHTML = def.thumbnail;

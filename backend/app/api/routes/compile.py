@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import shutil
 import subprocess
@@ -16,7 +18,10 @@ class SketchFile(BaseModel):
 class CompileReq(BaseModel):
     files: list[SketchFile] | None = None
     code: str | None = None
-    board_fqbn: str | None = "arduino:avr:uno"
+    board_fqbn: str | None = None
+    component_id: str | None = None
+    definition_id: str | None = None
+    language: str | None = None
 
 def _compile(files: list[SketchFile], fqbn: str) -> dict:
     executable = shutil.which("arduino-cli")
@@ -62,4 +67,16 @@ def _compile(files: list[SketchFile], fqbn: str) -> dict:
 @router.post("")
 async def compile(req: CompileReq):
     files = req.files or ([SketchFile(name="sketch.ino", content=req.code)] if req.code else [])
-    return await asyncio.to_thread(_compile, files, req.board_fqbn or "arduino:avr:uno")
+    fqbn = (req.board_fqbn or "").strip()
+    if not fqbn:
+        raise HTTPException(status_code=422, detail="board_fqbn is required; compilation must be explicitly targeted to a board")
+    if req.language and req.language not in {"arduino", "c"}:
+        raise HTTPException(status_code=422, detail=f"The arduino-cli compiler does not support {req.language} firmware")
+    result = await asyncio.to_thread(_compile, files, fqbn)
+    result["target"] = {
+        "component_id": req.component_id,
+        "definition_id": req.definition_id,
+        "language": req.language or "arduino",
+        "board_fqbn": fqbn,
+    }
+    return result

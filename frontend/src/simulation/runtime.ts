@@ -1,4 +1,4 @@
-import { catalog } from "../data/catalog.ts";
+import { componentPorts, resolveBoardPin, resolveFirmwareBinding, signalPort } from "../data/hardware.ts";
 import type { HardwareGraph } from "../store/useProjectStore.ts";
 
 export type RuntimeValue = boolean | number;
@@ -11,7 +11,7 @@ export interface RuntimeEvent {
 }
 
 export interface RuntimeResult {
-  status: "completed" | "no-firmware";
+  status: "completed" | "no-firmware" | "invalid-target";
   runtime: "browser";
   durationMs: number;
   outputs: Record<string, RuntimeValue>;
@@ -19,6 +19,7 @@ export interface RuntimeResult {
   programs: { componentId: string; writes: number; executions: number; sourceFiles: string[] }[];
   resolvedNets: number;
   serialOutput: string;
+  targetIssues: { componentId: string; code: string; message: string }[];
   note: string;
 }
 
@@ -61,34 +62,6 @@ class DisjointSet {
 
 function endpointKey(endpoint: Endpoint) { return `${endpoint.componentId}:${endpoint.portId}`; }
 
-function componentPorts(project: HardwareGraph, componentId: string) {
-  const instance = project.components.find((component) => component.id === componentId);
-  return catalog.find((definition) => definition.id === instance?.definitionId)?.ports ?? [];
-}
-
-function signalPort(project: HardwareGraph, componentId: string, requestedKey: string) {
-  const ports = componentPorts(project, componentId);
-  return ports.find((port) => port.id.toLowerCase() === requestedKey.toLowerCase())
-    ?? ports.find((port) => ["A", "OUT", "P1", "IN"].includes(port.id) && !["power", "ground"].includes(port.domain));
-}
-
-function pinEndpoint(project: HardwareGraph, boardId: string, expression: string, constants: Map<string, RuntimeValue>): Endpoint | null {
-  const target = project.components.find((component) => component.id === boardId);
-  const definition = catalog.find((item) => item.id === target?.definitionId);
-  const ports = definition?.ports ?? [];
-  const pinExpression = expression.trim().replace(/^\(+|\)+$/g, "");
-  const constantValue = constants.get(pinExpression);
-  const numeric = typeof constantValue === "number" ? String(constantValue) : pinExpression.match(/\d+/)?.[0];
-  if (!numeric) return null;
-  const direct = ports.find((port) => port.id === `GPIO${numeric}` || port.id === `D${numeric}` || port.id === `A${numeric}`);
-  if (direct) return { componentId: boardId, portId: direct.id };
-  for (const port of ports) {
-    const match = port.id.match(/(?:GPIO|D|A)(\d+)/i);
-    if (match?.[1] === numeric) return { componentId: boardId, portId: port.id };
-  }
-  return null;
-}
-
 function stripComments(source: string) {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 }
@@ -102,19 +75,18 @@ function parseConstants(source: string) {
     else if (/^(true|HIGH)$/i.test(raw)) constants.set(match[1], true);
     else if (/^(false|LOW)$/i.test(raw)) constants.set(match[1], false);
   }
+  const defines = source.matchAll(/^\s*#define\s+([A-Za-z_]\w*)\s+([^\s/]+).*$/gm);
+  for (const match of defines) {
+    const raw = match[2].trim();
+    if (/^-?\d+(?:\.\d+)?$/.test(raw)) constants.set(match[1], Number(raw));
+    else if (/^(true|HIGH)$/i.test(raw)) constants.set(match[1], true);
+    else if (/^(false|LOW)$/i.test(raw)) constants.set(match[1], false);
+  }
   return constants;
 }
 
 function parseExpressions(source: string) {
-  const expressions = new Map<string, RuntimeValue>();
-  const matches = source.matchAll(/(?:(?:const|constexpr)\s+)?(?:bool|boolean|byte|short|int|long|float|double|uint8_t|uint16_t)\s+([A-Za-z_]\w*)\s*=\s*([^;]+);/g);
-  for (const match of matches) {
-    const raw = match[2].trim();
-    if (/^-?\d+(?:\.\d+)?$/.test(raw)) expressions.set(match[1], Number(raw));
-    else if (/^(true|HIGH)$/i.test(raw)) expressions.set(match[1], true);
-    else if (/^(false|LOW)$/i.test(raw)) expressions.set(match[1], false);
-  }
-  return expressions;
+  return parseConstants(source);
 }
 
 function matchingDelimiter(source: string, start: number, open: string, close: string) {
@@ -226,13 +198,13 @@ function evaluateExpression(expression: string, context: ExpressionContext, dept
 
   const digitalRead = raw.match(/^digitalRead\s*\(\s*([^)]*)\s*\)$/i);
   if (digitalRead) {
-    const endpoint = pinEndpoint(context.project, context.boardId, digitalRead[1], context.constants);
+    const endpoint = resolveBoardPin(context.project, context.boardId, digitalRead[1], context.constants);
     const input = endpoint ? readInputValue(context.inputs, context.project, context.dsu, endpoint) : { value: false as RuntimeValue, semantic: false, inputKey: "" };
     return input.semantic && /pressed|button|click|trigger/i.test(input.inputKey) ? !input.value : Boolean(input.value);
   }
   const analogRead = raw.match(/^analogRead\s*\(\s*([^)]*)\s*\)$/i);
   if (analogRead) {
-    const endpoint = pinEndpoint(context.project, context.boardId, analogRead[1], context.constants);
+    const endpoint = resolveBoardPin(context.project, context.boardId, analogRead[1], context.constants);
     if (!endpoint) return 0;
     return readInputValue(context.inputs, context.project, context.dsu, endpoint).value;
   }
@@ -322,7 +294,7 @@ function executeStatement(statement: string, context: ExecutionContext) {
 
   const tone = text.match(/^tone\s*\(\s*([^,]+),\s*([^,]+),\s*([^)]+)\)$/i);
   if (tone) {
-    const endpoint = pinEndpoint(context.project, context.boardId, tone[1], context.constants);
+    const endpoint = resolveBoardPin(context.project, context.boardId, tone[1], context.constants);
     if (!endpoint) return;
     const root = context.dsu.find(endpointKey(endpoint));
     const start = Math.min(context.cursor, context.duration);
@@ -341,7 +313,7 @@ function executeStatement(statement: string, context: ExecutionContext) {
 
   const write = text.match(/^(digitalWrite|analogWrite)\s*\(\s*([^,]+),\s*([^)]+)\)$/i);
   if (write) {
-    const endpoint = pinEndpoint(context.project, context.boardId, write[2], context.constants);
+    const endpoint = resolveBoardPin(context.project, context.boardId, write[2], context.constants);
     if (!endpoint) return;
     const rawValue = evaluateExpression(write[3], context);
     const value = write[1].toLowerCase() === "analogwrite" ? asNumber(rawValue) : Boolean(rawValue);
@@ -372,13 +344,34 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
   const events: RuntimeEvent[] = [];
   const outputs: Record<string, RuntimeValue> = {};
   const programs: RuntimeResult["programs"] = [];
+  const targetIssues: RuntimeResult["targetIssues"] = [];
   const netValues = new Map<string, RuntimeValue>();
   for (const [key, value] of Object.entries(inputs)) netValues.set(dsu.find(key), value);
   const serial: string[] = [];
 
   for (const target of project.firmwareTargets) {
+    const binding = resolveFirmwareBinding(project, target.componentId);
+    if (!binding.component || !binding.definition) {
+      targetIssues.push({ componentId: target.componentId, code: "INVALID_FIRMWARE_TARGET", message: `Firmware target ${target.componentId} is not attached to a catalog component.` });
+      continue;
+    }
+    if (binding.definition.category !== "board") {
+      targetIssues.push({ componentId: target.componentId, code: "NON_BOARD_FIRMWARE_TARGET", message: `${binding.definition.title} is not a programmable board.` });
+      continue;
+    }
+    if (!binding.definitionMatchesTarget) {
+      targetIssues.push({ componentId: target.componentId, code: "FIRMWARE_DEFINITION_MISMATCH", message: `Firmware was written for ${target.definitionId}, but the current board is ${binding.component.definitionId}.` });
+      continue;
+    }
+    if (!binding.fqbnMatchesDefinition) {
+      targetIssues.push({ componentId: target.componentId, code: "FIRMWARE_FQBN_MISMATCH", message: `Firmware uses ${target.boardFqbn}, but ${binding.definition.title} maps to ${binding.targetConfig?.fqbn}.` });
+      continue;
+    }
     const source = sourceForTarget(target);
-    if (!source) continue;
+    if (!source) {
+      targetIssues.push({ componentId: target.componentId, code: "UNSUPPORTED_FIRMWARE_FILES", message: `No browser-supported C/C++ source file was found for ${binding.definition.title}.` });
+      continue;
+    }
     const constants = parseConstants(source);
     const context: ExecutionContext = {
       constants,
@@ -407,11 +400,11 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
       iteration += 1;
       if (context.cursor === before) break;
     }
-    programs.push({ componentId: target.componentId, writes: (source.match(/(?:digitalWrite|analogWrite)\s*\(/gi) ?? []).length, executions: context.executions, sourceFiles: target.files.map((file) => file.name) });
+    programs.push({ componentId: target.componentId, writes: context.writes, executions: context.executions, sourceFiles: target.files.map((file) => file.name) });
   }
 
   for (const [key, value] of Object.entries(inputs)) outputs[key] ??= value;
-  const status = programs.length > 0 ? "completed" : "no-firmware";
+  const status = programs.length > 0 ? "completed" : targetIssues.length > 0 ? "invalid-target" : "no-firmware";
   return {
     status,
     runtime: "browser",
@@ -421,8 +414,11 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
     programs,
     resolvedNets: dsu.size(),
     serialOutput: serial.join(""),
+    targetIssues,
     note: programs.length > 0
       ? "Firmware executed in the browser runtime. Control flow, reads, writes, delays, serial output, and connected nets were evaluated together."
-      : "No firmware target is attached to this project, so only input signals were observed.",
+      : targetIssues.length > 0
+        ? "Firmware targets were found but could not be executed until their board bindings or source files are corrected."
+        : "No firmware target is attached to this project, so only input signals were observed.",
   };
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import SuperTokens from "supertokens-auth-react";
 import { EmailPasswordPreBuiltUI } from "supertokens-auth-react/recipe/emailpassword/prebuiltui";
+import { canHandleRoute } from "supertokens-auth-react/ui";
 import { mockSignIn } from "../auth/supertokens";
 import LogoMark from "../components/LogoMark";
 
@@ -59,7 +59,7 @@ export default function AuthPage() {
                 If the core is not running, you will be redirected back to the mock room.
               </p>
               <div className="mt-4">
-                {EmailPasswordPreBuiltUI.canHandleRoute() ? (
+                {canHandleRoute([EmailPasswordPreBuiltUI]) ? (
                   <div>Loading SuperTokens UI…</div>
                 ) : (
                   <p className="text-sm">Core not reachable — use the local device room instead.</p>

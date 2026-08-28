@@ -45,4 +45,20 @@ describe("browser hardware runtime", () => {
     const run = runFirmwareRuntime(flashing, {}, 25);
     expect(run.events.filter((event) => event.endpoint === "led-1:IN").map((event) => [event.timeMs, event.value])).toEqual([[0, true], [10, false], [20, true], [25, false]]);
   });
+
+  it("resolves preprocessor pin definitions and reports stale board bindings", () => {
+    const definedPin = {
+      ...project,
+      firmwareTargets: [{ id: "fw-board-1", componentId: "board-1", files: [{ name: "main.ino", content: "#define LED_PIN 19\nvoid setup() {}\nvoid loop() { digitalWrite(LED_PIN, HIGH); }" }] }],
+    };
+    expect(runFirmwareRuntime(definedPin, {}, 1).outputs["led-1:IN"]).toBe(true);
+
+    const stale = {
+      ...definedPin,
+      firmwareTargets: [{ ...definedPin.firmwareTargets[0], definitionId: "arduino-uno" }],
+    };
+    const result = runFirmwareRuntime(stale, {}, 1);
+    expect(result.status).toBe("invalid-target");
+    expect(result.targetIssues[0]?.code).toBe("FIRMWARE_DEFINITION_MISMATCH");
+  });
 });

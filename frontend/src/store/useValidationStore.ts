@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { catalog } from "../data/catalog.ts";
+import { componentDefinition, componentPort, isBoardDefinition, resolveFirmwareBinding } from "../data/hardware.ts";
 import type { HardwareGraph } from "./useProjectStore.ts";
 
 export interface ValidationIssue {
@@ -31,9 +31,7 @@ export interface CompileState {
 }
 
 function portFor(project: HardwareGraph, componentId: string, portId: string) {
-  const instance = project.components.find((component) => component.id === componentId);
-  const definition = catalog.find((component) => component.id === instance?.definitionId);
-  return definition?.ports.find((port) => port.id === portId);
+  return componentPort(project, componentId, portId);
 }
 
 function isUntypedPort(port: { id: string; domain: string }) {
@@ -68,6 +66,9 @@ export function validateProject(project: HardwareGraph) {
     if (source.direction === "output" && target.direction === "output") {
       issues.push({ id: `out-out-${connection.id}`, severity: "error", code: "OUTPUT_TO_OUTPUT", message: `Output ${sourceKey} connected to output ${targetKey}.`, affectedConnections: [connection.id] });
     }
+    if (source.direction === "input" && target.direction === "input") {
+      issues.push({ id: `in-in-${connection.id}`, severity: "error", code: "INPUT_TO_INPUT", message: `Input ${sourceKey} connected to input ${targetKey}; connect a driving port to a receiving port.`, affectedConnections: [connection.id] });
+    }
     if (sourceDomain === "uart" && targetDomain === "uart" && source.name.toUpperCase().includes("TX") && target.name.toUpperCase().includes("TX")) {
       issues.push({ id: `uart-tx-${connection.id}`, severity: "error", code: "UART_TX_TO_TX", message: `UART TX→TX illegal: ${sourceKey} → ${targetKey}.`, affectedConnections: [connection.id] });
     }
@@ -100,7 +101,21 @@ export function validateProject(project: HardwareGraph) {
   if (project.connections.some((connection) => connection.domain === "i2c") && i2cDevices.length > 0 && !project.components.some((component) => component.definitionId.includes("resistor") || component.definitionId.includes("pullup"))) {
     issues.push({ id: "i2c-pullup", severity: "warning", code: "MISSING_PULLUP", message: "I2C bus has no pull-up resistor component (typically 4.7kΩ to VCC on SDA/SCL).", autoFix: { description: "Add 4.7k pull-ups", action: "insert_pullup", params: { value: 4700 } } });
   }
-  if (project.components.length > 0 && !project.components.some((component) => ["arduino", "esp32", "pi", "pico"].some((key) => component.definitionId.includes(key)))) issues.push({ id: "no-board", severity: "info", code: "NO_BOARD", message: "No microcontroller board detected — firmware has no target." });
+  const boards = project.components.filter((component) => isBoardDefinition(componentDefinition(project, component.id)));
+  if (project.components.length > 0 && boards.length === 0) issues.push({ id: "no-board", severity: "info", code: "NO_BOARD", message: "No microcontroller board detected — firmware has no target." });
+
+  for (const target of project.firmwareTargets) {
+    const binding = resolveFirmwareBinding(project, target.componentId);
+    if (!binding.component || !binding.definition) {
+      issues.push({ id: `firmware-missing-${target.id}`, severity: "error", code: "INVALID_FIRMWARE_TARGET", message: `Firmware target ${target.componentId} references a missing component or catalog definition.`, affectedComponents: [target.componentId] });
+    } else if (!isBoardDefinition(binding.definition)) {
+      issues.push({ id: `firmware-not-board-${target.id}`, severity: "error", code: "NON_BOARD_FIRMWARE_TARGET", message: `${binding.definition.title} cannot receive firmware.`, affectedComponents: [target.componentId] });
+    } else if (!binding.definitionMatchesTarget) {
+      issues.push({ id: `firmware-mismatch-${target.id}`, severity: "error", code: "FIRMWARE_DEFINITION_MISMATCH", message: `Firmware target ${target.id} was created for ${target.definitionId}, but the instance now contains ${binding.component.definitionId}.`, affectedComponents: [target.componentId] });
+    } else if (!binding.fqbnMatchesDefinition) {
+      issues.push({ id: `firmware-fqbn-mismatch-${target.id}`, severity: "error", code: "FIRMWARE_FQBN_MISMATCH", message: `Firmware target ${target.id} uses ${target.boardFqbn}, but ${binding.definition.title} maps to ${binding.targetConfig?.fqbn}.`, affectedComponents: [target.componentId] });
+    }
+  }
 
   const codeIssues = project.firmwareTargets.flatMap((target) => validateFirmwareFiles(target.files));
   return { valid: !issues.some((issue) => issue.severity === "error") && !codeIssues.some((issue) => issue.severity === "error"), issues, codeIssues };

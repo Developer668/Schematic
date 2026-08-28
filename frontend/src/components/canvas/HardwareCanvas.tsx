@@ -17,7 +17,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import HardwareNode from "./HardwareNode.tsx";
 import { useProjectStore } from "../../store/useProjectStore.ts";
-import { catalog } from "../../data/catalog.ts";
+import { getCatalogComponent } from "../../data/hardware.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
 import { Maximize2, Grid3X3, EyeOff, Map, AlertCircle } from "lucide-react";
@@ -27,7 +27,7 @@ const nodeTypes = { hardware: HardwareNode };
 
 function ArtworkMiniMapNode({ id, x, y, width, height, selected }: MiniMapNodeProps) {
   const component = useProjectStore((state) => state.project.components.find((item) => item.id === id));
-  const definition = catalog.find((item) => item.id === component?.definitionId);
+  const definition = getCatalogComponent(component?.definitionId);
   const artwork = componentArtworkHref(definition);
   const inset = Math.max(2, Math.min(width, height) * 0.08);
   return (
@@ -40,7 +40,7 @@ function ArtworkMiniMapNode({ id, x, y, width, height, selected }: MiniMapNodePr
 
 function projectToFlow(project: ReturnType<typeof useProjectStore.getState>["project"]) {
   const nodes: Node[] = project.components.map((c) => {
-    const def = catalog.find((d) => d.id === c.definitionId);
+    const def = getCatalogComponent(c.definitionId);
     return {
       id: c.id,
       type: "hardware",
@@ -107,13 +107,17 @@ export default function HardwareCanvas() {
     (params: FlowConnection) => {
       if (!params.source || !params.target || !params.sourceHandle || !params.targetHandle) return;
       try {
-        const { id } = connectPorts({ componentId: params.source, portId: params.sourceHandle }, { componentId: params.target, portId: params.targetHandle });
+        const connection = connectPorts({ componentId: params.source, portId: params.sourceHandle }, { componentId: params.target, portId: params.targetHandle });
         setEdges((eds) =>
           addEdge(
             {
               ...params,
-              id,
-              label: "gpio",
+              id: connection.id,
+              source: connection.source.componentId,
+              sourceHandle: connection.source.portId,
+              target: connection.target.componentId,
+              targetHandle: connection.target.portId,
+              label: connection.domain,
               type: "smoothstep",
             } as Edge,
             eds,
@@ -151,7 +155,7 @@ export default function HardwareCanvas() {
     // Try to get component id from drag data
     const compId = e.dataTransfer.getData("application/x-schematic-component");
     if (compId) {
-      const def = catalog.find((c) => c.id === compId);
+      const def = getCatalogComponent(compId);
       if (def) {
         setDragPreview({ html: def.thumbnail ?? "", title: def.title, x: e.clientX, y: e.clientY });
       }

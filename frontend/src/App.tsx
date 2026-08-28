@@ -4,7 +4,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { registerWebMCPTools } from "./webmcp/tools.ts";
 import "./store/useThemeStore.ts";
 import { useAuth, getCurrentUserId } from "./auth/supertokens.ts";
-import SuperTokens, { SuperTokensWrapper } from "supertokens-auth-react";
+import { SuperTokensWrapper } from "supertokens-auth-react";
 
 const LandingPage = lazy(() => import("./pages/LandingPage.tsx"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage.tsx"));

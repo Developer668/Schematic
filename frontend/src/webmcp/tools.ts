@@ -11,7 +11,8 @@ import { useValidationStore, validateFirmwareFiles, validateProject } from "../s
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
 import { useShoppingStore, type PartOffer, type ShoppingResult } from "../store/useShoppingStore.ts";
 import { runFirmwareRuntime } from "../simulation/runtime.ts";
-import { catalog, searchCatalog } from "../data/catalog.ts";
+import { catalog, getCatalogComponent, searchCatalog } from "../data/catalog.ts";
+import { isBoardDefinition, resolveFirmwareBinding } from "../data/hardware.ts";
 import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.json";
 
 type ToolDef = {
@@ -121,7 +122,7 @@ function retailerSearchUrl(retailer: string, title: string, partNumber?: string)
 }
 
 function fallbackShoppingResults(query: string, quantity: number, project: HardwareGraph): ShoppingResult[] {
-  const base = query.trim() ? searchCatalog(query).slice(0, 12) : project.components.map((component) => catalog.find((definition) => definition.id === component.definitionId)).filter(Boolean).slice(0, 12) as typeof catalog;
+  const base = query.trim() ? searchCatalog(query).slice(0, 12) : project.components.map((component) => getCatalogComponent(component.definitionId)).filter(Boolean).slice(0, 12) as typeof catalog;
   const requested = [...new Map([...base, ...base.flatMap((definition) => searchCatalog("", { category: definition.category }).filter((candidate) => candidate.id !== definition.id).slice(0, 2))].map((definition) => [definition.id, definition])).values()].slice(0, 24);
   return requested.map((definition) => {
     const partNumber = definition.partNumber ?? definition.id;
@@ -160,7 +161,7 @@ function normalizeShoppingResults(raw: unknown, query: string, quantity: number)
   return entries.slice(0, 24).map((entry, index) => {
     const item = entry && typeof entry === "object" ? entry as Record<string, any> : {};
     const catalogId = String(item.catalogId ?? item.componentId ?? item.id ?? `agent-part-${index + 1}`);
-    const definition = catalog.find((candidate) => candidate.id === catalogId) ?? searchCatalog(String(item.title ?? item.partNumber ?? query))[0];
+    const definition = getCatalogComponent(catalogId) ?? searchCatalog(String(item.title ?? item.partNumber ?? query))[0];
     const title = String(item.title ?? definition?.title ?? catalogId);
     const partNumber = item.partNumber ? String(item.partNumber) : definition?.partNumber ?? definition?.id;
     const rawOffers = Array.isArray(item.offers) ? item.offers : [];
@@ -321,7 +322,7 @@ const tools: ToolDef[] = [
       if (!replace && current.components.length > 0) return { content: [{ type: "text", text: "Blueprint not applied — the workspace is not empty and replace=false" }], isError: true };
       const project = cloneProject(blueprint);
       useProjectStore.getState().loadProject(project);
-      useSelectionStore.getState().setActive(project.components.find((component) => component.definitionId.includes("esp32") || component.definitionId.includes("arduino") || component.definitionId.includes("pico"))?.id ?? null);
+      useSelectionStore.getState().setActive(project.components.find((component) => isBoardDefinition(getCatalogComponent(component.definitionId)))?.id ?? null);
       useSimulationStore.getState().reset();
       useValidationStore.getState().clear();
       return {
@@ -405,7 +406,7 @@ const tools: ToolDef[] = [
     inputSchema: { type: "object", properties: { componentId: { type: "string", description: "Catalog id, e.g. bmp280" } }, required: ["componentId"] },
     annotations: { readOnlyHint: true },
     execute: async ({ componentId }) => {
-      const def = catalog.find((c) => c.id === componentId);
+      const def = getCatalogComponent(componentId);
       if (!def) return { content: [{ type: "text", text: `Unknown component ${componentId}` }], isError: true };
       return { content: [{ type: "text", text: JSON.stringify(def, null, 2) }], data: def };
     },
@@ -423,7 +424,7 @@ const tools: ToolDef[] = [
       required: ["componentId"],
     },
     execute: async ({ componentId, x, y }) => {
-      const def = catalog.find((c) => c.id === componentId);
+      const def = getCatalogComponent(componentId);
       if (!def) return { content: [{ type: "text", text: `Unknown component ${componentId}` }], isError: true };
       const { id } = useProjectStore.getState().addComponent(componentId, { x: x ?? 100, y: y ?? 100 });
       useSelectionStore.getState().setActive(id);
@@ -450,7 +451,7 @@ const tools: ToolDef[] = [
     execute: async ({ componentId }) => {
       const inst = useProjectStore.getState().project.components.find((c) => c.id === componentId);
       const defId = inst?.definitionId ?? componentId;
-      const def = catalog.find((c) => c.id === defId);
+      const def = getCatalogComponent(defId);
       if (!def) return { content: [{ type: "text", text: `Unknown ${componentId}` }], isError: true };
       return { content: [{ type: "text", text: JSON.stringify(def.ports, null, 2) }], data: def.ports };
     },
@@ -512,19 +513,26 @@ const tools: ToolDef[] = [
     required: ["componentId", "files"],
     },
     execute: async ({ componentId, files, language, boardFqbn }) => {
-      const component = useProjectStore.getState().project.components.find((item) => item.id === componentId);
-      if (!component) return { content: [{ type: "text", text: `Unknown component ${componentId}` }], isError: true };
-      const definition = catalog.find((item) => item.id === component.definitionId);
-      if (definition?.category !== "board") return { content: [{ type: "text", text: `${componentId} is not a programmable board` }], isError: true };
+      const id = String(componentId ?? "");
+      const project = useProjectStore.getState().project;
+      const binding = resolveFirmwareBinding(project, id);
+      if (!binding.component) return { content: [{ type: "text", text: `Unknown component ${id}` }], isError: true };
+      if (!isBoardDefinition(binding.definition)) return { content: [{ type: "text", text: `${id} is not a programmable board` }], isError: true };
       if (!Array.isArray(files) || files.length === 0) return { content: [{ type: "text", text: "At least one firmware file is required" }], isError: true };
       const normalizedFiles = files.map((file: any) => ({ name: String(file?.name ?? "").trim(), content: typeof file?.content === "string" ? file.content : String(file?.content ?? "") }));
       if (normalizedFiles.some((file: { name: string }) => !file.name)) return { content: [{ type: "text", text: "Every firmware file needs a name" }], isError: true };
-      useProjectStore.getState().updateFirmware(componentId, normalizedFiles, { language, boardFqbn });
+      const targetConfig = binding.targetConfig;
+      if (boardFqbn && targetConfig && boardFqbn !== targetConfig.fqbn) {
+        return { content: [{ type: "text", text: `${id} maps to ${targetConfig.fqbn}; refusing firmware for ${boardFqbn}` }], isError: true };
+      }
+      const targetLanguage = language ?? binding.target?.language ?? targetConfig?.language;
+      const targetFqbn = boardFqbn ?? targetConfig?.fqbn ?? binding.target?.boardFqbn;
+      useProjectStore.getState().updateFirmware(id, normalizedFiles, { language: targetLanguage, boardFqbn: targetFqbn });
       const codeIssues = validateFirmwareFiles(normalizedFiles);
       useValidationStore.getState().setCodeIssues(codeIssues);
-      useSimulationStore.getState().appendSerial(`[firmware] ${componentId} updated · ${normalizedFiles.length} file(s)\n`);
-      useSelectionStore.getState().setActive(componentId);
-      return { content: [{ type: "text", text: `Firmware written for ${componentId} (${normalizedFiles.length} file(s))` }], data: { componentId, files: normalizedFiles.map((file: { name: string }) => file.name), codeIssues } };
+      useSimulationStore.getState().appendSerial(`[firmware] ${id} updated · ${normalizedFiles.length} file(s)\n`);
+      useSelectionStore.getState().setActive(id);
+      return { content: [{ type: "text", text: `Firmware written for ${id} (${normalizedFiles.length} file(s))` }], data: { componentId: id, definitionId: binding.component.definitionId, language: targetLanguage, boardFqbn: targetFqbn, files: normalizedFiles.map((file: { name: string }) => file.name), codeIssues } };
     },
   },
   {
@@ -533,9 +541,10 @@ const tools: ToolDef[] = [
     inputSchema: { type: "object", properties: { componentId: { type: "string" } }, required: ["componentId"] },
     annotations: { readOnlyHint: true },
     execute: async ({ componentId }) => {
-      const target = useProjectStore.getState().project.firmwareTargets.find((item) => item.componentId === componentId);
-      if (!target) return { content: [{ type: "text", text: `No firmware for ${componentId}` }], isError: true };
-      return { content: [{ type: "text", text: JSON.stringify(target, null, 2) }], data: target };
+      const id = String(componentId ?? "");
+      const binding = resolveFirmwareBinding(useProjectStore.getState().project, id);
+      if (!binding.target) return { content: [{ type: "text", text: `No firmware for ${id}` }], isError: true };
+      return { content: [{ type: "text", text: JSON.stringify({ ...binding.target, definitionId: binding.component?.definitionId ?? binding.target.definitionId, definitionMatchesTarget: binding.definitionMatchesTarget }, null, 2) }], data: { ...binding.target, definitionId: binding.component?.definitionId ?? binding.target.definitionId, definitionMatchesTarget: binding.definitionMatchesTarget } };
     },
   },
   {
@@ -543,12 +552,23 @@ const tools: ToolDef[] = [
     description: "Run browser-safe firmware diagnostics and publish them to Problems and Debug",
     inputSchema: { type: "object", properties: { componentId: { type: "string" } }, required: ["componentId"] },
     execute: async ({ componentId }) => {
-      const target = useProjectStore.getState().project.firmwareTargets.find((item) => item.componentId === componentId);
-      if (!target) return { content: [{ type: "text", text: `No firmware for ${componentId}` }], isError: true };
+      const id = String(componentId ?? "");
+      const binding = resolveFirmwareBinding(useProjectStore.getState().project, id);
+      const target = binding.target;
+      if (!target) return { content: [{ type: "text", text: `No firmware for ${id}` }], isError: true };
+      const targetIssues = !binding.component || !binding.definition
+        ? [{ code: "INVALID_FIRMWARE_TARGET", message: `Firmware target ${id} references a missing board.` }]
+        : !isBoardDefinition(binding.definition)
+          ? [{ code: "NON_BOARD_FIRMWARE_TARGET", message: `${binding.definition.title} is not a programmable board.` }]
+          : !binding.definitionMatchesTarget
+            ? [{ code: "FIRMWARE_DEFINITION_MISMATCH", message: `Firmware was written for ${target.definitionId}, but the current board is ${binding.component.definitionId}.` }]
+            : !binding.fqbnMatchesDefinition
+              ? [{ code: "FIRMWARE_FQBN_MISMATCH", message: `Firmware uses ${target.boardFqbn}, but the current board maps to ${binding.targetConfig?.fqbn}.` }]
+            : [];
       const codeIssues = validateFirmwareFiles(target.files);
       useValidationStore.getState().setCodeIssues(codeIssues);
-      useSimulationStore.getState().appendSerial(`[firmware] checked ${componentId} · ${codeIssues.length} diagnostic(s)\n`);
-      return { content: [{ type: "text", text: JSON.stringify({ componentId, codeIssues }, null, 2) }], data: { componentId, codeIssues } };
+      useSimulationStore.getState().appendSerial(`[firmware] checked ${id} · ${codeIssues.length + targetIssues.length} diagnostic(s)\n`);
+      return { content: [{ type: "text", text: JSON.stringify({ componentId: id, codeIssues, targetIssues }, null, 2) }], data: { componentId: id, codeIssues, targetIssues } };
     },
   },
   {
@@ -557,30 +577,57 @@ const tools: ToolDef[] = [
     inputSchema: { type: "object", properties: { componentId: { type: "string" }, boardFqbn: { type: "string", description: "e.g. arduino:avr:uno" } }, required: ["componentId"] },
     execute: async ({ componentId, boardFqbn }) => {
       const proj = useProjectStore.getState().project;
-      const tgt = proj.firmwareTargets.find((f) => f.componentId === componentId);
+      const id = String(componentId ?? "");
+      const binding = resolveFirmwareBinding(proj, id);
+      const tgt = binding.target;
       if (!tgt) {
-        useValidationStore.getState().setCompile({ status: "error", log: `No firmware for ${componentId}`, checkedAt: Date.now() });
-        return { content: [{ type: "text", text: `No firmware for ${componentId} — call firmware.write first` }], isError: true };
+        useValidationStore.getState().setCompile({ status: "error", log: `No firmware for ${id}`, checkedAt: Date.now() });
+        return { content: [{ type: "text", text: `No firmware for ${id} — call firmware.write first` }], isError: true };
       }
-      const fqbn = boardFqbn ?? tgt.boardFqbn ?? "arduino:avr:uno";
+      if (!binding.component || !binding.definition || !isBoardDefinition(binding.definition)) {
+        const message = `${id} is not a valid programmable board target`;
+        useValidationStore.getState().setCompile({ status: "error", log: message, checkedAt: Date.now() });
+        return { content: [{ type: "text", text: message }], isError: true };
+      }
+      if (!binding.definitionMatchesTarget) {
+        const message = `Firmware target ${id} was created for ${tgt.definitionId}, but the current board is ${binding.component.definitionId}`;
+        useValidationStore.getState().setCompile({ status: "error", log: message, checkedAt: Date.now() });
+        return { content: [{ type: "text", text: message }], isError: true };
+      }
+      if (boardFqbn && binding.targetConfig && boardFqbn !== binding.targetConfig.fqbn) {
+        const message = `${id} maps to ${binding.targetConfig.fqbn}; refusing compilation for ${boardFqbn}`;
+        useValidationStore.getState().setCompile({ status: "error", log: message, checkedAt: Date.now() });
+        return { content: [{ type: "text", text: message }], isError: true };
+      }
+      if (!binding.fqbnMatchesDefinition && !boardFqbn) {
+        const message = `Firmware target ${id} uses ${tgt.boardFqbn}, but the current board maps to ${binding.targetConfig?.fqbn}`;
+        useValidationStore.getState().setCompile({ status: "error", log: message, checkedAt: Date.now() });
+        return { content: [{ type: "text", text: message }], isError: true };
+      }
+      const fqbn = boardFqbn ?? tgt.boardFqbn ?? binding.targetConfig?.fqbn;
       const codeIssues = validateFirmwareFiles(tgt.files);
       useValidationStore.getState().setCodeIssues(codeIssues);
+      if (!fqbn) {
+        const message = `No compiler target is mapped for ${binding.definition.title}; provide boardFqbn explicitly or use a supported board.`;
+        useValidationStore.getState().setCompile({ status: "unavailable", log: message, checkedAt: Date.now() });
+        return { content: [{ type: "text", text: message }], data: { componentId: id, definitionId: binding.component.definitionId, available: false, error: message, codeIssues } };
+      }
       useValidationStore.getState().setCompile({ status: "checking", boardFqbn: fqbn, log: "Checking source…", checkedAt: Date.now() });
-      const result = await fetchJson("/api/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: tgt.files, board_fqbn: fqbn }) });
+      const result = await fetchJson("/api/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: tgt.files, board_fqbn: fqbn, component_id: id, definition_id: binding.component.definitionId, language: tgt.language ?? binding.targetConfig?.language }) });
       if (!result.available) {
         const preflight = browserCompilePreflight(tgt.files, fqbn);
         const status = codeIssues.some((issue) => issue.severity === "error") ? "error" : "unavailable";
         useValidationStore.getState().setCompile({ status, boardFqbn: fqbn, log: JSON.stringify(preflight, null, 2), checkedAt: Date.now() });
-        useSimulationStore.getState().appendSerial(`[firmware] ${status === "error" ? "compile failed" : "preflight complete"} · ${componentId}\n`);
-        return { content: [{ type: "text", text: JSON.stringify(preflight, null, 2) }], data: { ...preflight, codeIssues } };
+        useSimulationStore.getState().appendSerial(`[firmware] ${status === "error" ? "compile failed" : "preflight complete"} · ${id}\n`);
+        return { content: [{ type: "text", text: JSON.stringify(preflight, null, 2) }], data: { ...preflight, componentId: id, definitionId: binding.component.definitionId, codeIssues } };
       }
       if (!result.response?.ok) {
         useValidationStore.getState().setCompile({ status: "error", boardFqbn: fqbn, log: JSON.stringify(result.data, null, 2), checkedAt: Date.now() });
         return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: result.data, isError: true };
       }
       useValidationStore.getState().setCompile({ status: "success", boardFqbn: fqbn, log: JSON.stringify(result.data, null, 2), checkedAt: Date.now() });
-      useSimulationStore.getState().appendSerial(`[firmware] compiled · ${componentId}\n`);
-      return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: result.data };
+      useSimulationStore.getState().appendSerial(`[firmware] compiled · ${id}\n`);
+      return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: { ...result.data, componentId: id, definitionId: binding.component.definitionId, boardFqbn: fqbn } };
     },
   },
   {

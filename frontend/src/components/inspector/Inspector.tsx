@@ -1,6 +1,6 @@
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
-import { catalog } from "../../data/catalog.ts";
+import { getCatalogComponent } from "../../data/catalog.ts";
 import { useMemo } from "react";
 import { Check, X, Trash2 } from "lucide-react";
 import ComponentArtwork from "../ComponentArtwork.tsx";
@@ -9,7 +9,7 @@ export default function Inspector() {
   const project = useProjectStore((s) => s.project);
   const activeId = useSelectionStore((s) => s.activeComponentId);
   const active = useMemo(() => project.components.find((c) => c.id === activeId), [project.components, activeId]);
-  const def = useMemo(() => (active ? catalog.find((d) => d.id === active.definitionId) : null), [active]);
+  const def = useMemo(() => (active ? getCatalogComponent(active.definitionId) : null), [active]);
 
   if (!active || !def) {
     return (

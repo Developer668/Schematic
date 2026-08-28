@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { catalog } from "../data/catalog.ts";
+import { defaultProperties, componentPort, getCatalogComponent, isBoardDefinition, orientConnectionEndpoints, resolveFirmwareBinding, boardTargetFor } from "../data/hardware.ts";
 import { useSelectionStore } from "./useSelectionStore.ts";
 import { useSimulationStore } from "./useSimulationStore.ts";
 import { useValidationStore } from "./useValidationStore.ts";
@@ -10,7 +10,7 @@ export interface HardwareGraph {
   description?: string;
   components: { id: string; definitionId: string; position: { x: number; y: number }; rotation: number; properties: Record<string, unknown>; label?: string }[];
   connections: { id: string; source: { componentId: string; portId: string }; target: { componentId: string; portId: string }; domain: string }[];
-  firmwareTargets: { id: string; componentId: string; language?: string; boardFqbn?: string; files: { name: string; content: string }[]; compiledArtifact?: { success: boolean; log: string; hexB64?: string; elfB64?: string; binB64?: string } }[];
+  firmwareTargets: { id: string; componentId: string; definitionId?: string; language?: string; boardFqbn?: string; files: { name: string; content: string }[]; compiledArtifact?: { success: boolean; log: string; hexB64?: string; elfB64?: string; binB64?: string } }[];
   simulation?: { mode: "interactive" | "batch"; durationMs?: number; engines: Record<string, { enabled: boolean; fidelity: "fast" | "high" }> };
   createdAt?: string;
   updatedAt?: string;
@@ -26,7 +26,7 @@ interface ProjectState {
   addComponent: (definitionId: string, pos?: { x: number; y: number }) => { id: string };
   moveComponent: (id: string, position: { x: number; y: number }) => void;
   removeComponent: (id: string) => void;
-  connectPorts: (source: { componentId: string; portId: string }, target: { componentId: string; portId: string }) => { id: string };
+  connectPorts: (source: { componentId: string; portId: string }, target: { componentId: string; portId: string }) => { id: string; domain: string; source: { componentId: string; portId: string }; target: { componentId: string; portId: string } };
   disconnectPorts: (connectionId: string) => void;
   getGraph: () => HardwareGraph;
   clear: () => void;
@@ -101,7 +101,7 @@ export function normalizeProject(stored: unknown, fallbackId?: string): Hardware
       definitionId: String(component?.definitionId ?? "unknown"),
       position: { x: Number(component?.position?.x ?? 100), y: Number(component?.position?.y ?? 100) },
       rotation: [0, 90, 180, 270].includes(component?.rotation) ? component.rotation : 0,
-      properties: component?.properties && typeof component.properties === "object" ? component.properties : {},
+      properties: { ...defaultProperties(String(component?.definitionId ?? "unknown")), ...(component?.properties && typeof component.properties === "object" && !Array.isArray(component.properties) ? component.properties : {}) },
     })) : [],
     connections: Array.isArray(value.connections) ? value.connections.map((connection: any) => ({
       ...connection,
@@ -114,6 +114,7 @@ export function normalizeProject(stored: unknown, fallbackId?: string): Hardware
       ...target,
       id: String(target?.id ?? makeId("fw")),
       componentId: String(target?.componentId ?? ""),
+      definitionId: typeof target?.definitionId === "string" ? target.definitionId : undefined,
       language: typeof target?.language === "string" ? target.language : "arduino",
       boardFqbn: typeof target?.boardFqbn === "string" ? target.boardFqbn : undefined,
       files: Array.isArray(target?.files) ? target.files.map((file: any) => ({ name: String(file?.name ?? "sketch.ino"), content: String(file?.content ?? "") })) : [],
@@ -219,10 +220,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   addComponent(definitionId, pos) {
+    if (!getCatalogComponent(definitionId)) throw new Error(`Unknown component definition ${definitionId}`);
     const id = `${definitionId}-${Math.random().toString(36).slice(2, 8)}`;
     const position = pos ?? { x: 100 + Math.random() * 400, y: 100 + Math.random() * 300 };
     set((state) => {
-      const project = { ...state.project, components: [...state.project.components, { id, definitionId, position, rotation: 0, properties: {} }], updatedAt: now() };
+      const project = { ...state.project, components: [...state.project.components, { id, definitionId, position, rotation: 0, properties: defaultProperties(definitionId) }], updatedAt: now() };
       const projects = state.projects.map((item) => item.id === project.id ? project : item);
       persistState(projects, state.activeProjectId);
       return { project, projects };
@@ -256,32 +258,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   connectPorts(source, target) {
     const current = get().project;
-    const findPort = (endpoint: { componentId: string; portId: string }) => {
-      const instance = current.components.find((component) => component.id === endpoint.componentId);
-      const definition = catalog.find((component) => component.id === (instance?.definitionId ?? endpoint.componentId));
-      return definition?.ports.find((port) => port.id === endpoint.portId);
-    };
-    const sourcePort = findPort(source);
-    const targetPort = findPort(target);
+    const sourcePort = componentPort(current, source.componentId, source.portId);
+    const targetPort = componentPort(current, target.componentId, target.portId);
     if (!sourcePort || !targetPort) throw new Error("Both connection endpoints must reference existing component ports");
     if (source.componentId === target.componentId) throw new Error("A component cannot be wired to itself");
-    const compatiblePower = ["power", "power_output"].includes(sourcePort.domain) && ["power", "power_output"].includes(targetPort.domain);
-    if (sourcePort.domain !== targetPort.domain && !compatiblePower) throw new Error(`Incompatible domains: ${sourcePort.domain} → ${targetPort.domain}`);
-    if (sourcePort.direction === "output" && targetPort.direction === "output") throw new Error("Output-to-output connections are not allowed");
+    const oriented = orientConnectionEndpoints(source, sourcePort, target, targetPort);
+    const orientedSourcePort = componentPort(current, oriented.source.componentId, oriented.source.portId)!;
+    const orientedTargetPort = componentPort(current, oriented.target.componentId, oriented.target.portId)!;
+    const compatiblePower = ["power", "power_output"].includes(orientedSourcePort.domain) && ["power", "power_output"].includes(orientedTargetPort.domain);
+    if (orientedSourcePort.domain !== orientedTargetPort.domain && !compatiblePower) throw new Error(`Incompatible domains: ${orientedSourcePort.domain} → ${orientedTargetPort.domain}`);
     const duplicate = current.connections.some((connection) => (
-      (connection.source.componentId === source.componentId && connection.source.portId === source.portId && connection.target.componentId === target.componentId && connection.target.portId === target.portId) ||
-      (connection.source.componentId === target.componentId && connection.source.portId === target.portId && connection.target.componentId === source.componentId && connection.target.portId === source.portId)
+      (connection.source.componentId === oriented.source.componentId && connection.source.portId === oriented.source.portId && connection.target.componentId === oriented.target.componentId && connection.target.portId === oriented.target.portId) ||
+      (connection.source.componentId === oriented.target.componentId && connection.source.portId === oriented.target.portId && connection.target.componentId === oriented.source.componentId && connection.target.portId === oriented.source.portId)
     ));
     if (duplicate) throw new Error("Those ports are already connected");
     const id = makeId("conn");
-    const domain = compatiblePower ? "power" : sourcePort.domain;
+    const domain = compatiblePower ? "power" : orientedSourcePort.domain;
     set((state) => {
-      const project = { ...state.project, connections: [...state.project.connections, { id, source, target, domain }], updatedAt: now() };
+      const project = { ...state.project, connections: [...state.project.connections, { id, source: oriented.source, target: oriented.target, domain }], updatedAt: now() };
       const projects = state.projects.map((item) => item.id === project.id ? project : item);
       persistState(projects, state.activeProjectId);
       return { project, projects };
     });
-    return { id };
+    return { id, domain, source: oriented.source, target: oriented.target };
   },
 
   disconnectPorts(connectionId) {
@@ -325,15 +324,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   updateFirmware(componentId, files, metadata = {}) {
+    const binding = resolveFirmwareBinding(get().project, componentId);
+    if (!binding.component) throw new Error(`Unknown component ${componentId}`);
+    if (!isBoardDefinition(binding.definition)) throw new Error(`${componentId} is not a programmable board`);
+    if (metadata.boardFqbn && binding.targetConfig && metadata.boardFqbn !== binding.targetConfig.fqbn) {
+      throw new Error(`${componentId} maps to ${binding.targetConfig.fqbn}; refusing firmware for ${metadata.boardFqbn}`);
+    }
     set((state) => {
       const existing = state.project.firmwareTargets.find((target) => target.componentId === componentId);
+      const targetConfig = boardTargetFor(binding.definition?.id);
       const target = {
         id: existing?.id ?? makeId(`fw-${componentId}`),
         componentId,
-        language: metadata.language ?? existing?.language ?? "arduino",
-        boardFqbn: metadata.boardFqbn ?? existing?.boardFqbn,
+        definitionId: binding.component!.definitionId,
+        language: metadata.language ?? existing?.language ?? targetConfig?.language ?? "arduino",
+        boardFqbn: metadata.boardFqbn ?? targetConfig?.fqbn ?? existing?.boardFqbn,
         files,
-        ...(existing?.compiledArtifact ? { compiledArtifact: existing.compiledArtifact } : {}),
       };
       const firmwareTargets = existing
         ? state.project.firmwareTargets.map((item) => item.componentId === componentId ? target : item)
@@ -418,7 +424,7 @@ function applyRemoteState(value: unknown) {
   const projects = stored.projects.map((project: unknown) => normalizeProject(project));
   const activeProjectId = projects.some((project: HardwareGraph) => project.id === stored.activeProjectId) ? stored.activeProjectId! : projects[0].id;
   const previous = useProjectStore.getState().activeProjectId;
-  const project = projects.find((item) => item.id === activeProjectId) ?? projects[0];
+  const project = projects.find((item: HardwareGraph) => item.id === activeProjectId) ?? projects[0];
   useProjectStore.setState({ projects, activeProjectId, project });
   if (previous !== activeProjectId) resetProjectRuntime();
 }
