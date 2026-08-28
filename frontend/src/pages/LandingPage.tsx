@@ -98,7 +98,7 @@ export default function LandingPage() {
       {/* Floating glass nav */}
       <nav className={`landing-nav ${menuOpen ? "is-open" : ""}`}>
         <Link to="/" className="landing-brand">
-          <span className="landing-logo">
+          <span className="brand-mark landing-logo">
             <LogoMark />
           </span>
           <span>Schematic</span>

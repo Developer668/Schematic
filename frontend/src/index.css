@@ -319,8 +319,8 @@ html.light .react-flow__pane {
 .mesh-c { width: 900px; height: 600px; left: 30%; bottom: -240px; background: radial-gradient(ellipse, #f59e0b 0%, transparent 72%); opacity: 0.07; }
 .landing-nav { position: sticky; top: 14px; z-index: 30; display: flex; width: min(1120px, calc(100% - 24px)); height: 54px; margin: 14px auto 0; align-items: center; justify-content: space-between; gap: 16px; padding: 6px 8px 6px 14px; border: 1px solid rgb(255 255 255 / .08); border-radius: 999px; background: rgb(16 16 20 / .72); backdrop-filter: blur(24px) saturate(1.4); box-shadow: 0 8px 32px rgb(0 0 0 / .28), inset 0 1px 0 rgb(255 255 255 / .06); }
 .landing-brand { display: flex; align-items: center; gap: 10px; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px; letter-spacing: -0.02em; }
-.landing-logo { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 999px; background: #fff; color: #050508; }
-.landing-logo .logo-mark { width: 20px; height: 20px; }
+.landing-logo { flex-shrink: 0; }
+.landing-logo .logo-mark { width: 22px; height: 22px; }
 .brand-dot { width: 6px; height: 6px; border-radius: 999px; background: #22c55e; box-shadow: 0 0 10px #22c55e; margin-left: 2px; }
 .landing-nav-pill { display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 999px; background: rgb(255 255 255 / .06); border: 1px solid rgb(255 255 255 / .06); }
 .landing-nav-pill a { padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 500; color: #a1a1aa; transition: all 220ms cubic-bezier(0.32,0.72,0,1); }
