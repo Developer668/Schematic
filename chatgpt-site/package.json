@@ -8,7 +8,7 @@
   "scripts": {
     "predev": "pnpm --filter @schematic/firmware-harness verify:wasm",
     "dev": "vinext dev",
-    "prebuild": "pnpm --filter @schematic/firmware-harness verify:wasm",
+    "prebuild": "node scripts/clean-build.mjs && pnpm --filter @schematic/firmware-harness verify:wasm",
     "build": "vinext build",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"

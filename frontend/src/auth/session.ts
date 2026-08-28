@@ -16,6 +16,8 @@ export interface AuthSession {
 const SESSION_EVENT = "schematic-session";
 let cachedSession: AuthSession | null | undefined;
 let sessionRequest: Promise<AuthSession | null> | null = null;
+let cachedSessionExpiresAt = 0;
+const SESSION_REFRESH_SKEW_MS = 30_000;
 
 function isLocalHost() {
   return typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
@@ -88,7 +90,8 @@ function announceSession() {
 }
 
 export async function getAuthSession(force = false): Promise<AuthSession | null> {
-  if (!force && cachedSession !== undefined) return cachedSession;
+  const sessionFresh = !cachedSession?.token || !cachedSessionExpiresAt || cachedSessionExpiresAt - Date.now() > SESSION_REFRESH_SKEW_MS;
+  if (!force && cachedSession !== undefined && sessionFresh) return cachedSession;
   if (!force && sessionRequest) return sessionRequest;
 
   sessionRequest = (async () => {
@@ -98,10 +101,12 @@ export async function getAuthSession(force = false): Promise<AuthSession | null>
       if (!response.ok) throw new Error(`Session endpoint returned HTTP ${response.status}`);
       const session = normalizeSession(payload);
       cachedSession = session ?? localDevelopmentSession();
+      cachedSessionExpiresAt = session?.token && session.expiresIn ? Date.now() + session.expiresIn * 1000 : 0;
     } catch {
       // The local session is a development-only convenience. Production never
       // turns a failed auth request into an authenticated browser identity.
       cachedSession = localDevelopmentSession();
+      cachedSessionExpiresAt = 0;
     }
     announceSession();
     return cachedSession ?? null;
@@ -142,8 +147,8 @@ export function useAuth() {
   return { session, loading, isAuthenticated: Boolean(session) };
 }
 
-export async function getAuthHeaders(): Promise<Record<string, string>> {
-  const session = await getAuthSession();
+export async function getAuthHeaders(force = false): Promise<Record<string, string>> {
+  const session = await getAuthSession(force);
   return session?.token ? { Authorization: `Bearer ${session.token}` } : {};
 }
 
@@ -178,6 +183,7 @@ export function authLogoutUrl(returnTo = "/") {
 export function signOut() {
   cachedSession = null;
   sessionRequest = null;
+  cachedSessionExpiresAt = 0;
   announceSession();
   if (typeof window !== "undefined") window.location.assign(authLogoutUrl());
 }

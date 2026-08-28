@@ -1,23 +1,8 @@
-import { issueSessionToken, responseForSession, verifySessionToken, type AuthEnv, type SessionIdentity } from "@schematic/session";
+import { issueSessionToken, responseForSession, verifySessionToken, type SessionIdentity } from "@schematic/session";
 import { getChatGPTUser } from "../../../chatgpt-auth";
+import { siteAuthEnv } from "../../site-auth";
 
 export const dynamic = "force-dynamic";
-
-async function siteAuthEnv(): Promise<AuthEnv> {
-  // Vinext exposes Cloudflare bindings through this module in the deployed
-  // Worker. The Node production server used for local smoke tests does not,
-  // so keep a process.env fallback without adding a second auth mechanism.
-  try {
-    const workers = await import("cloudflare:workers");
-    return workers.env as unknown as AuthEnv;
-  } catch {
-    return {
-      SCHEMATIC_AUTH_MODE: "chatgpt-sites",
-      SCHEMATIC_SESSION_SECRET: process.env.SCHEMATIC_SESSION_SECRET,
-      SCHEMATIC_SESSION_TTL_SECONDS: process.env.SCHEMATIC_SESSION_TTL_SECONDS,
-    };
-  }
-}
 
 export async function GET(request: Request) {
   const authEnv = await siteAuthEnv();

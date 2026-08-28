@@ -18,11 +18,11 @@ export default defineConfig(async () => {
   process.env.WRANGLER_WRITE_LOGS ??= "false";
   process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
   process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
-  // The ChatGPT Site owns the identity/session issuer. Its same code-base
-  // frontend sends authenticated API calls to the canonical Pages Functions
-  // deployment, whose shared signing secret verifies the token. Override this
-  // for local end-to-end checks with VITE_BACKEND_URL=http://127.0.0.1:8788.
-  const apiOrigin = process.env.VITE_BACKEND_URL?.trim() || process.env.SCHEMATIC_API_ORIGIN?.trim() || "https://schematic-webmcp-studio.pages.dev";
+  // The ChatGPT Site owns the API boundary as well as the identity/session
+  // issuer. Keep the default same-origin so a deployed Site never silently
+  // sends workspace data to a different deployment. A remote origin is an
+  // explicit local/integration-test override only.
+  const apiOrigin = process.env.VITE_BACKEND_URL?.trim() || process.env.SCHEMATIC_API_ORIGIN?.trim() || "";
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {

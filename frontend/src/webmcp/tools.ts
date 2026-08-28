@@ -61,11 +61,20 @@ function base64FromHex(hex: string) {
  */
 export async function fetchJson(path: string, init?: RequestInit): Promise<ApiJsonResult> {
   try {
-    const headers = new Headers(init?.headers);
-    if (!headers.has("Content-Type") && init?.body) headers.set("Content-Type", "application/json");
-    const authHeaders = await getAuthHeaders();
-    for (const [key, value] of Object.entries(authHeaders)) headers.set(key, value);
-    const response = await fetch(apiUrl(path), { credentials: "include", ...init, headers });
+    const request = async (authHeaders: Record<string, string>) => {
+      const headers = new Headers(init?.headers);
+      if (!headers.has("Content-Type") && init?.body) headers.set("Content-Type", "application/json");
+      for (const [key, value] of Object.entries(authHeaders)) headers.set(key, value);
+      return fetch(apiUrl(path), { credentials: "include", ...init, headers });
+    };
+    let response = await request(await getAuthHeaders());
+    // A Site session is intentionally short-lived. Retry one time with a
+    // freshly issued session so an agent action does not fail just because a
+    // tab was left open. All current WebMCP requests use replayable JSON
+    // bodies; avoid replaying an arbitrary streaming request.
+    if (response.status === 401 && (!init?.body || typeof init.body === "string")) {
+      response = await request(await getAuthHeaders(true));
+    }
     const responseText = typeof response.text === "function" ? await response.text() : null;
 
     if (responseText !== null) {
@@ -1198,6 +1207,9 @@ function isAllowedAgentOrigin(origin: string) {
 }
 
 export async function registerWebMCPTools() {
+  useWebMCPStore.getState().setRegistration({ state: "checking", registeredCount: 0, error: undefined });
+  const existingModelContext: any = (document as any).modelContext ?? (navigator as any).modelContext;
+  const hasNativeModelContext = typeof existingModelContext?.registerTool === "function";
   installModelContextProducerPolyfill();
   installModelContextTestingPolyfill();
   const mc: any = (document as any).modelContext ?? (navigator as any).modelContext;
@@ -1225,9 +1237,12 @@ export async function registerWebMCPTools() {
     });
   }
   if (!mc || typeof mc.registerTool !== "function") {
+    useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, error: "The browser did not expose document.modelContext." });
     console.warn("[WebMCP] modelContext not available — run in Chrome ≥146 with #enable-webmcp-testing, or use demo shim. Tools still callable via window.__schematicTools and postMessage");
     return;
   }
+  let registeredCount = 0;
+  let registrationErrors = 0;
   for (const t of tools) {
     const ctrl = new AbortController();
     controllers.push(ctrl);
@@ -1246,8 +1261,10 @@ export async function registerWebMCPTools() {
         },
         { signal: ctrl.signal },
       );
+      registeredCount += 1;
       console.log(`[WebMCP] registered ${t.name} (room-aware)`);
     } catch (e) {
+      registrationErrors += 1;
       console.error(`[WebMCP] failed to register ${t.name}:`, e);
     }
   }
@@ -1255,6 +1272,11 @@ export async function registerWebMCPTools() {
   if ("ontoolchange" in mc) {
     mc.ontoolchange = () => console.log("[WebMCP] toolset changed");
   }
+  useWebMCPStore.getState().setRegistration({
+    state: registrationErrors > 0 ? "error" : hasNativeModelContext ? "native" : "fallback",
+    registeredCount,
+    ...(registrationErrors > 0 ? { error: `${registrationErrors} tool registration${registrationErrors === 1 ? "" : "s"} failed.` } : { error: undefined }),
+  });
   console.log(`[WebMCP] ready — ${WEBMCP_TOOL_COUNT} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
 }
 

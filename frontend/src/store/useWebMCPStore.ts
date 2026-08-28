@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 export type ToolActivityStatus = "running" | "success" | "error";
+export type WebMCPRegistrationState = "checking" | "native" | "fallback" | "unavailable" | "error";
 
 export interface ToolActivity {
   id: string;
@@ -15,9 +16,15 @@ export interface ToolActivity {
 
 interface WebMCPState {
   activities: ToolActivity[];
+  registration: {
+    state: WebMCPRegistrationState;
+    registeredCount: number;
+    error?: string;
+  };
   beginTool: (name: string, args: Record<string, unknown>) => string;
   finishTool: (id: string, result: unknown, isError?: boolean) => void;
   clearActivities: () => void;
+  setRegistration: (registration: Partial<WebMCPState["registration"]>) => void;
 }
 
 const webmcpChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("schematic-webmcp-sync") : null;
@@ -37,6 +44,7 @@ function resultText(result: any) {
 
 export const useWebMCPStore = create<WebMCPState>((set) => ({
   activities: [],
+  registration: { state: "checking", registeredCount: 0 },
   beginTool(name, args) {
     const id = `tool-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const activity = { id, name, args, status: "running" as const, startedAt: Date.now() };
@@ -62,6 +70,9 @@ export const useWebMCPStore = create<WebMCPState>((set) => ({
   clearActivities() {
     set({ activities: [] });
     webmcpChannel?.postMessage({ type: "activity:clear" });
+  },
+  setRegistration(registration) {
+    set((state) => ({ registration: { ...state.registration, ...registration } }));
   },
 }));
 

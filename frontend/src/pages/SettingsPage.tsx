@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useThemeStore } from "../store/useThemeStore.ts";
 import { useProjectStore } from "../store/useProjectStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
+import { useWebMCPStore } from "../store/useWebMCPStore.ts";
 import { getRegisteredToolNames } from "../webmcp/tools.ts";
 import LogoMark from "../components/LogoMark.tsx";
 import { apiUrl, getAuthHeaders } from "../auth/session.ts";
@@ -33,17 +34,31 @@ export default function SettingsPage() {
   const project = useProjectStore((s) => s.project);
   const clear = useProjectStore((s) => s.clear);
   const { showGrid: lineGrid, setShowGrid: setLineGrid, snapToGrid: snapGrid, setSnapToGrid: setSnapGrid, libraryDensity, setLibraryDensity, reducedMotion, setReducedMotion } = useWorkspaceStore();
+  const webmcpRegistration = useWebMCPStore((state) => state.registration);
   const [apiStatus, setApiStatus] = useState<"checking" | "ok" | "offline">("checking");
   const [enginesStatus, setEnginesStatus] = useState<any>(null);
   const [notice, setNotice] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
   const [clearArmed, setClearArmed] = useState(false);
   const toolCount = getRegisteredToolNames().length;
   const apiBaseUrl = apiUrl("/api");
+  const apiBoundaryLabel = apiBaseUrl.startsWith("/") ? "same-origin API" : "configured API";
+  const webmcpStatus = webmcpRegistration.state === "native"
+    ? "Native WebMCP connected"
+    : webmcpRegistration.state === "fallback"
+      ? "Local compatibility bridge"
+      : webmcpRegistration.state === "error"
+        ? "Registration incomplete"
+        : webmcpRegistration.state === "unavailable"
+          ? "WebMCP unavailable"
+          : "Checking WebMCP…";
+  const webmcpCount = webmcpRegistration.state === "checking" ? `${toolCount} declared` : `${webmcpRegistration.registeredCount}/${toolCount} registered`;
 
   const checkApi = useCallback(async () => {
     setApiStatus("checking");
     try {
-      const response = await fetch(apiUrl("/api/engines"), { headers: await getAuthHeaders(), credentials: "include" });
+      const request = async (force = false) => fetch(apiUrl("/api/engines"), { headers: await getAuthHeaders(force), credentials: "include" });
+      let response = await request();
+      if (response.status === 401) response = await request(true);
       if (!response.ok) throw new Error(`Backend returned ${response.status}`);
       const contentType = response.headers.get("content-type") ?? "";
       if (!contentType.includes("application/json")) {
@@ -145,7 +160,7 @@ export default function SettingsPage() {
           <div className="flex-1">
             <h1 className="text-lg font-bold tracking-tight">Workspace Settings</h1>
             <p className="text-sm text-muted-foreground mt-1 leading-snug">
-              Tune appearance, canvas, and connectivity. All settings sync via <code className="bg-muted px-1 rounded">localStorage</code> and live-connect to the backend — verifies “all connect” as requested.
+              Tune appearance, canvas, and connectivity. Preferences stay in <code className="bg-muted px-1 rounded">localStorage</code>; the app checks its API boundary when available and keeps the browser runtime local.
             </p>
             <div className="flex flex-wrap gap-2 mt-3">
               <span className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1.5 ${apiStatus === "ok" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" : apiStatus === "offline" ? "bg-amber-500/10 text-amber-600 border-amber-500/20" : "bg-muted text-muted-foreground border-border"}`}>
@@ -262,7 +277,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/30">
                   <div>
                     <div className="text-xs font-medium flex items-center gap-1"><Globe size={12} /> Backend API</div>
-                      <div className="text-[11px] font-mono text-muted-foreground">{apiBaseUrl} · browser runtime fallback enabled</div>
+                      <div className="text-[11px] font-mono text-muted-foreground">{apiBaseUrl} · {apiBoundaryLabel} · browser runtime fallback enabled</div>
                   </div>
                   <a href="/api/docs" target="_blank" className="text-xs px-2.5 py-1 rounded-lg bg-card border border-border hover:bg-muted inline-flex items-center gap-1">
                     Open <ExternalLink size={10} />
@@ -282,17 +297,17 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/30">
                   <div>
                     <div className="text-xs font-medium flex items-center gap-1"><Shield size={12} /> WebMCP</div>
-                    <div className="text-[11px] text-muted-foreground">{toolCount} tools · document.modelContext</div>
+                    <div className="text-[11px] text-muted-foreground">{webmcpCount} tools · {webmcpStatus}</div>
                   </div>
-                  <span className="text-[11px] px-2 py-1 rounded-full bg-primary text-primary-foreground">Agent-ready</span>
+                  <span className={`text-[11px] px-2 py-1 rounded-full ${webmcpRegistration.state === "native" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : webmcpRegistration.state === "error" || webmcpRegistration.state === "unavailable" ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-primary text-primary-foreground"}`}>{webmcpRegistration.state === "native" ? "Connected" : webmcpRegistration.state === "fallback" ? "Fallback" : webmcpRegistration.state === "checking" ? "Checking" : "Review"}</span>
                 </div>
               </div>
 
               <div className="rounded-xl bg-muted/20 border border-border p-3">
                 <div className="text-xs font-medium mb-1">Verify checklist</div>
                 <ul className="text-xs space-y-1 text-muted-foreground">
-                  <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Frontend ↔ Backend via /api proxy (vite)</li>
-                  <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> WebMCP tools registered on load</li>
+                  <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Frontend ↔ same-origin API boundary</li>
+                  <li className="flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${webmcpRegistration.state === "native" ? "bg-emerald-500" : webmcpRegistration.state === "error" || webmcpRegistration.state === "unavailable" ? "bg-amber-500" : "bg-primary"}`} /> {webmcpStatus}</li>
                   <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Canvas world ↔ Project store live-sync</li>
                   <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Right panel Code ↔ firmware.write</li>
                   <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Bottom dock ↔ Simulation/Validation</li>
