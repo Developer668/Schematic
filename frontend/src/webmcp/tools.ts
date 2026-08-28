@@ -122,29 +122,72 @@ export function browserCompilePreflight(files: { name: string; content: string }
   };
 }
 
+const DEGRADED_RUN_STATUSES = new Set(["no-firmware", "invalid-target", "unsupported-api"]);
+
+function runTopologyCheck(project: HardwareGraph, inputs: Record<string, boolean | number>, durationMs: number) {
+  // Resolve the graph without executing firmware. This gives every run path
+  // the same wiring/protocol baseline, including a backend that declines an
+  // unsupported board model.
+  return runFirmwareRuntime({ ...project, firmwareTargets: [] }, inputs, durationMs);
+}
+
+function summarizeValidation(result: ReturnType<typeof validateProject>) {
+  return {
+    valid: result.valid,
+    issueCount: result.issues.length,
+    errorCount: result.issues.filter((issue) => issue.severity === "error").length,
+    warningCount: result.issues.filter((issue) => issue.severity === "warning").length,
+    codeIssueCount: result.codeIssues.length,
+  } satisfies import("../simulation/runtime.ts").RuntimeValidationSummary;
+}
+
+function enrichRunResult(
+  runtime: import("../simulation/runtime.ts").RuntimeResult,
+  topology: import("../simulation/runtime.ts").RuntimeResult,
+  validation: ReturnType<typeof validateProject>,
+) {
+  const codeExecution = runtime.codeExecution ?? {
+    status: runtime.programs.length > 0 ? runtime.unsupportedApis.length > 0 ? "partial" as const : "executed" as const : "unavailable" as const,
+    ...(runtime.programs.length === 0 ? { reason: "The runtime did not execute firmware for this target." } : {}),
+    physicalHardwareNextStep: "Export the source, compile it with the board’s normal toolchain, and test it on the actual hardware.",
+  };
+  const connectionCheck = runtime.connectionCheck ?? topology.connectionCheck;
+  const unavailableNote = codeExecution.status === "unavailable"
+    ? "Connection topology was checked, but browser firmware execution is unavailable for this board/model. Your source remains editable and exportable; compile and test it on the actual hardware."
+    : runtime.note;
+  return {
+    ...runtime,
+    resolvedNets: runtime.resolvedNets || topology.resolvedNets,
+    ...(connectionCheck ? { connectionCheck } : {}),
+    codeExecution,
+    validation: summarizeValidation(validation),
+    note: unavailableNote,
+  } satisfies import("../simulation/runtime.ts").RuntimeResult;
+}
+
 async function runBrowserSimulation(project: ReturnType<typeof useProjectStore.getState>["project"], inputs: Record<string, boolean | number>, durationMs: number) {
   const boundedDurationMs = Math.max(0, Math.min(Number.isFinite(durationMs) ? durationMs : 1000, 86_400_000));
+  const topology = runTopologyCheck(project, inputs, boundedDurationMs);
   let portable;
   try {
     portable = await runPortableButtonLedHarness(project, inputs, boundedDurationMs);
   } catch (error) {
     if (!(error instanceof PortableHarnessUnavailableError)) throw error;
     const runtime: import("../simulation/runtime.ts").RuntimeResult = {
+      ...topology,
       status: "unsupported-api",
       runtime: "browser",
-      executionEngine: "c-wasm",
       durationMs: boundedDurationMs,
-      outputs: {},
       events: [],
       programs: [],
-      resolvedNets: new Set(project.connections.map((connection) => `${connection.source.componentId}:${connection.source.portId}|${connection.target.componentId}:${connection.target.portId}`)).size,
-      serialOutput: "",
       targetIssues: [{ componentId: error.componentId, code: error.code, message: error.message }],
-      protocolEvents: [],
-      deviceStates: [],
-      warnings: [],
-      unsupportedApis: ["compiled-c-wasm"],
-      note: "The recognized portable firmware contract was not executed because its verified C/WASM artifact is unavailable or invalid. Rebuild the firmware-harness package before running this project.",
+      unsupportedApis: [...new Set([...topology.unsupportedApis, "compiled-c-wasm"])],
+      note: "Connection topology was checked, but browser firmware execution is unavailable because the verified C/WASM artifact could not be loaded. Your source remains editable and exportable; compile and test it on the actual hardware.",
+      codeExecution: {
+        status: "unavailable",
+        reason: "The verified C/WASM artifact could not be loaded in this browser.",
+        physicalHardwareNextStep: "Export the source, compile it with the board’s normal toolchain, and test it on the actual hardware.",
+      },
     };
     return finalizeBrowserSimulation(project, runtime, boundedDurationMs);
   }
@@ -159,13 +202,18 @@ async function runBrowserSimulation(project: ReturnType<typeof useProjectStore.g
         outputs: portable.outputs,
         events: portable.events,
         programs: [{ componentId: portable.boardId, writes: portable.events.length, executions: portable.steps, sourceFiles: portable.sourceFiles }],
-        resolvedNets: new Set(project.connections.map((connection) => `${connection.source.componentId}:${connection.source.portId}|${connection.target.componentId}:${connection.target.portId}`)).size,
+        resolvedNets: topology.resolvedNets,
         serialOutput: "",
         targetIssues: [],
         protocolEvents: [],
         deviceStates: [],
         warnings: [],
         unsupportedApis: [],
+        connectionCheck: topology.connectionCheck,
+        codeExecution: {
+          status: "executed",
+          physicalHardwareNextStep: "The source remains available for export and testing with the target board’s toolchain.",
+        },
         note: portable.note,
       }
     : runFirmwareRuntime(project, inputs, boundedDurationMs);
@@ -195,7 +243,7 @@ function finalizeBrowserSimulation(
   };
 }
 
-function normalizeRemoteRun(result: any): import("../simulation/runtime.ts").RuntimeResult {
+function normalizeRemoteRun(result: any, topology?: import("../simulation/runtime.ts").RuntimeResult): import("../simulation/runtime.ts").RuntimeResult {
   const events = Array.isArray(result?.events) ? result.events.flatMap((event: any) => {
     const value = event?.value;
     if (typeof value !== "boolean" && typeof value !== "number") return [];
@@ -206,6 +254,30 @@ function normalizeRemoteRun(result: any): import("../simulation/runtime.ts").Run
       reason: String(event?.reason ?? `${event?.kind ?? "event"}${event?.operation ? ` ${event.operation}` : ""}`),
     }];
   }) : [];
+  const programs = Array.isArray(result.programs) ? result.programs : [];
+  const unsupportedApis = Array.isArray(result.unsupported_apis) ? result.unsupported_apis : [];
+  const rawConnectionCheck = result?.connectionCheck ?? result?.connection_check;
+  const connectionCheck = rawConnectionCheck && typeof rawConnectionCheck === "object"
+    ? {
+        status: "completed" as const,
+        connectionsChecked: Number(rawConnectionCheck.connectionsChecked ?? rawConnectionCheck.connections_checked ?? 0),
+        resolvedNets: Number(rawConnectionCheck.resolvedNets ?? rawConnectionCheck.resolved_nets ?? result.resolved_nets ?? 0),
+        note: String(rawConnectionCheck.note ?? "The browser resolved connected nets and ran available protocol checks independently of firmware execution."),
+      }
+    : topology?.connectionCheck;
+  const rawCodeExecution = result?.codeExecution ?? result?.code_execution;
+  const rawStatus = rawCodeExecution?.status;
+  const codeExecution = rawCodeExecution && ["executed", "partial", "unavailable"].includes(rawStatus)
+    ? {
+        status: rawStatus as "executed" | "partial" | "unavailable",
+        ...(rawCodeExecution.reason ? { reason: String(rawCodeExecution.reason) } : {}),
+        physicalHardwareNextStep: String(rawCodeExecution.physicalHardwareNextStep ?? rawCodeExecution.physical_hardware_next_step ?? "Export the source, compile it with the board’s normal toolchain, and test it on the actual hardware."),
+      }
+    : {
+        status: programs.length > 0 ? unsupportedApis.length > 0 ? "partial" as const : "executed" as const : "unavailable" as const,
+        ...(programs.length === 0 ? { reason: "The remote runtime did not execute firmware for this target." } : {}),
+        physicalHardwareNextStep: "Export the source, compile it with the board’s normal toolchain, and test it on the actual hardware.",
+      };
   return {
     status: result.status,
     runtime: "remote",
@@ -213,15 +285,17 @@ function normalizeRemoteRun(result: any): import("../simulation/runtime.ts").Run
     durationMs: Number(result.duration_ms ?? Number(result.duration_ns ?? 0) / 1_000_000),
     outputs: result.outputs ?? {},
     events,
-    programs: Array.isArray(result.programs) ? result.programs : [],
-    resolvedNets: Number(result.resolved_nets ?? 0),
+    programs,
+    resolvedNets: Number(result.resolved_nets ?? topology?.resolvedNets ?? 0),
     serialOutput: String(result.serial_output ?? ""),
     targetIssues: Array.isArray(result.target_issues) ? result.target_issues : [],
     protocolEvents: Array.isArray(result.protocol_events) ? result.protocol_events : [],
     deviceStates: Array.isArray(result.device_states) ? result.device_states : [],
     warnings: Array.isArray(result.warnings) ? result.warnings : [],
-    unsupportedApis: Array.isArray(result.unsupported_apis) ? result.unsupported_apis : [],
+    unsupportedApis,
     note: String(result.note ?? "Remote behavioral simulation completed."),
+    ...(connectionCheck ? { connectionCheck } : {}),
+    codeExecution,
   };
 }
 
@@ -763,22 +837,43 @@ const tools: ToolDef[] = [
     execute: async ({ durationMs }) => {
       const project = useProjectStore.getState().project;
       const inputs = useSimulationStore.getState().pinStates;
+      const boundedDurationMs = durationMs ?? 1000;
+      const validation = validateProject(project);
+      const topology = runTopologyCheck(project, inputs, boundedDurationMs);
+      // Keep agent-triggered runs aligned with the Studio button: a missing
+      // executable model must not suppress canonical wiring diagnostics.
+      useValidationStore.getState().setResult(validation);
       useSimulationStore.getState().start();
       // The bounded portable contract is deliberately browser-first so a
       // connected backend cannot silently replace the C/WASM trace with a
       // different interpreter. More complex projects retain the remote-first
       // path and fall back to the explicit browser interpreter when offline.
       if (hasPortableButtonLedContract(project)) {
-        const res = await runBrowserSimulation(project, inputs, durationMs ?? 1000);
-        if (res.status === "unsupported-api") {
+        const res = enrichRunResult(await runBrowserSimulation(project, inputs, boundedDurationMs), topology, validation);
+        useSimulationStore.getState().setLastRun(res);
+        if (res.status === "unsupported-api" && res.codeExecution?.status !== "unavailable") {
           return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res, isError: true };
         }
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
       }
       const sessionId = useSimulationStore.getState().remoteSessionId;
-      const result = await fetchJson("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, inputs, duration_ns: (durationMs ?? 1000) * 1e6, ...(sessionId ? { session_id: sessionId } : {}) }) });
-      const remotePayload = result.available && result.response?.ok && result.data && typeof result.data === "object" && result.data.runtime === "remote" && result.data.execution_mode === "behavioral";
+      const result = await fetchJson("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, inputs, duration_ns: boundedDurationMs * 1e6, ...(sessionId ? { session_id: sessionId } : {}) }) });
+      const remoteContract = result.available && result.data && typeof result.data === "object" && result.data.runtime === "remote" && result.data.execution_mode === "behavioral";
+      const remotePayload = remoteContract && result.response?.ok;
+      const degradedRemote = remoteContract && DEGRADED_RUN_STATUSES.has(String(result.data.status));
       const remote = remotePayload && (result.data.status === "completed" || result.data.status === "completed-with-warnings");
+      if (degradedRemote) {
+        const normalized = enrichRunResult(normalizeRemoteRun(result.data, topology), topology, validation);
+        const simulation = useSimulationStore.getState();
+        simulation.setTime(BigInt(Math.round(boundedDurationMs * 1_000_000)));
+        for (const [portId, value] of Object.entries(normalized.outputs)) {
+          if (typeof value === "boolean" || typeof value === "number") simulation.setPin(portId, value);
+        }
+        simulation.setLastRun(normalized);
+        simulation.appendSerial(`[${project.name}] remote checks complete · browser code execution unavailable\n`);
+        simulation.stop();
+        return { content: [{ type: "text", text: JSON.stringify(normalized, null, 2) }], data: normalized };
+      }
       if (remotePayload && !remote) {
         useSimulationStore.getState().stop();
         return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: result.data, isError: true };
@@ -793,13 +888,14 @@ const tools: ToolDef[] = [
         return { content: [{ type: "text", text: JSON.stringify(contractError, null, 2) }], data: contractError, isError: true };
       }
       if (!remote) {
-        const res = await runBrowserSimulation(project, inputs, durationMs ?? 1000);
+        const res = enrichRunResult(await runBrowserSimulation(project, inputs, boundedDurationMs), topology, validation);
         const reason = result.available && !result.response?.ok ? ` Backend HTTP ${result.response?.status ?? "unknown"};` : "";
         res.note = `${res.note}${reason} Browser runtime is the active execution path.`;
+        useSimulationStore.getState().setLastRun(res);
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
       }
       const res = result.data;
-      const normalized = normalizeRemoteRun(res);
+      const normalized = enrichRunResult(normalizeRemoteRun(res, topology), topology, validation);
       const timeNs = BigInt(res.time_ns ?? 0);
       const simulation = useSimulationStore.getState();
       simulation.setRemoteSessionId(typeof res.session_id === "string" ? res.session_id : null);

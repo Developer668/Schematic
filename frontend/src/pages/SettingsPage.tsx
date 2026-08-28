@@ -346,7 +346,7 @@ export default function SettingsPage() {
 
               <div className="flex gap-2">
                 <button type="button" onClick={handleExport} className="flex-1 text-xs py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center gap-1.5 font-medium">
-                  <Download size={12} /> Export JSON
+                  <Download size={12} /> Export project + source
                 </button>
                 <label className="flex-1 text-xs py-2 rounded-xl border border-border hover:bg-muted flex items-center justify-center gap-1.5 cursor-pointer">
                   <Upload size={12} /> Import
@@ -362,7 +362,7 @@ export default function SettingsPage() {
               </button>}
 
               <div className="text-[11px] text-muted-foreground leading-snug p-2 rounded-xl bg-muted/20 border border-border">
-                Exports include components, wires & firmware targets. Import replaces current project.
+                Exports include components, wires, and firmware source targets. Import replaces the current project.
               </div>
             </div>
           </div>

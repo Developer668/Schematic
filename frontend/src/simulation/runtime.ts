@@ -24,6 +24,14 @@ export interface RuntimeCodeExecution {
   physicalHardwareNextStep: string;
 }
 
+export interface RuntimeValidationSummary {
+  valid: boolean;
+  issueCount: number;
+  errorCount: number;
+  warningCount: number;
+  codeIssueCount: number;
+}
+
 export interface RuntimeResult {
   status: "completed" | "completed-with-warnings" | "no-firmware" | "invalid-target" | "unsupported-api";
   runtime: "browser" | "remote";
@@ -46,6 +54,8 @@ export interface RuntimeResult {
   connectionCheck?: RuntimeConnectionCheck;
   /** Explicitly separates source editing/export from executable simulation. */
   codeExecution?: RuntimeCodeExecution;
+  /** Canonical validation is returned with every WebMCP run for agent parity. */
+  validation?: RuntimeValidationSummary;
 }
 
 type Endpoint = { componentId: string; portId: string };
