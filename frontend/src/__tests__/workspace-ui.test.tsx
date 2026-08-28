@@ -99,6 +99,20 @@ describe("workspace UI", () => {
     expect(new Set(useProjectStore.getState().projects.map((item) => item.name.toLowerCase())).size).toBe(useProjectStore.getState().projects.length);
   });
 
+  it("places default-added components in separate canvas cells", () => {
+    const store = useProjectStore.getState();
+    store.addComponent("esp32-devkit-v1");
+    store.addComponent("pushbutton");
+    store.addComponent("led");
+    const positions = useProjectStore.getState().project.components.map((component) => component.position);
+    expect(new Set(positions.map((position) => `${position.x}:${position.y}`)).size).toBe(3);
+    expect(positions).toEqual([
+      { x: 80, y: 80 },
+      { x: 440, y: 80 },
+      { x: 800, y: 80 },
+    ]);
+  });
+
   it("keeps secondary controls behind one menu and dismisses it on outside click or Escape", () => {
     const container = studio();
     const overflow = container.querySelector<HTMLButtonElement>("button[aria-label='Open workspace menu']");

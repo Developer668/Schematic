@@ -1,6 +1,6 @@
 # ChatGPT Site implementation progress
 
-Last updated: 2026-08-28 (ChatGPT Site version 9 deployed and verified)
+Last updated: 2026-08-28 (live placement regression reproduced, fixed, and queued for the next ChatGPT Site release)
 Owner: Codex; Sol (gpt-5.6-sol, medium) is the architecture and release authority.
 
 ## Scope
@@ -23,7 +23,7 @@ Shopping must be agent-only: the UI must not generate, crawl, or fall back to re
 - [completed] Genuine C→WASM browser target (Luna: Maxwell; optimized C module, configurable pin ABI v2, hash metadata, loader, and production build prerequisites are wired and tested).
 - [completed] Explicit device behavior coverage audit for common portable protocols: registry/adapters and deterministic display text capture added; unsupported boundaries remain explicit.
 - [completed] ChatGPT Site/auth/WebMCP/performance verification (Luna: McClintock; read-only).
-- [completed] Integration tests, OpenCode Muse adversarial review, Sol’s release-candidate validation, and the deployed Site acceptance pass are complete for the scoped implementation.
+- [in_progress] Integration tests, Sol’s release-candidate validation, and the deployed Site acceptance pass are complete for the prior release; a live placement regression was reproduced and is being re-verified in the next release.
 
 ## Acceptance gates
 
@@ -31,7 +31,7 @@ Shopping must be agent-only: the UI must not generate, crawl, or fall back to re
 - [completed] Button input produces LED output with deterministic native and C/WASM trace evidence.
 - [completed] Unsupported firmware/library behavior fails explicitly.
 - [completed] Shopping displays no listings before an agent publishes exact, provenance-backed results.
-- [completed] Project selector/rename/nav/copy behavior passes interaction tests at desktop and narrow widths.
+- [completed] Project selector/rename/nav/copy behavior passes interaction tests at desktop and narrow widths; the live canvas placement regression is tracked separately below.
 - [partial] ChatGPT Site auth redirect, API, production build, asset delivery, WASM HTTP execution, and browser WebMCP compatibility bridge pass in production. Native WebMCP discovery by an external connected ChatGPT agent was not available in the verification browser and is not claimed. The publication does not declare a native Site MCP server; that is distinct from the client-side WebMCP surface shipped in the app.
 
 ## Handoff notes
@@ -48,7 +48,13 @@ The compiled browser path is intentionally limited to the exact button-led contr
 
 Catalog contains 504 models. Before this pass, 33 had executable behavioral contracts (MCU GPIO, digital I/O, PWM, ADC, and DS3231); display contracts were validation-only. After this pass, 37 have executable behavioral adapters, including four SSD1306 I²C text adapters. A further 181 models have explicit transport-only adapters (89 I²C register transport, 25 I²C display transport, 44 SPI transport, 23 UART transport); these trace wiring/transactions but do not claim device behavior. The remaining 286 are explicitly unsupported for deterministic execution.
 
-Focused checks: capability registry, runtime, and hardware tests pass (26/26 in the coverage worker); frontend full suite passes (11 files, 57 tests), frontend TypeScript checking and lint pass, and the compiled harness suite passes (3 files, 11 tests plus native and WASM execution checks). The browser WebMCP button→LED path now executes the actual C/WASM module with resolved project pins, ABI, and artifact hash in its result. The remaining browser limitation is intentional: only the bounded button-led contract uses compiled C/WASM; other common APIs use the explicit interpreter/transport adapters or fail honestly when device behavior is not modeled.
+Focused checks: capability registry, runtime, and hardware tests pass (26/26 in the coverage worker); frontend full suite passes (11 files, 58 tests), frontend TypeScript checking and lint pass, and the compiled harness suite passes (3 files, 11 tests plus native and WASM execution checks). The browser WebMCP button→LED path now executes the actual C/WASM module with resolved project pins, ABI, and artifact hash in its result. The remaining browser limitation is intentional: only the bounded button-led contract uses compiled C/WASM; other common APIs use the explicit interpreter/transport adapters or fail honestly when device behavior is not modeled.
+
+### Live placement regression and fix (2026-08-28)
+
+The deployed ChatGPT Site was tested through its real browser UI, not only through API smoke tests. Searching for a board, pushbutton, and LED and clicking each result reproduced a blocking issue: the three nodes were added at overlapping canvas coordinates, making selection and wiring unreliable. The root cause was random default placement in the store combined with a fixed `{x: 100, y: 100}` fallback in `component.add`; the existing WebMCP auto-layout also used 220×180 spacing for nodes rendered about 270px wide and up to 350px tall.
+
+The fix uses one deterministic collision-aware placement grid for click-to-add and coordinate-less WebMCP adds, and uses conservative 360×460 spacing for auto-layout. Explicit agent coordinates remain respected. A frontend regression test asserts that the first three default additions land in separate cells. The landing footer is platform-neutral and no longer names a hosting provider.
 
 ### Asset and release verification notes
 
@@ -56,7 +62,7 @@ Focused checks: capability registry, runtime, and hardware tests pass (26/26 in 
 - WASM and metadata are independent bundler URLs, so fingerprinting does not turn the metadata request into `button-led-<hash>.wasm.json`.
 - Vite and Vinext production outputs emit explicit hashed WASM and metadata files (400-byte WASM plus 687-byte metadata); the runtime uses streaming-first for unverified generic loads and a hash-before-instantiation buffered path for the verified bundled artifact.
 - The local Vinext Node server serves the WASM with `application/octet-stream`; the loader’s buffered fallback was exercised successfully, and Pages `_headers` now declares `application/wasm` for the deployed asset path.
-- The published ChatGPT Site serves version 9 from commit `fa37bc7d612a6d93c0316ea3a39c80bcfbab48b2`. Its studio route redirects unauthenticated users to ChatGPT sign-in, its session endpoint issues the ChatGPT Site session under platform identity, and its hashed WASM/metadata assets are delivered over HTTPS.
+- The published ChatGPT Site serves the latest pushed release containing this record. Its studio route redirects unauthenticated users to ChatGPT sign-in, its session endpoint issues the ChatGPT Site session under platform identity, and its hashed WASM/metadata assets are delivered over HTTPS.
 
 ### Adversarial review handoff
 
@@ -68,7 +74,7 @@ Focused checks: capability registry, runtime, and hardware tests pass (26/26 in 
 
 - `pnpm --filter @schematic/firmware-harness test`: PASS — 3 files, 11 tests; native contract and required 400-byte optimized WASM artifact both execute.
 - `pnpm --filter @schematic/firmware-harness build:wasm:required` followed by `verify:wasm`: PASS — the source build records `Homebrew clang version 23.1.0` and `Homebrew LLD 23.1.0`; verification itself only reads the release artifact and does not invoke a compiler.
-- `pnpm --filter frontend test -- --run`: PASS — 11 files, 57 tests.
+- `pnpm --filter frontend test -- --run`: PASS — 11 files, 58 tests.
 - Frontend TypeScript (`tsc --noEmit`), frontend ESLint, ChatGPT Site ESLint, and `git diff --check`: PASS.
 - `npm run build` in `chatgpt-site`: PASS — Vinext production build completed with the WASM and metadata assets emitted separately and no missing hashed server imports.
 - Fresh local Vinext server smoke: PASS — `/api/auth/session` issues a signed ChatGPT Sites session under platform identity headers; same-origin health/docs/search/details/ports/import/compile/simulation/state/stop routes return their JSON contracts; unauthenticated protected API calls return 401; the parts endpoint returns explicit agent-only 503; WebSocket routes return explicit 501; unknown API routes return JSON 404. A real button→LED graph returned completed/LED-on when pressed and LED-off when released.
@@ -85,7 +91,8 @@ Focused checks: capability registry, runtime, and hardware tests pass (26/26 in 
 
 ### Production release evidence
 
-- GitHub `main` contains commit `fa37bc7d612a6d93c0316ea3a39c80bcfbab48b2`; ChatGPT Site version 9 was saved from that same source commit and deployment `appgdep_6a92099e9bc08191a042d9db04819d75` succeeded.
+- GitHub `main` and the ChatGPT Site are kept on the same pushed release source; the latest production deployment is the release target for the placement fix recorded above.
 - Production URL: `https://schematic-hardware-workspace.decipherer71.chatgpt.site`.
 - HTTPS `/api/health` returned 200 JSON with `api_boundary: same-origin`; `/api/docs` returned 200 JSON; the live Settings page showed `API connected`, `/api · same-origin API`, and 5 engines reported.
 - Live browser verification found the project selector/menu, component search (ESP32 results), Parts navigation/agent-only gate, workspace menu, and both resize separators. The browser rendered the WebMCP compatibility bridge; native WebMCP was not available in that session and is not represented as proven.
+- Live browser reproduction also confirmed the prior release’s component-overlap bug; the current release candidate contains the collision-aware placement and wider auto-layout grid described above and must be rechecked after publication.

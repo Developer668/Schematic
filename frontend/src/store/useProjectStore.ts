@@ -69,6 +69,52 @@ function makeId(prefix: string) {
 
 function now() { return new Date().toISOString(); }
 
+// Hardware nodes are rendered at roughly 270px wide and the largest board
+// definitions are about 350px tall. Keep the automatic placement cells larger
+// than that footprint so a click-to-add or an agent add without coordinates
+// never stacks new nodes on top of the existing graph.
+const COMPONENT_LAYOUT_ORIGIN = { x: 80, y: 80 };
+const COMPONENT_LAYOUT_COLUMNS = 4;
+const COMPONENT_LAYOUT_COLUMN_STEP = 360;
+const COMPONENT_LAYOUT_ROW_STEP = 460;
+const COMPONENT_LAYOUT_BOX = { width: 300, height: 420 };
+const COMPONENT_LAYOUT_GAP = 18;
+
+function boxesOverlap(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return a.x < b.x + COMPONENT_LAYOUT_BOX.width + COMPONENT_LAYOUT_GAP
+    && a.x + COMPONENT_LAYOUT_BOX.width + COMPONENT_LAYOUT_GAP > b.x
+    && a.y < b.y + COMPONENT_LAYOUT_BOX.height + COMPONENT_LAYOUT_GAP
+    && a.y + COMPONENT_LAYOUT_BOX.height + COMPONENT_LAYOUT_GAP > b.y;
+}
+
+/** Find the first conservative grid cell that does not collide with a node. */
+export function nextComponentPosition(components: Array<{ position: { x: number; y: number } }>) {
+  for (let index = 0; index < Math.max(components.length + 1, COMPONENT_LAYOUT_COLUMNS); index += 1) {
+    const candidate = {
+      x: COMPONENT_LAYOUT_ORIGIN.x + (index % COMPONENT_LAYOUT_COLUMNS) * COMPONENT_LAYOUT_COLUMN_STEP,
+      y: COMPONENT_LAYOUT_ORIGIN.y + Math.floor(index / COMPONENT_LAYOUT_COLUMNS) * COMPONENT_LAYOUT_ROW_STEP,
+    };
+    if (components.every((component) => !boxesOverlap(candidate, component.position))) return candidate;
+  }
+
+  // This fallback is only reachable for a graph whose nodes occupy every
+  // scanned cell. It remains deterministic and preserves the no-random-stack
+  // guarantee while allowing very large projects to continue growing.
+  const row = Math.ceil(components.length / COMPONENT_LAYOUT_COLUMNS);
+  return { x: COMPONENT_LAYOUT_ORIGIN.x, y: COMPONENT_LAYOUT_ORIGIN.y + row * COMPONENT_LAYOUT_ROW_STEP };
+}
+
+/** Stable layout shared by the visible auto-layout action and WebMCP. */
+export function layoutComponentPositions<T extends { position: { x: number; y: number } }>(components: T[]) {
+  return components.map((component, index) => ({
+    ...component,
+    position: {
+      x: COMPONENT_LAYOUT_ORIGIN.x + (index % COMPONENT_LAYOUT_COLUMNS) * COMPONENT_LAYOUT_COLUMN_STEP,
+      y: COMPONENT_LAYOUT_ORIGIN.y + Math.floor(index / COMPONENT_LAYOUT_COLUMNS) * COMPONENT_LAYOUT_ROW_STEP,
+    },
+  }));
+}
+
 function uniqueProjectName(name: string, projects: HardwareGraph[], excludeId?: string) {
   const base = name.trim().slice(0, 120) || "Untitled";
   const used = new Set(projects.filter((project) => project.id !== excludeId).map((project) => project.name.trim().toLowerCase()));
@@ -247,7 +293,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   addComponent(definitionId, pos) {
     if (!getCatalogComponent(definitionId)) throw new Error(`Unknown component definition ${definitionId}`);
     const id = `${definitionId}-${Math.random().toString(36).slice(2, 8)}`;
-    const position = pos ?? { x: 100 + Math.random() * 400, y: 100 + Math.random() * 300 };
+    const position = pos ?? nextComponentPosition(get().project.components);
     set((state) => {
       const project = { ...state.project, components: [...state.project.components, { id, definitionId, position, rotation: 0, properties: defaultProperties(definitionId) }], updatedAt: now() };
       const projects = state.projects.map((item) => item.id === project.id ? project : item);

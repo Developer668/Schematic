@@ -415,7 +415,7 @@ export default function LandingPage() {
               </Link>
             </div>
           </div>
-          <div className="cta-foot">AGPL-3.0 • WebMCP {WEBMCP_TOOL_COUNT} tools • Cloudflare Pages • provider-backed prices when connected</div>
+          <div className="cta-foot">AGPL-3.0 • WebMCP {WEBMCP_TOOL_COUNT} tools • browser runtime • provider-backed prices when connected</div>
         </section>
       </main>
 

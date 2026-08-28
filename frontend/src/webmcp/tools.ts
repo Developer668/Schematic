@@ -3,7 +3,7 @@
  * Per HardwareWebMCP.md: don't expose 100 tiny tools, expose powerful semantic ones.
  * Human click and AI call share same underlying Zustand functions.
  */
-import { useProjectStore, type HardwareGraph } from "../store/useProjectStore.ts";
+import { layoutComponentPositions, useProjectStore, type HardwareGraph } from "../store/useProjectStore.ts";
 import { useSimulationStore } from "../store/useSimulationStore.ts";
 import { useSelectionStore } from "../store/useSelectionStore.ts";
 import { useWorkspaceStore, type BottomPanel } from "../store/useWorkspaceStore.ts";
@@ -504,7 +504,12 @@ const tools: ToolDef[] = [
     execute: async ({ componentId, x, y }) => {
       const def = getCatalogComponent(componentId);
       if (!def) return { content: [{ type: "text", text: `Unknown component ${componentId}` }], isError: true };
-      const { id } = useProjectStore.getState().addComponent(componentId, { x: x ?? 100, y: y ?? 100 });
+      const requestedX = Number(x);
+      const requestedY = Number(y);
+      const position = Number.isFinite(requestedX) && Number.isFinite(requestedY)
+        ? { x: requestedX, y: requestedY }
+        : undefined;
+      const { id } = useProjectStore.getState().addComponent(componentId, position);
       useSelectionStore.getState().setActive(id);
       return { content: [{ type: "text", text: `Added ${componentId} as ${id}` }], data: { instanceId: id } };
     },
@@ -1107,7 +1112,7 @@ const tools: ToolDef[] = [
     inputSchema: { type: "object", properties: {} },
     execute: async () => {
       const proj = useProjectStore.getState().project;
-      const next = proj.components.map((c, i) => ({ ...c, position: { x: 50 + (i % 4) * 220, y: 50 + Math.floor(i / 4) * 180 } }));
+      const next = layoutComponentPositions(proj.components);
       useProjectStore.getState().loadProject({ ...proj, components: next });
       return { content: [{ type: "text", text: `Auto-layout applied to ${next.length} components` }] };
     },
