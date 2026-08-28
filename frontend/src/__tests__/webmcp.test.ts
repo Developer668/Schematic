@@ -7,6 +7,8 @@ import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { useValidationStore } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
 import { useShoppingStore } from "../store/useShoppingStore.ts";
+import { getCatalogComponent } from "../data/catalog.ts";
+import { resolveBoardPin } from "../data/hardware.ts";
 import { hasPortableButtonLedContract } from "../simulation/portableHarness.ts";
 import { getRegisteredToolNames, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools, WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
 
@@ -112,9 +114,41 @@ describe("WebMCP tools", () => {
     expect(useProjectStore.getState().project.components).toHaveLength(0);
   });
 
+  it("uses safe automatic placement and rejects malformed WebMCP coordinates", async () => {
+    const first: any = await invokeWebMCPTool("component.add", { componentId: "esp32-devkit-v1" });
+    const second: any = await invokeWebMCPTool("component.add", { componentId: "led" });
+    expect(first.isError).not.toBe(true);
+    expect(second.isError).not.toBe(true);
+    expect(first.data.position).toEqual({ x: 80, y: 80 });
+    expect(second.data.position).toEqual({ x: 440, y: 80 });
+
+    const partial: any = await invokeWebMCPTool("component.add", { componentId: "pushbutton", x: 100 });
+    expect(partial.isError).toBe(true);
+    expect(partial.content[0].text).toMatch(/provided together/i);
+
+    const nullCoordinates: any = await invokeWebMCPTool("component.add", { componentId: "pushbutton", x: null, y: null });
+    expect(nullCoordinates.isError).toBe(true);
+    expect(nullCoordinates.content[0].text).toMatch(/finite numbers/i);
+
+    const stringCoordinates: any = await invokeWebMCPTool("component.add", { componentId: "pushbutton", x: "0", y: "0" });
+    expect(stringCoordinates.isError).toBe(true);
+
+    const explicit: any = await invokeWebMCPTool("component.add", { componentId: "pushbutton", x: 0, y: 0 });
+    expect(explicit.isError).not.toBe(true);
+    expect(explicit.data.position).toEqual({ x: 0, y: 0 });
+  });
+
   it("keeps agent activity, panels, and diagnostics live", async () => {
     useWebMCPStore.getState().clearActivities();
     await invokeWebMCPTool("project.apply_blueprint", { blueprintId: "meta-glasses" });
+    const blueprintGraph = useProjectStore.getState().project;
+    expect(blueprintGraph.connections.find((connection) => connection.id === "c12")?.source.portId).toBe("GPIO4");
+    expect(blueprintGraph.connections.find((connection) => connection.id === "c18")?.source.portId).toBe("GPIO18");
+    expect(blueprintGraph.connections.find((connection) => connection.id === "c14")?.source.portId).toBe("GPIO1");
+    expect(getCatalogComponent("esp32-s3")?.ports.find((port) => port.id === "GPIO1")).toMatchObject({ domain: "adc", description: expect.stringContaining("ADC1") });
+    expect(getCatalogComponent("esp32-s3")?.ports.some((port) => port.id === "ADC1_CH0")).toBe(false);
+    expect(resolveBoardPin(blueprintGraph, "compute-1", "1", new Map())).toEqual({ componentId: "compute-1", portId: "GPIO1" });
+    expect(getCatalogComponent("esp32-s3")?.ports.some((port) => port.id === "GPIO34")).toBe(false);
     await invokeWebMCPTool("validation.check");
     await invokeWebMCPTool("workspace.set_panel", { panel: "validation" });
     await invokeWebMCPTool("simulation.set_input", { componentId: "capture-1", key: "pressed", value: true });

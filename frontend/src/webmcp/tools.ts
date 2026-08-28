@@ -491,7 +491,7 @@ const tools: ToolDef[] = [
   },
   {
     name: "component.add",
-    description: "Add a hardware component to the current project at x,y",
+    description: "Add a hardware component to the current project; omit x and y for collision-aware automatic placement, or provide both finite numeric coordinates",
     inputSchema: {
       type: "object",
       properties: {
@@ -504,14 +504,17 @@ const tools: ToolDef[] = [
     execute: async ({ componentId, x, y }) => {
       const def = getCatalogComponent(componentId);
       if (!def) return { content: [{ type: "text", text: `Unknown component ${componentId}` }], isError: true };
-      const requestedX = Number(x);
-      const requestedY = Number(y);
-      const position = Number.isFinite(requestedX) && Number.isFinite(requestedY)
-        ? { x: requestedX, y: requestedY }
-        : undefined;
+      const hasX = typeof x !== "undefined";
+      const hasY = typeof y !== "undefined";
+      if (hasX !== hasY) return { content: [{ type: "text", text: "x and y must be provided together, or both omitted for automatic placement" }], isError: true };
+      if (hasX && (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y))) {
+        return { content: [{ type: "text", text: "x and y must both be finite numbers when coordinates are provided" }], isError: true };
+      }
+      const position = hasX ? { x: x as number, y: y as number } : undefined;
       const { id } = useProjectStore.getState().addComponent(componentId, position);
       useSelectionStore.getState().setActive(id);
-      return { content: [{ type: "text", text: `Added ${componentId} as ${id}` }], data: { instanceId: id } };
+      const resolvedPosition = useProjectStore.getState().project.components.find((component) => component.id === id)?.position ?? position;
+      return { content: [{ type: "text", text: `Added ${componentId} as ${id} at (${resolvedPosition?.x}, ${resolvedPosition?.y})` }], data: { instanceId: id, position: resolvedPosition } };
     },
   },
   {

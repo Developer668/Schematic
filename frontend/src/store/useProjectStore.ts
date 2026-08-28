@@ -89,7 +89,8 @@ function boxesOverlap(a: { x: number; y: number }, b: { x: number; y: number }) 
 
 /** Find the first conservative grid cell that does not collide with a node. */
 export function nextComponentPosition(components: Array<{ position: { x: number; y: number } }>) {
-  for (let index = 0; index < Math.max(components.length + 1, COMPONENT_LAYOUT_COLUMNS); index += 1) {
+  const initialScanCells = Math.max(components.length + 1, COMPONENT_LAYOUT_COLUMNS) * COMPONENT_LAYOUT_COLUMNS;
+  for (let index = 0; index < initialScanCells; index += 1) {
     const candidate = {
       x: COMPONENT_LAYOUT_ORIGIN.x + (index % COMPONENT_LAYOUT_COLUMNS) * COMPONENT_LAYOUT_COLUMN_STEP,
       y: COMPONENT_LAYOUT_ORIGIN.y + Math.floor(index / COMPONENT_LAYOUT_COLUMNS) * COMPONENT_LAYOUT_ROW_STEP,
@@ -97,11 +98,37 @@ export function nextComponentPosition(components: Array<{ position: { x: number;
     if (components.every((component) => !boxesOverlap(candidate, component.position))) return candidate;
   }
 
-  // This fallback is only reachable for a graph whose nodes occupy every
-  // scanned cell. It remains deterministic and preserves the no-random-stack
-  // guarantee while allowing very large projects to continue growing.
-  const row = Math.ceil(components.length / COMPONENT_LAYOUT_COLUMNS);
-  return { x: COMPONENT_LAYOUT_ORIGIN.x, y: COMPONENT_LAYOUT_ORIGIN.y + row * COMPONENT_LAYOUT_ROW_STEP };
+  // A manually positioned component can block more than one grid cell, so the
+  // bounded first pass is followed by a bounded row scan. Every fallback
+  // candidate is checked before returning; failure is explicit rather than an
+  // unchecked coordinate that could reintroduce overlap.
+  const firstFallbackRow = Math.ceil(initialScanCells / COMPONENT_LAYOUT_COLUMNS);
+  const lastFallbackRow = firstFallbackRow + Math.max(components.length * 2 + 4, 8);
+  for (let row = firstFallbackRow; row <= lastFallbackRow; row += 1) {
+    for (let column = 0; column < COMPONENT_LAYOUT_COLUMNS; column += 1) {
+      const candidate = {
+        x: COMPONENT_LAYOUT_ORIGIN.x + column * COMPONENT_LAYOUT_COLUMN_STEP,
+        y: COMPONENT_LAYOUT_ORIGIN.y + row * COMPONENT_LAYOUT_ROW_STEP,
+      };
+      if (components.every((component) => !boxesOverlap(candidate, component.position))) return candidate;
+    }
+  }
+
+  throw new Error("Unable to find a free canvas position for the new component");
+}
+
+/** Repair only legacy graphs whose saved node rectangles already collide. */
+function repairOverlappingComponentPositions<T extends { position: { x: number; y: number } }>(components: T[]) {
+  const placed: T[] = [];
+  return components.map((component) => {
+    if (placed.every((other) => !boxesOverlap(component.position, other.position))) {
+      placed.push(component);
+      return component;
+    }
+    const repaired = { ...component, position: nextComponentPosition(placed) };
+    placed.push(repaired);
+    return repaired;
+  });
 }
 
 /** Stable layout shared by the visible auto-layout action and WebMCP. */
@@ -139,19 +166,24 @@ function defaultSimulation() {
 export function normalizeProject(stored: unknown, fallbackId?: string): HardwareGraph {
   const value = stored && typeof stored === "object" ? stored as Record<string, any> : {};
   const timestamp = now();
+  const components = Array.isArray(value.components) ? value.components.map((component: any) => {
+    const x = Number(component?.position?.x ?? 100);
+    const y = Number(component?.position?.y ?? 100);
+    return {
+      ...component,
+      id: String(component?.id ?? makeId("component")),
+      definitionId: String(component?.definitionId ?? "unknown"),
+      position: { x: Number.isFinite(x) ? x : 100, y: Number.isFinite(y) ? y : 100 },
+      rotation: [0, 90, 180, 270].includes(component?.rotation) ? component.rotation : 0,
+      properties: { ...defaultProperties(String(component?.definitionId ?? "unknown")), ...(component?.properties && typeof component.properties === "object" && !Array.isArray(component.properties) ? component.properties : {}) },
+    };
+  }) : [];
   return {
     ...value,
     id: typeof value.id === "string" && value.id ? value.id : fallbackId ?? makeId("proj"),
     name: typeof value.name === "string" && value.name.trim() ? value.name.trim().slice(0, 120) : "Untitled",
     description: typeof value.description === "string" ? value.description : undefined,
-    components: Array.isArray(value.components) ? value.components.map((component: any) => ({
-      ...component,
-      id: String(component?.id ?? makeId("component")),
-      definitionId: String(component?.definitionId ?? "unknown"),
-      position: { x: Number(component?.position?.x ?? 100), y: Number(component?.position?.y ?? 100) },
-      rotation: [0, 90, 180, 270].includes(component?.rotation) ? component.rotation : 0,
-      properties: { ...defaultProperties(String(component?.definitionId ?? "unknown")), ...(component?.properties && typeof component.properties === "object" && !Array.isArray(component.properties) ? component.properties : {}) },
-    })) : [],
+    components: repairOverlappingComponentPositions(components),
     connections: Array.isArray(value.connections) ? value.connections.map((connection: any) => ({
       ...connection,
       id: String(connection?.id ?? makeId("conn")),

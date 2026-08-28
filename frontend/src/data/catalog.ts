@@ -74,10 +74,9 @@ const GPIO_IN = [...POWER, port("OUT", "gpio", "output")];
 const ADC_SOURCE = [...POWER, port("OUT", "adc", "output")];
 const GPIO_ACT = [...POWER, port("IN", "gpio", "input")];
 const PASSIVE_2 = [port("A", "gpio", "bidirectional"), port("B", "gpio", "bidirectional")];
+const PUSHBUTTON_PORTS = [port("A", "gpio", "input"), port("B", "ground", "power")];
 const PASSIVE_ELECTRICAL_2 = [port("A", "power", "bidirectional"), port("B", "power", "bidirectional")];
-// Provisional two-pin aliases retained for legacy/reference parts.  They are
-// intentionally generic and receive validation-only model contracts.
-const GENERIC_P2 = [port("P1", "gpio", "bidirectional"), port("P2", "gpio", "bidirectional")];
+const BATTERY_COIN_CELL_PORTS = [port("P1", "power", "power"), port("P2", "ground", "power")];
 
 const BOARD_ESP32: HardwarePort[] = [
   port("3V3", "power", "power"),
@@ -105,12 +104,39 @@ const BOARD_ESP32: HardwarePort[] = [
   port("GPIO27", "gpio"),
   port("GPIO32", "gpio"),
   port("GPIO33", "gpio"),
-  port("GPIO34", "gpio", "input"),
+  // GPIO34 is input-only and ADC-capable on the ESP32; model its analog
+  // capability explicitly so sensor wiring can be validated correctly.
+  port("GPIO34", "adc", "input"),
   port("GPIO35", "gpio", "input"),
   port("GPIO36", "gpio", "input"),
   port("GPIO39", "gpio", "input"),
   port("TX", "uart"),
   port("RX", "uart"),
+  port("SCK", "spi"),
+  port("MOSI", "spi"),
+  port("MISO", "spi"),
+  port("CS", "spi"),
+];
+
+// ESP32-S3 does not share the classic ESP32's GPIO34–39 ADC layout. Keep each
+// physical pin as one graph endpoint so firmware pin resolution and analog
+// wiring cannot disagree about which pin is connected. GPIO1 is the scoped
+// analog endpoint used by the demo; its description documents the ADC alias.
+const BOARD_ESP32_S3: HardwarePort[] = [
+  port("3V3", "power", "power"),
+  port("5V", "power", "power"),
+  port("GND", "ground", "power"),
+  { ...port("SDA", "i2c"), protocol: { role: "controller" as const } },
+  { ...port("SCL", "i2c"), protocol: { role: "controller" as const } },
+  ...Array.from({ length: 22 }, (_, index) => index === 1
+    ? { ...port("GPIO1", "adc", "input"), description: "ESP32-S3 ADC1 channel 0" }
+    : port(`GPIO${index}`, "gpio")),
+  port("TX", "uart"),
+  port("RX", "uart"),
+  port("SCK", "spi"),
+  port("MOSI", "spi"),
+  port("MISO", "spi"),
+  port("CS", "spi"),
 ];
 
 const BOARD_UNO: HardwarePort[] = [
@@ -236,7 +262,7 @@ const BOARD_PI: HardwarePort[] = [
 ];
 
 const PORTS_BY_ID: Record<string, HardwarePort[]> = {
-  "esp32-s3": BOARD_ESP32,
+  "esp32-s3": BOARD_ESP32_S3,
   "esp32-devkit-v1": BOARD_ESP32,
   "esp32-c3-devkit": BOARD_ESP32,
   "esp8266-nodemcu": BOARD_ESP32,
@@ -292,13 +318,13 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "sound-ky038": [...POWER, port("AO", "adc", "output"), port("DO", "gpio", "output")],
   "soil-moisture-capacitive": [...POWER, port("AO", "adc", "output")],
   "joystick-ps2": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("VRx", "adc", "output"), port("VRy", "adc", "output"), port("SW", "gpio", "input")],
-  "small-sound-sensor": GENERIC_P2,
-  "big-sound-sensor": GENERIC_P2,
-  photodiode: GENERIC_P2,
-  "battery-coin-cell": GENERIC_P2,
-  "microsd-card": GENERIC_P2,
-  pushbutton: PASSIVE_2,
-  "pushbutton-6mm": PASSIVE_2,
+  "small-sound-sensor": [...POWER, port("OUT", "gpio", "output")],
+  "big-sound-sensor": [...POWER, port("OUT", "gpio", "output")],
+  photodiode: ADC_SOURCE,
+  "battery-coin-cell": BATTERY_COIN_CELL_PORTS,
+  "microsd-card": [...POWER, port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi")],
+  pushbutton: PUSHBUTTON_PORTS,
+  "pushbutton-6mm": PUSHBUTTON_PORTS,
   resistor: PASSIVE_2,
   potentiometer: [port("VCC", "power", "power"), port("GND", "ground", "power"), port("OUT", "adc", "output")],
   "nrf24l01-module": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("CE", "gpio", "input"), port("CSN", "spi"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("IRQ", "gpio", "output")],
@@ -442,7 +468,7 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "esp32-c5-devkit": BOARD_ESP32,
   "esp32-ethernet-kit": BOARD_ESP32,
   "esp32-pico-v3": BOARD_ESP32,
-  "esp32-s3-devkitc-1": BOARD_ESP32,
+  "esp32-s3-devkitc-1": BOARD_ESP32_S3,
   "esp32-wroom-32u": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TX", "uart", "output"), port("RX", "uart", "input")],
   "fan-5v-30mm": PASSIVE_2,
   "gy-273-hmc5883l": I2C_HMC5883L,

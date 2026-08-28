@@ -27,7 +27,7 @@ vi.mock("../auth/session.ts", () => ({
 import { BrowserRouter } from "react-router-dom";
 import StudioPage from "../pages/StudioPage.tsx";
 import RightPanel from "../components/layout/RightPanel.tsx";
-import { useProjectStore } from "../store/useProjectStore.ts";
+import { nextComponentPosition, useProjectStore } from "../store/useProjectStore.ts";
 import { useSelectionStore } from "../store/useSelectionStore.ts";
 
 let root: Root | undefined;
@@ -101,16 +101,63 @@ describe("workspace UI", () => {
 
   it("places default-added components in separate canvas cells", () => {
     const store = useProjectStore.getState();
-    store.addComponent("esp32-devkit-v1");
-    store.addComponent("pushbutton");
-    store.addComponent("led");
+    const ids = [
+      store.addComponent("esp32-devkit-v1").id,
+      store.addComponent("pushbutton").id,
+      store.addComponent("led").id,
+      store.addComponent("bmp280").id,
+      store.addComponent("ds3231").id,
+    ];
     const positions = useProjectStore.getState().project.components.map((component) => component.position);
-    expect(new Set(positions.map((position) => `${position.x}:${position.y}`)).size).toBe(3);
+    expect(new Set(positions.map((position) => `${position.x}:${position.y}`)).size).toBe(5);
     expect(positions).toEqual([
       { x: 80, y: 80 },
       { x: 440, y: 80 },
       { x: 800, y: 80 },
+      { x: 1160, y: 80 },
+      { x: 80, y: 540 },
     ]);
+    store.removeComponent(ids[0]);
+    expect(store.addComponent("resistor").id).toContain("resistor");
+    const lastComponent = useProjectStore.getState().project.components[useProjectStore.getState().project.components.length - 1];
+    expect(lastComponent?.position).toEqual({ x: 80, y: 80 });
+  });
+
+  it("repairs saved overlap without changing component identity or wiring data", () => {
+    const store = useProjectStore.getState();
+    store.loadProject({
+      ...store.project,
+      components: [
+        { id: "board-1", definitionId: "esp32-devkit-v1", position: { x: 80, y: 80 }, rotation: 0, properties: { keep: true } },
+        { id: "button-1", definitionId: "pushbutton", position: { x: 80, y: 80 }, rotation: 90, properties: { label: "Input" } },
+        { id: "led-1", definitionId: "led", position: { x: 80, y: 80 }, rotation: 0, properties: { color: "red" } },
+      ],
+      connections: [{ id: "connection-1", source: { componentId: "board-1", portId: "gpio-0" }, target: { componentId: "button-1", portId: "pin-1" }, domain: "gpio" }],
+    });
+
+    const repaired = useProjectStore.getState().project;
+    expect(repaired.components.map((component) => component.id)).toEqual(["board-1", "button-1", "led-1"]);
+    expect(repaired.components.map((component) => component.position)).toEqual([
+      { x: 80, y: 80 },
+      { x: 440, y: 80 },
+      { x: 800, y: 80 },
+    ]);
+    expect(repaired.components[1]?.rotation).toBe(90);
+    expect(repaired.components[1]?.properties).toMatchObject({ label: "Input" });
+    expect(repaired.connections).toEqual(expect.arrayContaining([{ id: "connection-1", source: { componentId: "board-1", portId: "gpio-0" }, target: { componentId: "button-1", portId: "pin-1" }, domain: "gpio" }]));
+  });
+
+  it("keeps growing without overlap and skips multiple candidates blocked by manual placement", () => {
+    const store = useProjectStore.getState();
+    for (let index = 0; index < 20; index += 1) store.addComponent("led");
+    const positions = useProjectStore.getState().project.components.map((component) => component.position);
+    expect(new Set(positions.map((position) => `${position.x}:${position.y}`)).size).toBe(20);
+    for (let first = 0; first < positions.length; first += 1) {
+      for (let second = first + 1; second < positions.length; second += 1) {
+        expect(Math.abs(positions[first].x - positions[second].x) >= 360 || Math.abs(positions[first].y - positions[second].y) >= 460).toBe(true);
+      }
+    }
+    expect(nextComponentPosition([{ position: { x: 260, y: 80 } }, { position: { x: 980, y: 80 } }])).toEqual({ x: 80, y: 540 });
   });
 
   it("keeps secondary controls behind one menu and dismisses it on outside click or Escape", () => {

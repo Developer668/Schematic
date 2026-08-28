@@ -5,38 +5,40 @@
   "components": [
     { "id": "compute-1", "definitionId": "esp32-s3", "position": { "x": 520, "y": 260 }, "rotation": 0, "properties": { "role": "wireless compute + BLE/Wi-Fi bridge" } },
     { "id": "imu-1", "definitionId": "mpu6050", "position": { "x": 210, "y": 110 }, "rotation": 0, "properties": { "role": "head tracking / motion" } },
-    { "id": "mic-left-1", "definitionId": "small-sound-sensor", "position": { "x": 820, "y": 100 }, "rotation": 0, "properties": { "role": "left temple microphone proxy" } },
-    { "id": "mic-right-1", "definitionId": "big-sound-sensor", "position": { "x": 820, "y": 220 }, "rotation": 0, "properties": { "role": "right temple microphone proxy" } },
+    { "id": "mic-left-1", "definitionId": "sound-ky038", "position": { "x": 820, "y": 100 }, "rotation": 0, "properties": { "role": "left temple microphone proxy" } },
+    { "id": "mic-right-1", "definitionId": "sound-ky038", "position": { "x": 820, "y": 220 }, "rotation": 0, "properties": { "role": "right temple microphone proxy" } },
     { "id": "audio-1", "definitionId": "buzzer", "position": { "x": 820, "y": 360 }, "rotation": 0, "properties": { "role": "open-ear speaker output proxy" } },
     { "id": "capture-1", "definitionId": "pushbutton", "position": { "x": 180, "y": 430 }, "rotation": 0, "properties": { "role": "capture / assistant button" } },
-    { "id": "ambient-1", "definitionId": "photodiode", "position": { "x": 460, "y": 500 }, "rotation": 0, "properties": { "role": "ambient light / auto-exposure proxy" } },
+    { "id": "ambient-1", "definitionId": "photoresistor-sensor", "position": { "x": 460, "y": 500 }, "rotation": 0, "properties": { "role": "ambient light / auto-exposure proxy" } },
     { "id": "privacy-led-1", "definitionId": "led", "position": { "x": 760, "y": 520 }, "rotation": 0, "properties": { "role": "capture + privacy status" } },
     { "id": "battery-1", "definitionId": "battery-coin-cell", "position": { "x": 120, "y": 260 }, "rotation": 0, "properties": { "role": "temple battery proxy" } },
-    { "id": "storage-1", "definitionId": "microsd-card", "position": { "x": 1030, "y": 260 }, "rotation": 0, "properties": { "role": "local media buffer" } }
+    { "id": "storage-1", "definitionId": "micro-sd-module", "position": { "x": 1030, "y": 260 }, "rotation": 0, "properties": { "role": "local media buffer" } }
   ],
   "connections": [
     { "id": "c1", "source": { "componentId": "compute-1", "portId": "3V3" }, "target": { "componentId": "imu-1", "portId": "VCC" }, "domain": "power" },
     { "id": "c2", "source": { "componentId": "compute-1", "portId": "GND" }, "target": { "componentId": "imu-1", "portId": "GND" }, "domain": "ground" },
     { "id": "c3", "source": { "componentId": "compute-1", "portId": "SDA" }, "target": { "componentId": "imu-1", "portId": "SDA" }, "domain": "i2c" },
     { "id": "c4", "source": { "componentId": "compute-1", "portId": "SCL" }, "target": { "componentId": "imu-1", "portId": "SCL" }, "domain": "i2c" },
-    { "id": "c5", "source": { "componentId": "compute-1", "portId": "TX" }, "target": { "componentId": "mic-left-1", "portId": "P1" }, "domain": "uart" },
-    { "id": "c6", "source": { "componentId": "compute-1", "portId": "GND" }, "target": { "componentId": "mic-left-1", "portId": "P2" }, "domain": "ground" },
-    { "id": "c7", "source": { "componentId": "compute-1", "portId": "RX" }, "target": { "componentId": "mic-right-1", "portId": "P1" }, "domain": "uart" },
-    { "id": "c8", "source": { "componentId": "compute-1", "portId": "GND" }, "target": { "componentId": "mic-right-1", "portId": "P2" }, "domain": "ground" },
+    { "id": "c5", "source": { "componentId": "compute-1", "portId": "GPIO16" }, "target": { "componentId": "mic-left-1", "portId": "DO" }, "domain": "gpio" },
+    { "id": "c6", "source": { "componentId": "compute-1", "portId": "GND" }, "target": { "componentId": "mic-left-1", "portId": "GND" }, "domain": "ground" },
+    { "id": "c7", "source": { "componentId": "compute-1", "portId": "GPIO17" }, "target": { "componentId": "mic-right-1", "portId": "DO" }, "domain": "gpio" },
+    { "id": "c8", "source": { "componentId": "compute-1", "portId": "GND" }, "target": { "componentId": "mic-right-1", "portId": "GND" }, "domain": "ground" },
     { "id": "c9", "source": { "componentId": "compute-1", "portId": "3V3" }, "target": { "componentId": "audio-1", "portId": "VCC" }, "domain": "power" },
     { "id": "c10", "source": { "componentId": "compute-1", "portId": "GND" }, "target": { "componentId": "audio-1", "portId": "GND" }, "domain": "ground" },
     { "id": "c11", "source": { "componentId": "compute-1", "portId": "GPIO19" }, "target": { "componentId": "audio-1", "portId": "IN" }, "domain": "gpio" },
-    { "id": "c12", "source": { "componentId": "compute-1", "portId": "GPIO18" }, "target": { "componentId": "capture-1", "portId": "A" }, "domain": "gpio" },
+    { "id": "c12", "source": { "componentId": "compute-1", "portId": "GPIO4" }, "target": { "componentId": "capture-1", "portId": "A" }, "domain": "gpio" },
     { "id": "c13", "source": { "componentId": "compute-1", "portId": "GND" }, "target": { "componentId": "capture-1", "portId": "B" }, "domain": "ground" },
-    { "id": "c14", "source": { "componentId": "compute-1", "portId": "RX" }, "target": { "componentId": "ambient-1", "portId": "P1" }, "domain": "uart" },
-    { "id": "c15", "source": { "componentId": "compute-1", "portId": "GND" }, "target": { "componentId": "ambient-1", "portId": "P2" }, "domain": "ground" },
+    { "id": "c14", "source": { "componentId": "compute-1", "portId": "GPIO1" }, "target": { "componentId": "ambient-1", "portId": "OUT" }, "domain": "adc" },
+    { "id": "c15", "source": { "componentId": "compute-1", "portId": "GND" }, "target": { "componentId": "ambient-1", "portId": "GND" }, "domain": "ground" },
     { "id": "c16", "source": { "componentId": "compute-1", "portId": "3V3" }, "target": { "componentId": "privacy-led-1", "portId": "VCC" }, "domain": "power" },
     { "id": "c17", "source": { "componentId": "compute-1", "portId": "GND" }, "target": { "componentId": "privacy-led-1", "portId": "GND" }, "domain": "ground" },
     { "id": "c18", "source": { "componentId": "compute-1", "portId": "GPIO18" }, "target": { "componentId": "privacy-led-1", "portId": "IN" }, "domain": "gpio" },
     { "id": "c19", "source": { "componentId": "battery-1", "portId": "P1" }, "target": { "componentId": "compute-1", "portId": "3V3" }, "domain": "power" },
     { "id": "c20", "source": { "componentId": "battery-1", "portId": "P2" }, "target": { "componentId": "compute-1", "portId": "GND" }, "domain": "ground" },
-    { "id": "c21", "source": { "componentId": "compute-1", "portId": "TX" }, "target": { "componentId": "storage-1", "portId": "P1" }, "domain": "uart" },
-    { "id": "c22", "source": { "componentId": "compute-1", "portId": "RX" }, "target": { "componentId": "storage-1", "portId": "P2" }, "domain": "uart" }
+    { "id": "c21", "source": { "componentId": "compute-1", "portId": "SCK" }, "target": { "componentId": "storage-1", "portId": "SCK" }, "domain": "spi" },
+    { "id": "c22", "source": { "componentId": "compute-1", "portId": "MOSI" }, "target": { "componentId": "storage-1", "portId": "MOSI" }, "domain": "spi" },
+    { "id": "c23", "source": { "componentId": "compute-1", "portId": "MISO" }, "target": { "componentId": "storage-1", "portId": "MISO" }, "domain": "spi" },
+    { "id": "c24", "source": { "componentId": "compute-1", "portId": "CS" }, "target": { "componentId": "storage-1", "portId": "CS" }, "domain": "spi" }
   ],
   "firmwareTargets": [
     {
@@ -47,7 +49,7 @@
       "files": [
         {
           "name": "smart_glasses.ino",
-          "content": "#include <Wire.h>\n\n// Meta-style audio-first glasses prototype\nconstexpr int CAPTURE_BUTTON = 18;\nconstexpr int AUDIO_OUT = 19;\nconstexpr int STATUS_LED = 18;\n\nvoid setup() {\n  pinMode(CAPTURE_BUTTON, INPUT_PULLUP);\n  pinMode(AUDIO_OUT, OUTPUT);\n  pinMode(STATUS_LED, OUTPUT);\n  Wire.begin(); // MPU6050 head-motion bus\n}\n\nvoid loop() {\n  const bool capture = digitalRead(CAPTURE_BUTTON) == LOW;\n  digitalWrite(STATUS_LED, capture);\n  if (capture) tone(AUDIO_OUT, 880, 80);\n  delay(20);\n}\n"
+          "content": "#include <Wire.h>\n\n// Meta-style audio-first glasses prototype\nconstexpr int CAPTURE_BUTTON = 4;\nconstexpr int AUDIO_OUT = 19;\nconstexpr int STATUS_LED = 18;\n\nvoid setup() {\n  pinMode(CAPTURE_BUTTON, INPUT_PULLUP);\n  pinMode(AUDIO_OUT, OUTPUT);\n  pinMode(STATUS_LED, OUTPUT);\n  Wire.begin(); // MPU6050 head-motion bus\n}\n\nvoid loop() {\n  const bool capture = digitalRead(CAPTURE_BUTTON) == LOW;\n  digitalWrite(STATUS_LED, capture);\n  if (capture) tone(AUDIO_OUT, 880, 80);\n  delay(20);\n}\n"
         }
       ]
     }
