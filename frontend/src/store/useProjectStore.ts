@@ -41,9 +41,22 @@ interface ProjectState {
   listProjects: () => HardwareGraph[];
 }
 
+import { getCurrentUserId } from "../auth/supertokens.ts";
+
+function storageKey() {
+  const uid = getCurrentUserId();
+  return uid ? `schematic-projects:${uid}` : "schematic-projects";
+}
+function legacyKey() {
+  const uid = getCurrentUserId();
+  return uid ? `schematic-project:${uid}` : "schematic-project";
+}
 const PROJECTS_STORAGE_KEY = "schematic-projects";
 const LEGACY_PROJECT_STORAGE_KEY = "schematic-project";
 const projectChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("schematic-project-sync") : null;
+
+// Per-user room: projects are stored on device keyed by userId (localStorage)
+// so WebMCP mutates only your room, never global. See supertokens-core.
 
 type StoredProjects = { version: 1; activeProjectId: string; projects: HardwareGraph[] };
 
@@ -122,16 +135,36 @@ function emptyProject(name = "Untitled"): HardwareGraph {
 function readStoredState(): StoredProjects {
   try {
     if (typeof localStorage === "undefined") return { version: 1, activeProjectId: "", projects: [emptyProject()] };
-    const stored = JSON.parse(localStorage.getItem(PROJECTS_STORAGE_KEY) ?? "null");
-    if (stored && Array.isArray(stored.projects) && stored.projects.length > 0) {
-      const projects = stored.projects.map((project: unknown) => normalizeProject(project));
-      const activeProjectId = projects.some((project: HardwareGraph) => project.id === stored.activeProjectId) ? stored.activeProjectId : projects[0].id;
-      return { version: 1, activeProjectId, projects };
+    // Try per-user key first, then fallback to global, then legacy
+    const tryKeys = [storageKey(), PROJECTS_STORAGE_KEY, legacyKey(), LEGACY_PROJECT_STORAGE_KEY];
+    for (const key of tryKeys) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const stored = JSON.parse(raw);
+      if (stored && Array.isArray(stored.projects) && stored.projects.length > 0) {
+        const projects = stored.projects.map((project: unknown) => normalizeProject(project));
+        const activeProjectId = projects.some((project: HardwareGraph) => project.id === stored.activeProjectId) ? stored.activeProjectId : projects[0].id;
+        // If we loaded from a fallback global key but we have a user, migrate to per-user key
+        if (key !== storageKey()) {
+          try { localStorage.setItem(storageKey(), JSON.stringify({ version: 1, activeProjectId, projects })); } catch {}
+        }
+        return { version: 1, activeProjectId, projects };
+      }
+      if (stored && typeof stored === "object" && !Array.isArray(stored.projects)) {
+        // Legacy single project shape
+        const project = normalizeProject(stored);
+        try { localStorage.setItem(storageKey(), JSON.stringify({ version: 1, activeProjectId: project.id, projects: [project] })); } catch {}
+        return { version: 1, activeProjectId: project.id, projects: [project] };
+      }
     }
-    const legacy = JSON.parse(localStorage.getItem(LEGACY_PROJECT_STORAGE_KEY) ?? "null");
-    if (legacy && typeof legacy === "object") {
-      const project = normalizeProject(legacy);
-      return { version: 1, activeProjectId: project.id, projects: [project] };
+    // Also try legacy singletons
+    for (const key of [legacyKey(), LEGACY_PROJECT_STORAGE_KEY]) {
+      const legacy = JSON.parse(localStorage.getItem(key) ?? "null");
+      if (legacy && typeof legacy === "object") {
+        const project = normalizeProject(legacy);
+        try { localStorage.setItem(storageKey(), JSON.stringify({ version: 1, activeProjectId: project.id, projects: [project] })); } catch {}
+        return { version: 1, activeProjectId: project.id, projects: [project] };
+      }
     }
   } catch {}
   const project = emptyProject();
@@ -141,9 +174,17 @@ function readStoredState(): StoredProjects {
 function persistState(projects: HardwareGraph[], activeProjectId: string, broadcast = true) {
   const state: StoredProjects = { version: 1, activeProjectId, projects };
   try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(state));
+    if (typeof localStorage !== "undefined") localStorage.setItem(storageKey(), JSON.stringify(state));
   } catch {}
-  if (broadcast) projectChannel?.postMessage({ type: "projects:update", state });
+  if (broadcast) projectChannel?.postMessage({ type: "projects:update", state: { ...state, _room: getCurrentUserId() } });
+}
+
+export function reloadForCurrentUser() {
+  const next = readStoredState();
+  const proj = next.projects.find((p) => p.id === next.activeProjectId) ?? next.projects[0];
+  useProjectStore.setState({ projects: next.projects, activeProjectId: next.activeProjectId, project: proj });
+  // Also notify other tabs with the room
+  projectChannel?.postMessage({ type: "projects:update", state: { ...next, _room: getCurrentUserId() } });
 }
 
 function resetProjectRuntime() {
@@ -368,10 +409,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
 function applyRemoteState(value: unknown) {
   if (!value || typeof value !== "object") return;
-  const stored = value as Partial<StoredProjects>;
+  const stored = value as any;
+  // Only apply if it matches our current room (user)
+  const incomingRoom = stored._room ?? null;
+  const currentRoom = getCurrentUserId();
+  if (incomingRoom !== currentRoom) return;
   if (!Array.isArray(stored.projects) || stored.projects.length === 0) return;
-  const projects = stored.projects.map((project) => normalizeProject(project));
-  const activeProjectId = projects.some((project) => project.id === stored.activeProjectId) ? stored.activeProjectId! : projects[0].id;
+  const projects = stored.projects.map((project: unknown) => normalizeProject(project));
+  const activeProjectId = projects.some((project: HardwareGraph) => project.id === stored.activeProjectId) ? stored.activeProjectId! : projects[0].id;
   const previous = useProjectStore.getState().activeProjectId;
   const project = projects.find((item) => item.id === activeProjectId) ?? projects[0];
   useProjectStore.setState({ projects, activeProjectId, project });
@@ -384,7 +429,11 @@ projectChannel?.addEventListener("message", (event) => {
 
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (event) => {
-    if (event.key !== PROJECTS_STORAGE_KEY || !event.newValue) return;
+    if (!event.newValue) return;
+    if (event.key !== storageKey() && event.key !== PROJECTS_STORAGE_KEY) return;
     try { applyRemoteState(JSON.parse(event.newValue)); } catch {}
   });
+  // When user signs in/out, reload to their room (stored on device, per-user key)
+  window.addEventListener("st-mock-login" as any, () => reloadForCurrentUser());
+  window.addEventListener("supertokens-session" as any, () => reloadForCurrentUser());
 }

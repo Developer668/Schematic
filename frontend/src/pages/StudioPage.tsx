@@ -14,7 +14,8 @@ import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { catalog, categories as allCategories } from "../data/catalog.ts";
 import ComponentArtwork from "../components/ComponentArtwork.tsx";
 import LogoMark from "../components/LogoMark.tsx";
-import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check } from "lucide-react";
+import { useAuth, mockSignOut, getCurrentUserId } from "../auth/supertokens.ts";
+import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User } from "lucide-react";
 
 function ThemeIcon({ theme }: { theme: string }) {
   return theme === "dark" ? (
@@ -26,6 +27,30 @@ function ThemeIcon({ theme }: { theme: string }) {
     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
       <path d="M12.5 8A4.5 4.5 0 1 1 8 3.5 3.4 3.4 0 0 0 12.5 8Z" />
     </svg>
+  );
+}
+
+function UserRoomBadge() {
+  const { session } = useAuth();
+  const roomId = getCurrentUserId() || "global";
+  const shortRoom = roomId.slice(0, 10);
+  if (!session) {
+    return (
+      <Link to="/auth" className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+        <User size={12} /> Sign in for your room
+      </Link>
+    );
+  }
+  return (
+    <div className="hidden sm:flex items-center gap-1.5">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300" title={`Room ${roomId} — stored on your device, isolated per user. WebMCP mutates only this room.`}>
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+        Room {shortRoom} • {session.email || "local"}
+      </span>
+      <button onClick={() => { mockSignOut().then(() => window.location.reload()); }} className="grid h-7 w-7 place-items-center rounded-full border border-border hover:bg-muted" title="Sign out (room stays on device)">
+        <LogOut size={12} />
+      </button>
+    </div>
   );
 }
 
@@ -295,6 +320,7 @@ export default function StudioPage() {
               <Play size={9} className="fill-current" /> Run
             </button>
           )}
+          <UserRoomBadge />
         </div>
       </header>
 
@@ -481,6 +507,8 @@ export default function StudioPage() {
       <footer className="flex h-5 items-center gap-2 border-t border-border bg-muted/40 px-2.5 text-[10px] font-mono tabular-nums text-muted-foreground shrink-0">
         <span>{project.components.length}c · {project.connections.length}w</span>
         <span className="hidden sm:inline">· {toolNames.length} tools</span>
+        <span className="hidden md:inline">· room {getCurrentUserId()?.slice(0, 8) || "global"} • device-local</span>
+        <span className="hidden lg:inline">· WebMCP scoped to your room • <span className="text-emerald-600 dark:text-emerald-400">agent can place on your behalf</span></span>
         <span className="ml-auto">{running ? "running" : "idle"}</span>
       </footer>
     </div>

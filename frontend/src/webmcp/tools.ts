@@ -42,7 +42,7 @@ function cloneProject(source: unknown): HardwareGraph {
  */
 export async function fetchJson(path: string, init?: RequestInit): Promise<ApiJsonResult> {
   try {
-    const response = await fetch(path, init);
+    const response = await fetch(path, { credentials: "include", ...init, headers: { "Content-Type": "application/json", ...(init?.headers as any) } });
     const responseText = typeof response.text === "function" ? await response.text() : null;
 
     if (responseText !== null) {
@@ -913,9 +913,31 @@ export async function registerWebMCPTools() {
   installModelContextProducerPolyfill();
   installModelContextTestingPolyfill();
   const mc: any = (document as any).modelContext ?? (navigator as any).modelContext;
+  // Always expose fallback for agents that use window.__schematicTools or postMessage
+  (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>) => executeToolWithActivity(t, args)]));
+  // Also expose via postMessage for cross-origin agents (e.g., chat.openai.com acting on behalf of user)
+  // The agent can do: window.postMessage({type: 'webmcp-call', tool: 'component.add', args: {...}}, '*')
+  if (!(window as any).__webmcpMessageHandler) {
+    (window as any).__webmcpMessageHandler = true;
+    window.addEventListener("message", async (event) => {
+      // Allow any origin for demo, but verify tool exists and log. In production, check event.origin against allowlist.
+      const data: any = event.data;
+      if (!data || data.type !== "webmcp-call" || !data.tool) return;
+      const tool = tools.find((t) => t.name === data.tool);
+      if (!tool) {
+        event.source?.postMessage({ type: "webmcp-result", id: data.id, error: `Unknown tool ${data.tool}` }, event.origin as any);
+        return;
+      }
+      try {
+        const result = await executeToolWithActivity(tool, data.args || {});
+        event.source?.postMessage({ type: "webmcp-result", id: data.id, result }, event.origin as any);
+      } catch (e: any) {
+        event.source?.postMessage({ type: "webmcp-result", id: data.id, error: e.message }, event.origin as any);
+      }
+    });
+  }
   if (!mc || typeof mc.registerTool !== "function") {
-    console.warn("[WebMCP] modelContext not available — run in Chrome ≥146 with #enable-webmcp-testing, or use demo shim. Tools still callable via window.__schematicTools");
-    (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>) => executeToolWithActivity(t, args)]));
+    console.warn("[WebMCP] modelContext not available — run in Chrome ≥146 with #enable-webmcp-testing, or use demo shim. Tools still callable via window.__schematicTools and postMessage");
     return;
   }
   for (const t of tools) {
@@ -925,24 +947,27 @@ export async function registerWebMCPTools() {
       await mc.registerTool(
         {
           name: t.name,
-          description: t.description,
+          description: t.description + " — Scoped to your per-user room (stored on device, isolated per SuperTokens user). Agent may place hardware on your behalf within your room only.",
           inputSchema: t.inputSchema,
           annotations: t.annotations,
-          execute: (args: Record<string, unknown>) => executeToolWithActivity(t, args),
+          execute: (args: Record<string, unknown>) => {
+            // Log for debugging agent access
+            console.log(`[WebMCP] agent calling ${t.name}`, args, "room:", (window as any).__schematicRoom?.() || "global");
+            return executeToolWithActivity(t, args);
+          },
         },
         { signal: ctrl.signal },
       );
-      console.log(`[WebMCP] registered ${t.name}`);
+      console.log(`[WebMCP] registered ${t.name} (room-aware)`);
     } catch (e) {
       console.error(`[WebMCP] failed to register ${t.name}:`, e);
     }
   }
-  // expose for in-page testing / fallback
-  (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>) => executeToolWithActivity(t, args)]));
   // listen for toolchange
   if ("ontoolchange" in mc) {
     mc.ontoolchange = () => console.log("[WebMCP] toolset changed");
   }
+  console.log(`[WebMCP] ready — ${tools.length} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
 }
 
 export function unregisterWebMCPTools() {
