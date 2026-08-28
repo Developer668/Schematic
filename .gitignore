@@ -8,6 +8,10 @@ coverage/
 .vite/
 .turbo/
 *.tsbuildinfo
+.wrangler/
+chatgpt-site/.next/
+chatgpt-site/.vinext/
+backend/src/vendor/
 
 # Python environments and caches
 __pycache__/

@@ -14,6 +14,10 @@ describe("component-format importer", () => {
     expect(e).toContain("renode");
     expect(e).toContain("opencascade");
   });
+  it("detects a KiCad schematic as a KiCad source", () => {
+    expect(detectFileType("wearable.kicad_sch")).toMatchObject({ engine: "kicad", fidelity: "schematic" });
+    expect(chooseEnginesForFiles(["wearable.kicad_sch", "README.md"])).toEqual(["kicad"]);
+  });
   it("unknown returns null", () => {
     expect(detectFileType("readme.txt")).toBeNull();
   });

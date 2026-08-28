@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { AlertCircle, FileArchive, Loader2, UploadCloud, X } from "lucide-react";
+import { apiUrl, getAuthHeaders } from "../../auth/session.ts";
 
 interface Step { step: number; label: string; status: string; detail?: string }
 type Analysis = { engines: string[]; fidelity: Record<string, boolean>; steps: Step[] };
@@ -25,7 +26,9 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
     if (!files.length) return;
     setLoading(true); setError(null); setAnalysis(null);
     try {
-      const response = await fetch("/api/components/import/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filenames: files.map((file) => file.name), fileSizes: files.map((file) => file.size) }) });
+      const headers = new Headers(await getAuthHeaders());
+      headers.set("Content-Type", "application/json");
+      const response = await fetch(apiUrl("/api/components/import/analyze"), { method: "POST", headers, credentials: "include", body: JSON.stringify({ filenames: files.map((file) => file.name), fileSizes: files.map((file) => file.size) }) });
       if (!response.ok) throw new Error(`Import analysis failed (${response.status})`);
       setAnalysis(await response.json());
     } catch (cause) {

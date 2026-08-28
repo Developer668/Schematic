@@ -5,6 +5,7 @@ import { useProjectStore } from "../store/useProjectStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { getRegisteredToolNames } from "../webmcp/tools.ts";
 import LogoMark from "../components/LogoMark.tsx";
+import { apiUrl, getAuthHeaders } from "../auth/session.ts";
 import {
   Palette,
   Grid3X3,
@@ -37,14 +38,20 @@ export default function SettingsPage() {
   const [notice, setNotice] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
   const [clearArmed, setClearArmed] = useState(false);
   const toolCount = getRegisteredToolNames().length;
+  const apiBaseUrl = apiUrl("/api");
 
   const checkApi = useCallback(async () => {
     setApiStatus("checking");
     try {
-      const response = await fetch("/api/engines");
+      const response = await fetch(apiUrl("/api/engines"), { headers: await getAuthHeaders(), credentials: "include" });
       if (!response.ok) throw new Error(`Backend returned ${response.status}`);
       const contentType = response.headers.get("content-type") ?? "";
-      if (!contentType.includes("application/json")) throw new Error("Backend returned a non-JSON response");
+      if (!contentType.includes("application/json")) {
+        setApiStatus("offline");
+        setEnginesStatus(null);
+        setNotice({ kind: "info", text: "The remote backend is not connected. The browser behavioral runtime and local WebMCP tools remain available." });
+        return;
+      }
       const payload = await response.json();
       setApiStatus("ok");
       setEnginesStatus(payload);
@@ -255,7 +262,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/30">
                   <div>
                     <div className="text-xs font-medium flex items-center gap-1"><Globe size={12} /> Backend API</div>
-                    <div className="text-[11px] font-mono text-muted-foreground">/api · proxied to :8001</div>
+                      <div className="text-[11px] font-mono text-muted-foreground">{apiBaseUrl} · browser runtime fallback enabled</div>
                   </div>
                   <a href="/api/docs" target="_blank" className="text-xs px-2.5 py-1 rounded-lg bg-card border border-border hover:bg-muted inline-flex items-center gap-1">
                     Open <ExternalLink size={10} />

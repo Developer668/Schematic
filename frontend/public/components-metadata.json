@@ -10867,6 +10867,50 @@
       "name": "GUVA-S12SD UV (Analog)",
       "category": "sensors",
       "description": "GUVA-S12SD 240-370nm analog, 5V. UV."
+    },
+    {
+      "id": "esp32-s3",
+      "tagName": "schematic-esp32-s3",
+      "name": "ESP32-S3",
+      "category": "boards",
+      "description": "ESP32-S3 Wi-Fi + BLE MCU board",
+      "tags": ["esp32", "esp32-s3", "board", "wifi", "ble"],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0
+    },
+    {
+      "id": "arduino-uno-r3",
+      "tagName": "schematic-arduino-uno-r3",
+      "name": "Arduino Uno R3",
+      "category": "boards",
+      "description": "ATmega328P Arduino Uno R3",
+      "tags": ["arduino", "uno", "board"],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0
+    },
+    {
+      "id": "raspberry-pi-pico-w",
+      "tagName": "schematic-raspberry-pi-pico-w",
+      "name": "Raspberry Pi Pico W",
+      "category": "boards",
+      "description": "RP2040 + CYW43439 Wi-Fi",
+      "tags": ["raspberry", "pico", "rp2040", "board", "wifi"],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 0
+    },
+    {
+      "id": "active-buzzer",
+      "tagName": "schematic-active-buzzer",
+      "name": "Active buzzer",
+      "category": "output",
+      "description": "Active piezo buzzer",
+      "tags": ["buzzer", "actuator", "output"],
+      "properties": [],
+      "defaultValues": {},
+      "pinCount": 2
     }
   ]
 }

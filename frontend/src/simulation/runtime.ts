@@ -1,4 +1,5 @@
 import { componentPorts, resolveBoardPin, resolveFirmwareBinding, signalPort } from "../data/hardware.ts";
+import { createProtocolRuntime, type DeviceRuntimeState, type ProtocolRuntime, type ProtocolTrace, type ProtocolWarning } from "./protocolRuntime.ts";
 import type { HardwareGraph } from "../store/useProjectStore.ts";
 
 export type RuntimeValue = boolean | number;
@@ -11,8 +12,8 @@ export interface RuntimeEvent {
 }
 
 export interface RuntimeResult {
-  status: "completed" | "no-firmware" | "invalid-target";
-  runtime: "browser";
+  status: "completed" | "completed-with-warnings" | "no-firmware" | "invalid-target" | "unsupported-api";
+  runtime: "browser" | "remote";
   durationMs: number;
   outputs: Record<string, RuntimeValue>;
   events: RuntimeEvent[];
@@ -20,6 +21,10 @@ export interface RuntimeResult {
   resolvedNets: number;
   serialOutput: string;
   targetIssues: { componentId: string; code: string; message: string }[];
+  protocolEvents: ProtocolTrace[];
+  deviceStates: DeviceRuntimeState[];
+  warnings: ProtocolWarning[];
+  unsupportedApis: string[];
   note: string;
 }
 
@@ -31,6 +36,8 @@ type ExpressionContext = {
   project: HardwareGraph;
   boardId: string;
   dsu: DisjointSet;
+  protocol: ProtocolRuntime;
+  cursor: number;
 };
 type ExecutionContext = ExpressionContext & {
   outputs: Record<string, RuntimeValue>;
@@ -42,6 +49,7 @@ type ExecutionContext = ExpressionContext & {
   writes: number;
   executions: number;
   programId: string;
+  unsupportedApis: Set<string>;
 };
 
 class DisjointSet {
@@ -66,19 +74,40 @@ function stripComments(source: string) {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 }
 
+function balancedSource(source: string) {
+  const stack: string[] = [];
+  let quote = "";
+  let escaped = false;
+  const pairs: Record<string, string> = { "}": "{", ")": "(", "]": "[" };
+  for (const character of source) {
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === "\"" || character === "'") quote = character;
+    else if ("{([".includes(character)) stack.push(character);
+    else if ("})]".includes(character)) {
+      if (!stack.length || stack.pop() !== pairs[character]) return false;
+    }
+  }
+  return stack.length === 0 && !quote;
+}
+
 function parseConstants(source: string) {
   const constants = new Map<string, RuntimeValue>();
   const matches = source.matchAll(/(?:(?:const|constexpr)\s+)?(?:bool|boolean|byte|short|int|long|float|double|uint8_t|uint16_t)\s+([A-Za-z_]\w*)\s*=\s*([^;]+);/g);
   for (const match of matches) {
     const raw = match[2].trim();
-    if (/^-?\d+(?:\.\d+)?$/.test(raw)) constants.set(match[1], Number(raw));
+    if (/^-?(?:\d+(?:\.\d+)?|0x[\da-f]+)$/i.test(raw)) constants.set(match[1], Number(raw));
     else if (/^(true|HIGH)$/i.test(raw)) constants.set(match[1], true);
     else if (/^(false|LOW)$/i.test(raw)) constants.set(match[1], false);
   }
   const defines = source.matchAll(/^\s*#define\s+([A-Za-z_]\w*)\s+([^\s/]+).*$/gm);
   for (const match of defines) {
     const raw = match[2].trim();
-    if (/^-?\d+(?:\.\d+)?$/.test(raw)) constants.set(match[1], Number(raw));
+    if (/^-?(?:\d+(?:\.\d+)?|0x[\da-f]+)$/i.test(raw)) constants.set(match[1], Number(raw));
     else if (/^(true|HIGH)$/i.test(raw)) constants.set(match[1], true);
     else if (/^(false|LOW)$/i.test(raw)) constants.set(match[1], false);
   }
@@ -206,12 +235,43 @@ function evaluateExpression(expression: string, context: ExpressionContext, dept
   if (analogRead) {
     const endpoint = resolveBoardPin(context.project, context.boardId, analogRead[1], context.constants);
     if (!endpoint) return 0;
-    return readInputValue(context.inputs, context.project, context.dsu, endpoint).value;
+    if (Object.prototype.hasOwnProperty.call(context.inputs, endpointKey(endpoint))) return asNumber(context.inputs[endpointKey(endpoint)]);
+    return context.protocol.analogRead(context.boardId, endpoint.portId, context.inputs);
+  }
+  const wireAvailable = raw.match(/^Wire\.available\s*\(\s*\)$/i);
+  if (wireAvailable) return context.protocol.i2cAvailable(context.boardId);
+  const wireRead = raw.match(/^Wire\.read\s*\(\s*\)$/i);
+  if (wireRead) return context.protocol.i2cRead(context.boardId);
+  const serialAvailable = raw.match(/^Serial\.available\s*\(\s*\)$/i);
+  if (serialAvailable) return context.protocol.serialAvailable(context.boardId);
+  const serialRead = raw.match(/^Serial\.read\s*\(\s*\)$/i);
+  if (serialRead) return context.protocol.serialRead(context.boardId);
+  const spiTransfer = raw.match(/^SPI\.transfer\s*\(\s*([^)]*)\s*\)$/i);
+  if (spiTransfer) return context.protocol.spiTransfer(context.boardId, asNumber(evaluateExpression(spiTransfer[1], context)));
+  const millis = raw.match(/^millis\s*\(\s*\)$/i);
+  if (millis) return context.cursor;
+  const micros = raw.match(/^micros\s*\(\s*\)$/i);
+  if (micros) return context.cursor * 1000;
+  const mapCall = raw.match(/^map\s*\(\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^)]+)\)$/i);
+  if (mapCall) {
+    const value = asNumber(evaluateExpression(mapCall[1], context));
+    const fromLow = asNumber(evaluateExpression(mapCall[2], context));
+    const fromHigh = asNumber(evaluateExpression(mapCall[3], context));
+    const toLow = asNumber(evaluateExpression(mapCall[4], context));
+    const toHigh = asNumber(evaluateExpression(mapCall[5], context));
+    return fromHigh === fromLow ? toLow : (value - fromLow) * (toHigh - toLow) / (fromHigh - fromLow) + toLow;
+  }
+  const constrain = raw.match(/^constrain\s*\(\s*([^,]+),\s*([^,]+),\s*([^)]+)\)$/i);
+  if (constrain) {
+    const value = asNumber(evaluateExpression(constrain[1], context));
+    const low = asNumber(evaluateExpression(constrain[2], context));
+    const high = asNumber(evaluateExpression(constrain[3], context));
+    return Math.min(high, Math.max(low, value));
   }
   if (/^!/.test(raw)) return !evaluateExpression(raw.slice(1), context, depth + 1);
   if (/^(true|HIGH)$/i.test(raw)) return true;
   if (/^(false|LOW)$/i.test(raw)) return false;
-  if (/^-?\d+(?:\.\d+)?$/.test(raw)) return Number(raw);
+  if (/^-?(?:\d+(?:\.\d+)?|0x[\da-f]+)$/i.test(raw)) return /^0x/i.test(raw) ? Number.parseInt(raw, 16) : Number(raw);
   if (context.variables.has(raw)) return context.variables.get(raw)!;
   if (context.constants.has(raw)) return context.constants.get(raw)!;
   return false;
@@ -281,14 +341,71 @@ function executeStatement(statement: string, context: ExecutionContext) {
   const delay = text.match(/^delay\s*\(\s*([^)]*)\s*\)$/i);
   if (delay) {
     context.cursor += Math.max(0, asNumber(evaluateExpression(delay[1], context)));
+    context.protocol.advanceTo(context.cursor);
     return;
   }
+
+  const pinMode = text.match(/^pinMode\s*\(\s*([^,]+),\s*([^)]+)\)$/i);
+  if (pinMode) return;
+
+  const wireBegin = text.match(/^Wire\.begin\s*\(.*\)$/i);
+  if (wireBegin) return;
+  const wireBeginTransmission = text.match(/^Wire\.beginTransmission\s*\(\s*([^)]*)\s*\)$/i);
+  if (wireBeginTransmission) {
+    context.protocol.i2cBeginTransmission(context.boardId, asNumber(evaluateExpression(wireBeginTransmission[1], context)));
+    return;
+  }
+  const wireWrite = text.match(/^Wire\.write\s*\(\s*([^,)]*)(?:,[^)]*)?\s*\)$/i);
+  if (wireWrite) {
+    context.protocol.i2cWrite(context.boardId, asNumber(evaluateExpression(wireWrite[1], context)));
+    return;
+  }
+  const wireEndTransmission = text.match(/^Wire\.endTransmission\s*\(.*\)$/i);
+  if (wireEndTransmission) {
+    context.protocol.i2cEndTransmission(context.boardId);
+    return;
+  }
+  const wireRequestFrom = text.match(/^Wire\.requestFrom\s*\(\s*([^,]+),\s*([^,]+)(?:,[^)]*)?\s*\)$/i);
+  if (wireRequestFrom) {
+    context.protocol.i2cRequestFrom(context.boardId, asNumber(evaluateExpression(wireRequestFrom[1], context)), asNumber(evaluateExpression(wireRequestFrom[2], context)));
+    return;
+  }
+
+  const spiBegin = text.match(/^SPI\.begin\s*\(.*\)$/i);
+  if (spiBegin) return;
+  const spiTransaction = text.match(/^SPI\.beginTransaction\s*\(.*\)$/i);
+  if (spiTransaction) {
+    context.protocol.spiBeginTransaction(context.boardId);
+    return;
+  }
+  const spiTransfer = text.match(/^SPI\.transfer\s*\(\s*([^)]*)\s*\)$/i);
+  if (spiTransfer) {
+    context.protocol.spiTransfer(context.boardId, asNumber(evaluateExpression(spiTransfer[1], context)));
+    return;
+  }
+  const spiEndTransaction = text.match(/^SPI\.endTransaction\s*\(.*\)$/i);
+  if (spiEndTransaction) {
+    context.protocol.spiEndTransaction(context.boardId);
+    return;
+  }
+  const spiEnd = text.match(/^SPI\.end\s*\(.*\)$/i);
+  if (spiEnd) return;
 
   const serial = text.match(/^Serial\.(?:print|println)\s*\((.*)\)$/i);
   if (serial) {
     const raw = serial[1].trim();
     const value = /^".*"$/.test(raw) ? raw.slice(1, -1) : String(evaluateExpression(raw, context));
-    context.serial.push(value + (/println/i.test(text) ? "\n" : ""));
+    const output = value + (/println/i.test(text) ? "\n" : "");
+    context.serial.push(output);
+    context.protocol.serialWrite(context.boardId, [...new TextEncoder().encode(output)]);
+    return;
+  }
+  const serialBegin = text.match(/^Serial\.begin\s*\(.*\)$/i);
+  if (serialBegin) return;
+  const serialWrite = text.match(/^Serial\.write\s*\(\s*([^)]*)\s*\)$/i);
+  if (serialWrite) {
+    const value = asNumber(evaluateExpression(serialWrite[1], context));
+    context.protocol.serialWrite(context.boardId, [value]);
     return;
   }
 
@@ -303,6 +420,7 @@ function executeStatement(statement: string, context: ExecutionContext) {
       context.events.push({ timeMs: start, endpoint: member, value: true, reason: `${context.programId} firmware tone` });
     }
     context.writes += 1;
+    context.protocol.pwmWrite(context.boardId, endpoint.portId, 255, asNumber(evaluateExpression(tone[2], context)));
     context.cursor += Math.max(0, asNumber(evaluateExpression(tone[3], context)));
     for (const member of context.dsu.members(root)) {
       context.outputs[member] = false;
@@ -311,11 +429,12 @@ function executeStatement(statement: string, context: ExecutionContext) {
     return;
   }
 
-  const write = text.match(/^(digitalWrite|analogWrite)\s*\(\s*([^,]+),\s*([^)]+)\)$/i);
-  if (write) {
-    const endpoint = resolveBoardPin(context.project, context.boardId, write[2], context.constants);
+  const write = text.match(/^(digitalWrite|analogWrite)\s*\((.*)\)$/i);
+  const writeArguments = write ? splitTopLevel(write[2], ",") : null;
+  if (write && writeArguments) {
+    const endpoint = resolveBoardPin(context.project, context.boardId, writeArguments[0], context.constants);
     if (!endpoint) return;
-    const rawValue = evaluateExpression(write[3], context);
+    const rawValue = evaluateExpression(writeArguments[1], context);
     const value = write[1].toLowerCase() === "analogwrite" ? asNumber(rawValue) : Boolean(rawValue);
     const root = context.dsu.find(endpointKey(endpoint));
     context.netValues.set(root, value);
@@ -329,10 +448,54 @@ function executeStatement(statement: string, context: ExecutionContext) {
 
   const assignment = text.match(/^(?:(?:const\s+)?(?:bool|boolean|byte|short|int|long|float|double|uint8_t|uint16_t)\s+)?([A-Za-z_]\w*)\s*=\s*(.+)$/);
   if (assignment) context.variables.set(assignment[1], evaluateExpression(assignment[2], context));
+
+  const unsupported = text.match(/^(Wire|SPI|Serial|digitalRead|digitalWrite|analogRead|analogWrite|pinMode|delay|tone|millis|micros|map|constrain)\.?(?:[A-Za-z_]\w*)?\s*\(/i);
+  if (unsupported) context.unsupportedApis.add(unsupported[0].replace(/\s*\($/, "").trim());
 }
 
 function sourceForTarget(target: HardwareGraph["firmwareTargets"][number]) {
   return stripComments(target.files.filter((file) => /\.(ino|c|cpp|h)$/i.test(file.name)).map((file) => file.content).join("\n"));
+}
+
+const SUPPORTED_PROTOCOL_APIS = new Set([
+  "Wire.begin",
+  "Wire.beginTransmission",
+  "Wire.write",
+  "Wire.endTransmission",
+  "Wire.requestFrom",
+  "Wire.available",
+  "Wire.read",
+  "SPI.begin",
+  "SPI.beginTransaction",
+  "SPI.transfer",
+  "SPI.endTransaction",
+  "SPI.end",
+  "Serial.begin",
+  "Serial.print",
+  "Serial.println",
+  "Serial.write",
+  "Serial.available",
+  "Serial.read",
+]);
+
+function collectUnsupportedApis(source: string, output: Set<string>) {
+  for (const match of source.matchAll(/\b(Wire|SPI|Serial)\.([A-Za-z_]\w*)\s*\(/g)) {
+    const api = `${match[1]}.${match[2]}`;
+    if (!SUPPORTED_PROTOCOL_APIS.has(api)) output.add(api);
+  }
+  for (const match of source.matchAll(/\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\(/g)) {
+    if (!["Wire", "SPI", "Serial"].includes(match[1])) output.add(`C++:${match[1]}.${match[2]}`);
+  }
+  const supported = new Set([
+    "setup", "loop", "if", "else", "for", "while", "switch", "digitalRead", "digitalWrite", "analogRead", "analogWrite",
+    "pinMode", "delay", "tone", "millis", "micros", "map", "constrain", "min", "max", "abs", "round", "SPISettings",
+  ]);
+  for (const match of source.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)) {
+    const name = match[1];
+    const offset = match.index ?? 0;
+    if (offset > 0 && source[offset - 1] === ".") continue;
+    if (!supported.has(name)) output.add(`C++:${name}`);
+  }
 }
 
 export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string, RuntimeValue>, durationMs: number): RuntimeResult {
@@ -348,6 +511,8 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
   const netValues = new Map<string, RuntimeValue>();
   for (const [key, value] of Object.entries(inputs)) netValues.set(dsu.find(key), value);
   const serial: string[] = [];
+  const protocol = createProtocolRuntime(project, dsu, duration, inputs);
+  const runtimeUnsupported = new Set<string>();
 
   for (const target of project.firmwareTargets) {
     const binding = resolveFirmwareBinding(project, target.componentId);
@@ -355,8 +520,20 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
       targetIssues.push({ componentId: target.componentId, code: "INVALID_FIRMWARE_TARGET", message: `Firmware target ${target.componentId} is not attached to a catalog component.` });
       continue;
     }
+    if (!target.definitionId) {
+      targetIssues.push({ componentId: target.componentId, code: "FIRMWARE_DEFINITION_REQUIRED", message: "Firmware must retain the exact catalog definition of its board target." });
+      continue;
+    }
+    if (!target.boardFqbn) {
+      targetIssues.push({ componentId: target.componentId, code: "FIRMWARE_FQBN_REQUIRED", message: "Firmware must declare the exact compiler target for its board." });
+      continue;
+    }
     if (binding.definition.category !== "board") {
       targetIssues.push({ componentId: target.componentId, code: "NON_BOARD_FIRMWARE_TARGET", message: `${binding.definition.title} is not a programmable board.` });
+      continue;
+    }
+    if (!["behavioral", "engine-backed"].includes(binding.definition.model.support)) {
+      targetIssues.push({ componentId: target.componentId, code: "UNSUPPORTED_BOARD_MODEL", message: `${binding.definition.title} has no verified executable firmware model in the browser runtime.` });
       continue;
     }
     if (!binding.definitionMatchesTarget) {
@@ -368,8 +545,17 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
       continue;
     }
     const source = sourceForTarget(target);
+    collectUnsupportedApis(source, runtimeUnsupported);
     if (!source) {
       targetIssues.push({ componentId: target.componentId, code: "UNSUPPORTED_FIRMWARE_FILES", message: `No browser-supported C/C++ source file was found for ${binding.definition.title}.` });
+      continue;
+    }
+    if (!balancedSource(source)) {
+      targetIssues.push({ componentId: target.componentId, code: "MALFORMED_FIRMWARE", message: "Firmware source has unbalanced delimiters and was not executed." });
+      continue;
+    }
+    if (!/\b(?:setup|loop)\s*\(/i.test(source)) {
+      targetIssues.push({ componentId: target.componentId, code: "NO_EXECUTABLE_ENTRYPOINT", message: "The supported Arduino runtime requires a setup() or loop() entrypoint." });
       continue;
     }
     const constants = parseConstants(source);
@@ -389,6 +575,8 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
       writes: 0,
       executions: 0,
       programId: target.componentId,
+      protocol,
+      unsupportedApis: new Set<string>(),
     };
     executeBlock(functionBody(source, "setup"), context);
     const loop = functionBody(source, "loop");
@@ -403,8 +591,11 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
     programs.push({ componentId: target.componentId, writes: context.writes, executions: context.executions, sourceFiles: target.files.map((file) => file.name) });
   }
 
+  protocol.advanceTo(duration);
+
   for (const [key, value] of Object.entries(inputs)) outputs[key] ??= value;
-  const status = programs.length > 0 ? "completed" : targetIssues.length > 0 ? "invalid-target" : "no-firmware";
+  const unsupportedApis = [...runtimeUnsupported];
+  const status = programs.length > 0 ? runtimeUnsupported.size > 0 ? "unsupported-api" : protocol.warnings.length > 0 ? "completed-with-warnings" : "completed" : targetIssues.length > 0 ? "invalid-target" : "no-firmware";
   return {
     status,
     runtime: "browser",
@@ -415,8 +606,16 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
     resolvedNets: dsu.size(),
     serialOutput: serial.join(""),
     targetIssues,
+    protocolEvents: protocol.events,
+    deviceStates: protocol.deviceStates,
+    warnings: protocol.warnings,
+    unsupportedApis,
     note: programs.length > 0
-      ? "Firmware executed in the browser runtime. Control flow, reads, writes, delays, serial output, and connected nets were evaluated together."
+      ? runtimeUnsupported.size > 0
+        ? `Firmware ran with unsupported Arduino APIs: ${[...runtimeUnsupported].join(", ")}. No unsupported call was treated as a successful device operation.`
+        : protocol.warnings.length > 0
+          ? `Firmware executed with ${protocol.warnings.length} protocol warning(s). Review device wiring and model coverage before treating the result as valid.`
+        : "Firmware executed in the browser runtime. Control flow, reads, writes, delays, serial output, protocol transactions, and connected nets were evaluated together."
       : targetIssues.length > 0
         ? "Firmware targets were found but could not be executed until their board bindings or source files are corrected."
         : "No firmware target is attached to this project, so only input signals were observed.",

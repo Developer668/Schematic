@@ -8,6 +8,7 @@ import {
   resolveBoardPin,
   resolveFirmwareBinding,
 } from "../data/hardware.ts";
+import { getCatalogComponent } from "../data/catalog.ts";
 
 const project = {
   components: [
@@ -35,6 +36,29 @@ describe("shared hardware resolvers", () => {
   it("does not invent a compiler target for an unsupported board", () => {
     expect(isBoardDefinition("stm32-bluepill")).toBe(true);
     expect(boardTargetFor("stm32-bluepill")).toBeUndefined();
+  });
+
+  it("keeps architecture-specific pin profiles distinct", () => {
+    expect(getCatalogComponent("esp32-devkit-v1")?.ports.some((port) => port.id === "GPIO19")).toBe(true);
+    expect(getCatalogComponent("stm32-bluepill")?.ports.some((port) => port.id === "PA13")).toBe(true);
+    expect(getCatalogComponent("teensy-3-2")?.ports.some((port) => port.id === "D13")).toBe(true);
+    expect(getCatalogComponent("bbc-microbit-v2")?.ports.some((port) => port.id === "P0")).toBe(true);
+    expect(getCatalogComponent("nano-rp2040-connect")?.ports.some((port) => port.id === "GPIO19")).toBe(true);
+    expect(getCatalogComponent("esp32-devkit-v1")?.ports.some((port) => port.id === "PA13")).toBe(false);
+  });
+
+  it("marks unimplemented protocol parts as validation-only", () => {
+    expect(getCatalogComponent("ds3231")?.model).toMatchObject({ support: "behavioral", modelId: "ds3231-register-read:v1" });
+    expect(getCatalogComponent("bmp280")?.model.support).toBe("validation");
+    expect(getCatalogComponent("ssd1306")?.model.support).toBe("validation");
+  });
+
+  it("keeps device-specific ports and bus identities physically truthful", () => {
+    expect(getCatalogComponent("gy-521-mpu6050")?.ports.find((port) => port.id === "SDA")?.protocol).toMatchObject({ role: "target", address: 0x68 });
+    expect(getCatalogComponent("gy-68-bmp280")?.ports.find((port) => port.id === "SDA")?.protocol).toMatchObject({ role: "target", address: 0x76 });
+    expect(getCatalogComponent("hcsr04-2")?.ports.map((port) => [port.id, port.domain])).toEqual(expect.arrayContaining([["TRIG", "gpio"], ["ECHO", "gpio"]]));
+    expect(getCatalogComponent("hx711-2")?.ports.map((port) => [port.id, port.domain])).toEqual(expect.arrayContaining([["DOUT", "gpio"], ["SCK", "gpio"]]));
+    expect(getCatalogComponent("tft-1-8-st7735-2")?.ports.find((port) => port.id === "SCL")?.domain).toBe("spi");
   });
 
   it("hydrates catalog defaults and resolves named pins", () => {

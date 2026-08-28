@@ -22,6 +22,8 @@
     {
       "id": "fw-esp32-1",
       "componentId": "esp32-1",
+      "definitionId": "esp32-s3",
+      "boardFqbn": "esp32:esp32:esp32s3",
       "files": [
         {
           "name": "sketch.ino",

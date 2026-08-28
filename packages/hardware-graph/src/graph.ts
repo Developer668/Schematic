@@ -9,7 +9,7 @@ export function createEmptyProject(name = "Untitled"): HardwareProject {
     components: [],
     connections: [],
     firmwareTargets: [],
-    simulation: { mode: "interactive", engines: { renode: { enabled: true, fidelity: "fast" }, ngspice: { enabled: true, fidelity: "fast" }, wasmtime: { enabled: true, fidelity: "fast" } } },
+    simulation: { mode: "interactive", engines: { behavioral: { enabled: true, fidelity: "fast" }, renode: { enabled: false, fidelity: "fast" }, ngspice: { enabled: false, fidelity: "fast" }, wasmtime: { enabled: false, fidelity: "fast" } } },
     createdAt: now,
     updatedAt: now,
     version: 1,

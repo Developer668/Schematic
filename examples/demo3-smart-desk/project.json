@@ -18,8 +18,8 @@
     { "id": "c5", "source": { "componentId": "pi-1", "portId": "TX" }, "target": { "componentId": "esp32-1", "portId": "GPIO4" }, "domain": "uart" }
   ],
   "firmwareTargets": [
-    { "id": "fw-pi", "componentId": "pi-1", "files": [{ "name": "app.py", "content": "# Pi Linux service — exposes presence via HTTP\nprint('Smart desk running')\n" }] },
-    { "id": "fw-esp32", "componentId": "esp32-1", "files": [{ "name": "sketch.ino", "content": "void setup(){ pinMode(4, INPUT); pinMode(18, OUTPUT); Serial.begin(115200); } void loop(){ if(digitalRead(4)) digitalWrite(18,HIGH); else digitalWrite(18,LOW); }" }] }
+    { "id": "fw-pi", "componentId": "pi-1", "definitionId": "raspberry-pi-5", "boardFqbn": "raspberry-pi:linux:arm64", "files": [{ "name": "app.py", "content": "# Pi Linux service — exposes presence via HTTP\nprint('Smart desk running')\n" }] },
+    { "id": "fw-esp32", "componentId": "esp32-1", "definitionId": "esp32-s3", "boardFqbn": "esp32:esp32:esp32s3", "files": [{ "name": "sketch.ino", "content": "void setup(){ pinMode(4, INPUT); pinMode(18, OUTPUT); Serial.begin(115200); } void loop(){ if(digitalRead(4)) digitalWrite(18,HIGH); else digitalWrite(18,LOW); }" }] }
   ],
   "simulation": { "mode": "interactive", "engines": { "qemu": { "enabled": true, "fidelity": "fast" }, "renode": { "enabled": true, "fidelity": "fast" }, "wasmtime": { "enabled": true, "fidelity": "fast" } } },
   "createdAt": "2026-08-26T00:00:00Z",

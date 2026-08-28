@@ -86,6 +86,19 @@ export interface ModelReference {
   verified: boolean;
 }
 
+export type SimulationSupport = "visual" | "validation" | "behavioral" | "engine-backed";
+
+export interface ComponentModelContract {
+  version: 1;
+  family: string;
+  support: SimulationSupport;
+  capabilities: string[];
+  verified: boolean;
+  source: "family-template" | "catalog-model" | "vendor-reference" | "none";
+  modelId: string;
+  reason?: string;
+}
+
 export interface ComponentDefinition {
   id: string; // e.g. "raspberry-pi-5", "bmp280", "ti-drv8871"
   title: string;
@@ -95,6 +108,7 @@ export interface ComponentDefinition {
   description?: string;
   ports: HardwarePort[];
   models: Record<string, ModelReference>;
+  model: ComponentModelContract;
   electrical?: { nominalVoltage?: number; maxVoltage?: number; maxCurrentA?: number; powerMw?: number };
   physical?: { widthMm?: number; heightMm?: number; depthMm?: number; weightG?: number };
   datasheetUrl?: string;
@@ -136,13 +150,38 @@ export interface FirmwareFile {
   content: string;
 }
 
+export interface FirmwareArtifactIdentity {
+  componentId?: string;
+  definitionId?: string;
+  sourceSha256?: string;
+  artifactName?: string | null;
+  artifactSha256?: string | null;
+  boardFqbn?: string;
+  language?: FirmwareLanguage;
+  compiler?: {
+    name: string;
+    version?: string | null;
+    core?: { fqbn: string; version?: string | null };
+  } | null;
+}
+
+export interface CompiledFirmwareArtifact {
+  hexB64?: string;
+  elfB64?: string;
+  binB64?: string;
+  success: boolean;
+  log: string;
+  identity?: FirmwareArtifactIdentity;
+}
+
 export interface FirmwareTarget {
   id: string;
   componentId: string; // board instance
+  definitionId: string; // immutable board-definition binding
   language: FirmwareLanguage;
-  boardFqbn?: string; // arduino:avr:uno etc.
+  boardFqbn: string; // arduino:avr:uno etc.
   files: FirmwareFile[];
-  compiledArtifact?: { hexB64?: string; elfB64?: string; binB64?: string; success: boolean; log: string };
+  compiledArtifact?: CompiledFirmwareArtifact;
 }
 
 // ─── Simulation config ───────────────────────────────────────────

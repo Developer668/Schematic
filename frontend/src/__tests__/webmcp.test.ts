@@ -5,7 +5,7 @@ import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { useValidationStore } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
 import { useShoppingStore } from "../store/useShoppingStore.ts";
-import { getRegisteredToolNames, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools } from "../webmcp/tools.ts";
+import { getRegisteredToolNames, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools, WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
 
 describe("WebMCP tools", () => {
   beforeEach(() => useProjectStore.getState().clear());
@@ -15,9 +15,11 @@ describe("WebMCP tools", () => {
     delete (document as any).modelContext;
   });
 
-  it("registers ~18 tools", () => {
+  it("registers the complete tool surface", () => {
     const names = getRegisteredToolNames();
-    expect(names.length).toBeGreaterThanOrEqual(15);
+    expect(names.length).toBe(WEBMCP_TOOL_COUNT);
+    expect(WEBMCP_TOOL_COUNT).toBe(42);
+    expect(WEBMCP_TOOL_COUNT).toBeGreaterThanOrEqual(15);
     expect(names).toContain("project.get_graph");
     expect(names).toContain("component.search");
     expect(names).toContain("connection.connect");
@@ -105,6 +107,7 @@ describe("WebMCP tools", () => {
   it("executes all registered WebMCP tools through real state transitions", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/simulation/run")) throw new Error("backend is not connected");
       const data = url.includes("/api/compile")
         ? { success: true, artifact: "firmware.elf" }
         : { status: "ok", simulated_ns: 2_000_000 };
@@ -243,6 +246,28 @@ describe("WebMCP tools", () => {
     expect(fallbackShopping.data.results.some((result: any) => result.catalogId === "pushbutton")).toBe(true);
     expect(fallbackShopping.data.liveOffers).toBe(false);
 
+    const unmatched: any = await invokeWebMCPTool("shopping.search", {
+      query: "mystery module",
+      listings: [{ catalogId: "unknown-module", title: "Mystery module", exactMatch: false, offers: [] }],
+    });
+    expect(unmatched.data.results[0].exactMatch).toBe(false);
+    const refusedUnmatched: any = await invokeWebMCPTool("shopping.cart_add", { resultId: unmatched.data.results[0].id });
+    expect(refusedUnmatched.isError).toBe(true);
+
+    const omittedMatch: any = await invokeWebMCPTool("shopping.search", {
+      query: "esp32",
+      listings: [{ catalogId: "esp32-devkit-v1", title: "ESP32 DevKit", offers: [] }],
+    });
+    expect(omittedMatch.data.results[0].exactMatch).toBe(false);
+    expect((await invokeWebMCPTool("shopping.cart_add", { resultId: omittedMatch.data.results[0].id }) as any).isError).toBe(true);
+
+    const misleadingMatch: any = await invokeWebMCPTool("shopping.search", {
+      query: "esp32",
+      listings: [{ catalogId: "wrong-catalog-id", title: "ESP32 DevKit", exactMatch: true, offers: [] }],
+    });
+    expect(misleadingMatch.data.results[0].exactMatch).toBe(false);
+    expect((await invokeWebMCPTool("shopping.cart_add", { resultId: misleadingMatch.data.results[0].id }) as any).isError).toBe(true);
+
     await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: "void setup() {" }] });
     const diagnostics: any = await invokeWebMCPTool("firmware.check", { componentId: boardId });
     expect(diagnostics.data.codeIssues.some((issue: any) => issue.code === "FIRMWARE_UNBALANCED_BRACES")).toBe(true);
@@ -288,6 +313,60 @@ describe("WebMCP tools", () => {
     expect((await invokeWebMCPTool("shopping.quote") as any).data.lines[0].quantity).toBe(1);
     await invokeWebMCPTool("shopping.cart_remove", { resultId });
     expect((await invokeWebMCPTool("shopping.quote") as any).data.lines).toHaveLength(0);
+  });
+
+  it("accepts a valid remote behavioral run and records a stopped remote result", async () => {
+    useSimulationStore.getState().reset();
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: "completed",
+        runtime: "remote",
+        execution_mode: "behavioral",
+        session_id: "remote-session-1",
+        duration_ns: 5_000_000,
+        time_ns: 5_000_000,
+        outputs: {},
+        events: [],
+        programs: [{ componentId: "board-remote", writes: 0, executions: 1, sourceFiles: ["main.ino"] }],
+        resolved_nets: 1,
+        serial_output: "remote ok\n",
+        target_issues: [],
+        protocol_events: [],
+        device_states: [],
+        warnings: [],
+        unsupported_apis: [],
+        note: "remote test",
+      }),
+    })));
+
+    const board: any = await invokeWebMCPTool("component.add", { componentId: "esp32-devkit-v1" });
+    await invokeWebMCPTool("firmware.write", { componentId: board.data.instanceId, files: [{ name: "main.ino", content: "void setup(){} void loop(){}" }] });
+    const result: any = await invokeWebMCPTool("simulation.run", { durationMs: 5 });
+
+    expect(result.data.runtime).toBe("remote");
+    expect(result.isError).not.toBe(true);
+    expect(useSimulationStore.getState().running).toBe(false);
+    expect(useSimulationStore.getState().lastRun?.runtime).toBe("remote");
+    expect(useSimulationStore.getState().lastRun?.programs).toHaveLength(1);
+    expect(useSimulationStore.getState().remoteSessionId).toBe("remote-session-1");
+  });
+
+  it("does not treat a compiler HTTP 200 success:false payload as a successful compile", async () => {
+    useSimulationStore.getState().reset();
+    const board: any = await invokeWebMCPTool("component.add", { componentId: "esp32-devkit-v1" });
+    await invokeWebMCPTool("firmware.write", { componentId: board.data.instanceId, files: [{ name: "main.ino", content: "void setup(){} void loop(){}" }] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: false, error: "compiler failed" }),
+    })));
+
+    const result: any = await invokeWebMCPTool("firmware.compile", { componentId: board.data.instanceId });
+    expect(result.isError).toBe(true);
+    expect(useValidationStore.getState().compile.status).toBe("error");
+    expect(useSimulationStore.getState().serialOutput).toContain("compile failed");
   });
 
 });

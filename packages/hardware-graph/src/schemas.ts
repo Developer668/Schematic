@@ -67,6 +67,16 @@ export const ComponentDefinitionSchema = z.object({
   description: z.string().optional(),
   ports: z.array(HardwarePortSchema),
   models: z.record(z.object({ engine: z.string(), file: z.string(), fidelity: z.string(), verified: z.boolean() })),
+  model: z.object({
+    version: z.literal(1),
+    family: z.string().min(1),
+    support: z.enum(["visual", "validation", "behavioral", "engine-backed"]),
+    capabilities: z.array(z.string()),
+    verified: z.boolean(),
+    source: z.enum(["family-template", "catalog-model", "vendor-reference", "none"]),
+    modelId: z.string().min(1),
+    reason: z.string().optional(),
+  }),
   electrical: z.object({ nominalVoltage: z.number().optional(), maxVoltage: z.number().optional(), maxCurrentA: z.number().optional(), powerMw: z.number().optional() }).optional(),
   physical: z.object({ widthMm: z.number().optional(), heightMm: z.number().optional(), depthMm: z.number().optional(), weightG: z.number().optional() }).optional(),
   datasheetUrl: z.string().optional(),
@@ -104,9 +114,34 @@ export const HardwareProjectSchema = z.object({
     z.object({
       id: z.string(),
       componentId: z.string(),
+      // Firmware is executable only when it is bound to the exact board
+      // definition that owns the target. Legacy projects are normalized at
+      // the application boundary before they reach this canonical schema.
+      definitionId: z.string().min(1),
       language: z.enum(["arduino", "micropython", "espidf", "c", "python", "wasm"]),
-      boardFqbn: z.string().optional(),
+      boardFqbn: z.string().min(1),
       files: z.array(z.object({ name: z.string(), content: z.string() })),
+      compiledArtifact: z.object({
+        hexB64: z.string().optional(),
+        elfB64: z.string().optional(),
+        binB64: z.string().optional(),
+        success: z.boolean(),
+        log: z.string(),
+        identity: z.object({
+          componentId: z.string().optional(),
+          definitionId: z.string().optional(),
+          sourceSha256: z.string().optional(),
+          artifactName: z.string().nullable().optional(),
+          artifactSha256: z.string().nullable().optional(),
+          boardFqbn: z.string().optional(),
+          language: z.enum(["arduino", "micropython", "espidf", "c", "python", "wasm"]).optional(),
+          compiler: z.object({
+            name: z.string(),
+            version: z.string().nullable().optional(),
+            core: z.object({ fqbn: z.string(), version: z.string().nullable().optional() }).optional(),
+          }).nullable().optional(),
+        }).optional(),
+      }).optional(),
     }),
   ),
   simulation: z.object({

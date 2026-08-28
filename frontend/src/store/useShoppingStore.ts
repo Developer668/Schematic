@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getCurrentUserId } from "../auth/session.ts";
 
 export interface PartOffer {
   id: string;
@@ -59,14 +60,23 @@ export interface ShoppingState {
   getQuote: () => { total: number; budget: number | null; overBudget: boolean; missingPrices: string[]; lines: { resultId: string; title: string; quantity: number; unitPrice: number | null; subtotal: number | null; offer?: PartOffer }[] };
 }
 
-const STORAGE_KEY = "schematic-shopping";
+const ANONYMOUS_STORAGE_KEY = "schematic-shopping";
 const shoppingChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("schematic-shopping-sync") : null;
 type PersistedShopping = Pick<ShoppingState, "query" | "results" | "cart" | "budget" | "lastSearchAt">;
+
+function storageKey() {
+  const userId = getCurrentUserId();
+  return userId && userId !== "local-development" ? ANONYMOUS_STORAGE_KEY + ":" + userId : ANONYMOUS_STORAGE_KEY;
+}
+
+function roomId() {
+  return getCurrentUserId();
+}
 
 function readState(): PersistedShopping {
   const fallback: PersistedShopping = { query: "", results: [], cart: [], budget: null, lastSearchAt: null };
   try {
-    const raw = typeof localStorage !== "undefined" ? JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") : null;
+    const raw = typeof localStorage !== "undefined" ? JSON.parse(localStorage.getItem(storageKey()) ?? "null") : null;
     return raw && typeof raw === "object" ? { ...fallback, ...raw, results: Array.isArray(raw.results) ? raw.results : [], cart: Array.isArray(raw.cart) ? raw.cart : [] } : fallback;
   } catch { return fallback; }
 }
@@ -74,8 +84,8 @@ function readState(): PersistedShopping {
 function snapshot(state: ShoppingState): PersistedShopping { return { query: state.query, results: state.results, cart: state.cart, budget: state.budget, lastSearchAt: state.lastSearchAt }; }
 function persist(state: ShoppingState, broadcast = true) {
   const next = snapshot(state);
-  try { if (typeof localStorage !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
-  if (broadcast) shoppingChannel?.postMessage({ type: "shopping:update", state: next });
+  try { if (typeof localStorage !== "undefined") localStorage.setItem(storageKey(), JSON.stringify(next)); } catch {}
+  if (broadcast) shoppingChannel?.postMessage({ type: "shopping:update", state: { ...next, _room: roomId() } });
 }
 function remember(cart: CartLine[]) { return [...cart.map((line) => ({ ...line }))]; }
 function safeQuantity(value: number, fallback = 1) {
@@ -96,7 +106,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
   setResults(results) { set({ results, lastSearchAt: Date.now() }); persist(get()); },
   addToCart(resultId, quantity = 1) {
     set((state) => {
-      if (!state.results.some((result) => result.id === resultId)) return state;
+      if (!state.results.some((result) => result.id === resultId && result.exactMatch)) return state;
       const exists = state.cart.find((line) => line.resultId === resultId);
       const amount = safeQuantity(quantity);
       const cart = exists ? state.cart.map((line) => line.resultId === resultId ? { ...line, quantity: safeQuantity(line.quantity + amount) } : line) : [...state.cart, { resultId, quantity: amount }];
@@ -132,7 +142,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     const state = get();
     const current = state.results.find((result) => result.id === resultId);
     const alternative = current?.alternatives.find((item) => item.catalogId === catalogId);
-    const replacement = state.results.find((result) => result.catalogId === catalogId && (alternative?.resultId ? result.id === alternative.resultId : true));
+    const replacement = state.results.find((result) => result.catalogId === catalogId && result.exactMatch && (alternative?.resultId ? result.id === alternative.resultId : true));
     if (!alternative || !replacement) return false;
     set((currentState) => {
       const next = { cart: currentState.cart.map((line) => line.resultId === resultId ? { ...line, resultId: replacement.id, selectedOfferId: undefined } : line), undoStack: [...currentState.undoStack.slice(-19), remember(currentState.cart)] };
@@ -150,7 +160,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     set((state) => {
       const counts = new Map<string, number>();
       for (const catalogId of requiredCatalogIds ?? []) counts.set(catalogId, (counts.get(catalogId) ?? 0) + 1);
-      const cart = [...counts.entries()].map(([catalogId, quantity]) => ({ result: state.results.find((item) => item.catalogId === catalogId), quantity })).filter((item): item is { result: ShoppingResult; quantity: number } => Boolean(item.result)).map(({ result, quantity }) => ({ resultId: result.id, quantity }));
+      const cart = [...counts.entries()].map(([catalogId, quantity]) => ({ result: state.results.find((item) => item.catalogId === catalogId && item.exactMatch), quantity })).filter((item): item is { result: ShoppingResult; quantity: number } => Boolean(item.result)).map(({ result, quantity }) => ({ resultId: result.id, quantity }));
       const next = { cart, undoStack: [...state.undoStack.slice(-19), remember(state.cart)] };
       persist({ ...state, ...next });
       return next;
@@ -183,5 +193,25 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
 }));
 
 shoppingChannel?.addEventListener("message", (event) => {
-  if (event.data?.type === "shopping:update" && event.data.state) useShoppingStore.setState(event.data.state);
+  if (event.data?.type !== "shopping:update" || !event.data.state) return;
+  if ((event.data.state._room ?? null) !== roomId()) return;
+  const { _room: _ignoredRoom, ...state } = event.data.state;
+  useShoppingStore.setState(state);
 });
+
+export function reloadShoppingForCurrentUser() {
+  const next = readState();
+  useShoppingStore.setState({ ...next, undoStack: [] });
+  shoppingChannel?.postMessage({ type: "shopping:update", state: { ...next, _room: roomId() } });
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("schematic-session", () => reloadShoppingForCurrentUser());
+  window.addEventListener("storage", (event) => {
+    if (event.key !== storageKey() || !event.newValue) return;
+    try {
+      const next = JSON.parse(event.newValue) as PersistedShopping;
+      if (next && typeof next === "object") useShoppingStore.setState({ ...next, undoStack: [] });
+    } catch {}
+  });
+}

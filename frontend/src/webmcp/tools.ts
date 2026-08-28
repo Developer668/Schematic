@@ -1,5 +1,5 @@
 /**
- * WebMCP tool surface — ~18 semantic hardware tools via document.modelContext.registerTool
+ * WebMCP tool surface — semantic hardware tools via document.modelContext.registerTool
  * Per HardwareWebMCP.md: don't expose 100 tiny tools, expose powerful semantic ones.
  * Human click and AI call share same underlying Zustand functions.
  */
@@ -13,6 +13,7 @@ import { useShoppingStore, type PartOffer, type ShoppingResult } from "../store/
 import { runFirmwareRuntime } from "../simulation/runtime.ts";
 import { catalog, getCatalogComponent, searchCatalog } from "../data/catalog.ts";
 import { isBoardDefinition, resolveFirmwareBinding } from "../data/hardware.ts";
+import { apiUrl, getAuthHeaders, getAuthSession } from "../auth/session.ts";
 import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.json";
 
 type ToolDef = {
@@ -36,6 +37,16 @@ function cloneProject(source: unknown): HardwareGraph {
   return JSON.parse(JSON.stringify(source)) as HardwareGraph;
 }
 
+function base64FromHex(hex: string) {
+  const normalized = hex.trim();
+  if (!/^(?:[0-9a-f]{2})*$/i.test(normalized)) return undefined;
+  let binary = "";
+  for (let index = 0; index < normalized.length; index += 2) {
+    binary += String.fromCharCode(Number.parseInt(normalized.slice(index, index + 2), 16));
+  }
+  return btoa(binary);
+}
+
 /**
  * Pages serves the SPA fallback for unknown /api routes. Read the body once
  * and identify that case before calling JSON.parse, so WebMCP gets a useful
@@ -43,7 +54,11 @@ function cloneProject(source: unknown): HardwareGraph {
  */
 export async function fetchJson(path: string, init?: RequestInit): Promise<ApiJsonResult> {
   try {
-    const response = await fetch(path, { credentials: "include", ...init, headers: { "Content-Type": "application/json", ...(init?.headers as any) } });
+    const headers = new Headers(init?.headers);
+    if (!headers.has("Content-Type") && init?.body) headers.set("Content-Type", "application/json");
+    const authHeaders = await getAuthHeaders();
+    for (const [key, value] of Object.entries(authHeaders)) headers.set(key, value);
+    const response = await fetch(apiUrl(path), { credentials: "include", ...init, headers });
     const responseText = typeof response.text === "function" ? await response.text() : null;
 
     if (responseText !== null) {
@@ -87,7 +102,7 @@ export function browserCompilePreflight(files: { name: string; content: string }
       ? "Connect the Schematic backend with arduino-cli to produce a firmware artifact."
       : "Fix the source syntax, then connect the Schematic backend for binary compilation.",
     simulation_ready: balancedBraces && hasSketchFile,
-    browser_runtime: { available: balancedBraces && hasSketchFile, supports: ["setup", "loop", "digitalRead", "digitalWrite", "analogRead", "analogWrite", "delay", "Serial"] },
+    browser_runtime: { available: balancedBraces && hasSketchFile, supports: ["setup", "loop", "digitalRead", "digitalWrite", "analogRead", "analogWrite", "delay", "Serial", "Wire", "SPI"] },
   };
 }
 
@@ -107,6 +122,35 @@ function runBrowserSimulation(project: ReturnType<typeof useProjectStore.getStat
     ...runtime,
     time_ns: timeNs.toString(),
     snapshot: runtime.outputs,
+  };
+}
+
+function normalizeRemoteRun(result: any): import("../simulation/runtime.ts").RuntimeResult {
+  const events = Array.isArray(result?.events) ? result.events.flatMap((event: any) => {
+    const value = event?.value;
+    if (typeof value !== "boolean" && typeof value !== "number") return [];
+    return [{
+      timeMs: Number(event?.timeMs ?? 0),
+      endpoint: String(event?.endpoint ?? `${event?.deviceId ?? event?.controllerId ?? "device"}:${event?.operation ?? event?.kind ?? "event"}`),
+      value,
+      reason: String(event?.reason ?? `${event?.kind ?? "event"}${event?.operation ? ` ${event.operation}` : ""}`),
+    }];
+  }) : [];
+  return {
+    status: result.status,
+    runtime: "remote",
+    durationMs: Number(result.duration_ms ?? Number(result.duration_ns ?? 0) / 1_000_000),
+    outputs: result.outputs ?? {},
+    events,
+    programs: Array.isArray(result.programs) ? result.programs : [],
+    resolvedNets: Number(result.resolved_nets ?? 0),
+    serialOutput: String(result.serial_output ?? ""),
+    targetIssues: Array.isArray(result.target_issues) ? result.target_issues : [],
+    protocolEvents: Array.isArray(result.protocol_events) ? result.protocol_events : [],
+    deviceStates: Array.isArray(result.device_states) ? result.device_states : [],
+    warnings: Array.isArray(result.warnings) ? result.warnings : [],
+    unsupportedApis: Array.isArray(result.unsupported_apis) ? result.unsupported_apis : [],
+    note: String(result.note ?? "Remote behavioral simulation completed."),
   };
 }
 
@@ -161,7 +205,13 @@ function normalizeShoppingResults(raw: unknown, query: string, quantity: number)
   return entries.slice(0, 24).map((entry, index) => {
     const item = entry && typeof entry === "object" ? entry as Record<string, any> : {};
     const catalogId = String(item.catalogId ?? item.componentId ?? item.id ?? `agent-part-${index + 1}`);
-    const definition = getCatalogComponent(catalogId) ?? searchCatalog(String(item.title ?? item.partNumber ?? query))[0];
+    // A title search is useful for displaying an agent result, but it must not
+    // silently turn an approximate or malformed listing into a purchasable
+    // catalog item. Only an explicit exactMatch=true plus a known catalog id
+    // can authorize a cart add.
+    const catalogDefinition = getCatalogComponent(catalogId);
+    const definition = catalogDefinition ?? searchCatalog(String(item.title ?? item.partNumber ?? query))[0];
+    const exactMatch = item.exactMatch === true && Boolean(catalogDefinition);
     const title = String(item.title ?? definition?.title ?? catalogId);
     const partNumber = item.partNumber ? String(item.partNumber) : definition?.partNumber ?? definition?.id;
     const rawOffers = Array.isArray(item.offers) ? item.offers : [];
@@ -209,8 +259,12 @@ function normalizeShoppingResults(raw: unknown, query: string, quantity: number)
       manufacturer: item.manufacturer ? String(item.manufacturer) : definition?.manufacturer,
       partNumber,
       requestedQuantity: Math.max(1, Math.round(Number(item.requestedQuantity ?? quantity))),
-      exactMatch: Boolean(definition) && item.exactMatch !== false,
-      matchNote: item.matchNote ? String(item.matchNote) : definition ? "Agent listing normalized against the Schematic catalog." : "Agent listing could not be matched to the Schematic catalog; verify the exact part number before buying.",
+      exactMatch,
+      matchNote: item.matchNote ? String(item.matchNote) : exactMatch
+        ? "Agent listing explicitly verified against the Schematic catalog."
+        : definition
+          ? "Agent listing was not explicitly verified as an exact catalog match; verify the exact part number before buying."
+          : "Agent listing could not be matched to the Schematic catalog; verify the exact part number before buying.",
       offers: [...offersByRetailer.values()],
       alternatives,
       updatedAt: String(item.updatedAt ?? new Date().toISOString()),
@@ -352,7 +406,7 @@ const tools: ToolDef[] = [
         panels: {
           webmcp: { activities: useWebMCPStore.getState().activities.slice(0, 12) },
           terminal: { running: simulation.running, serialOutput: simulation.serialOutput.slice(-2000) },
-          debug: { timeNs: simulation.timeNs.toString(), pinStates: simulation.pinStates, engineStatus: simulation.engineStatus, lastRun: simulation.lastRun },
+          debug: { timeNs: simulation.timeNs.toString(), pinStates: simulation.pinStates, engineStatus: simulation.engineStatus, remoteSessionId: simulation.remoteSessionId, lastRun: simulation.lastRun },
           validation: { valid: validation.valid, issues: validation.issues, codeIssues: validation.codeIssues, compile: validation.compile, checkedAt: validation.checkedAt },
         },
       };
@@ -397,7 +451,7 @@ const tools: ToolDef[] = [
     annotations: { readOnlyHint: true },
     execute: async ({ query, category, domain }) => {
       const res = searchCatalog(query ?? "", { category: category || undefined, domain: domain || undefined });
-      return { content: [{ type: "text", text: JSON.stringify(res.map((r) => ({ id: r.id, title: r.title, category: r.category, ports: r.ports.length })), null, 2) }], data: res };
+      return { content: [{ type: "text", text: JSON.stringify(res.map((r) => ({ id: r.id, title: r.title, category: r.category, ports: r.ports.length, model: { support: r.model.support, family: r.model.family, modelId: r.model.modelId } })), null, 2) }], data: res };
     },
   },
   {
@@ -560,6 +614,10 @@ const tools: ToolDef[] = [
         ? [{ code: "INVALID_FIRMWARE_TARGET", message: `Firmware target ${id} references a missing board.` }]
         : !isBoardDefinition(binding.definition)
           ? [{ code: "NON_BOARD_FIRMWARE_TARGET", message: `${binding.definition.title} is not a programmable board.` }]
+          : !target.definitionId
+            ? [{ code: "FIRMWARE_DEFINITION_REQUIRED", message: "Firmware has no exact board definition binding." }]
+            : !target.boardFqbn
+              ? [{ code: "FIRMWARE_FQBN_REQUIRED", message: "Firmware has no explicit board FQBN." }]
           : !binding.definitionMatchesTarget
             ? [{ code: "FIRMWARE_DEFINITION_MISMATCH", message: `Firmware was written for ${target.definitionId}, but the current board is ${binding.component.definitionId}.` }]
             : !binding.fqbnMatchesDefinition
@@ -614,6 +672,17 @@ const tools: ToolDef[] = [
       }
       useValidationStore.getState().setCompile({ status: "checking", boardFqbn: fqbn, log: "Checking source…", checkedAt: Date.now() });
       const result = await fetchJson("/api/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: tgt.files, board_fqbn: fqbn, component_id: id, definition_id: binding.component.definitionId, language: tgt.language ?? binding.targetConfig?.language }) });
+      // A hosted Pages/Sites Function can be reachable while still lacking a
+      // native arduino-cli binary. Treat its explicit preflight contract like
+      // the fully static fallback instead of reporting a malformed compiler
+      // success or blocking the rest of the behavioral runtime.
+      if (result.available && result.response?.ok && result.data?.mode === "browser-preflight") {
+        const preflight = result.data;
+        const status = preflight.preflight?.balanced_braces === false || codeIssues.some((issue) => issue.severity === "error") ? "error" : "unavailable";
+        useValidationStore.getState().setCompile({ status, boardFqbn: fqbn, log: JSON.stringify(preflight, null, 2), checkedAt: Date.now() });
+        useSimulationStore.getState().appendSerial(`[firmware] ${status === "error" ? "compile failed" : "preflight complete"} · ${id}\n`);
+        return { content: [{ type: "text", text: JSON.stringify(preflight, null, 2) }], data: { ...preflight, componentId: id, definitionId: binding.component.definitionId, codeIssues } };
+      }
       if (!result.available) {
         const preflight = browserCompilePreflight(tgt.files, fqbn);
         const status = codeIssues.some((issue) => issue.severity === "error") ? "error" : "unavailable";
@@ -625,6 +694,31 @@ const tools: ToolDef[] = [
         useValidationStore.getState().setCompile({ status: "error", boardFqbn: fqbn, log: JSON.stringify(result.data, null, 2), checkedAt: Date.now() });
         return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: result.data, isError: true };
       }
+      if (result.data?.success !== true) {
+        const message = result.data?.error || "Compiler returned no firmware artifact";
+        useValidationStore.getState().setCompile({ status: "error", boardFqbn: fqbn, log: JSON.stringify(result.data, null, 2), checkedAt: Date.now() });
+        useSimulationStore.getState().appendSerial(`[firmware] compile failed · ${id} · ${message}\n`);
+        return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: { ...result.data, componentId: id, definitionId: binding.component.definitionId, boardFqbn: fqbn }, isError: true };
+      }
+      const identity = result.data?.artifact_identity && typeof result.data.artifact_identity === "object"
+        ? {
+            componentId: result.data.artifact_identity.component_id ?? id,
+            definitionId: result.data.artifact_identity.definition_id ?? binding.component.definitionId,
+            sourceSha256: result.data.artifact_identity.source_sha256,
+            artifactName: result.data.artifact_identity.artifact_name ?? null,
+            artifactSha256: result.data.artifact_identity.artifact_sha256 ?? null,
+            boardFqbn: result.data.artifact_identity.board_fqbn ?? fqbn,
+            language: result.data.artifact_identity.language ?? tgt.language ?? binding.targetConfig?.language,
+            compiler: result.data.artifact_identity.compiler ?? null,
+          }
+        : undefined;
+      useProjectStore.getState().setCompiledArtifact(id, {
+        success: true,
+        log: JSON.stringify(result.data, null, 2),
+        hexB64: typeof result.data?.hex_content === "string" ? btoa(result.data.hex_content) : undefined,
+        binB64: typeof result.data?.binary_content === "string" ? base64FromHex(result.data.binary_content) : undefined,
+        identity,
+      });
       useValidationStore.getState().setCompile({ status: "success", boardFqbn: fqbn, log: JSON.stringify(result.data, null, 2), checkedAt: Date.now() });
       useSimulationStore.getState().appendSerial(`[firmware] compiled · ${id}\n`);
       return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: { ...result.data, componentId: id, definitionId: binding.component.definitionId, boardFqbn: fqbn } };
@@ -638,8 +732,23 @@ const tools: ToolDef[] = [
       const project = useProjectStore.getState().project;
       const inputs = useSimulationStore.getState().pinStates;
       useSimulationStore.getState().start();
-      const result = await fetchJson("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, inputs, duration_ns: (durationMs ?? 1000) * 1e6 }) });
-      const remote = result.available && result.response?.ok && result.data && typeof result.data === "object" && result.data.runtime === "remote" && Object.keys(result.data.outputs ?? {}).length > 0;
+      const sessionId = useSimulationStore.getState().remoteSessionId;
+      const result = await fetchJson("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, inputs, duration_ns: (durationMs ?? 1000) * 1e6, ...(sessionId ? { session_id: sessionId } : {}) }) });
+      const remotePayload = result.available && result.response?.ok && result.data && typeof result.data === "object" && result.data.runtime === "remote" && result.data.execution_mode === "behavioral";
+      const remote = remotePayload && (result.data.status === "completed" || result.data.status === "completed-with-warnings");
+      if (remotePayload && !remote) {
+        useSimulationStore.getState().stop();
+        return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: result.data, isError: true };
+      }
+      if (result.available && result.response && !result.response.ok && result.data && typeof result.data === "object") {
+        useSimulationStore.getState().stop();
+        return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: result.data, isError: true };
+      }
+      if (!remotePayload && result.available && result.response?.ok && result.data && typeof result.data === "object") {
+        useSimulationStore.getState().stop();
+        const contractError = { status: "invalid-response", error: "Simulation backend returned a JSON response without the remote behavioral contract.", response: result.data };
+        return { content: [{ type: "text", text: JSON.stringify(contractError, null, 2) }], data: contractError, isError: true };
+      }
       if (!remote) {
         const res = runBrowserSimulation(project, inputs, durationMs ?? 1000);
         const reason = result.available && !result.response?.ok ? ` Backend HTTP ${result.response?.status ?? "unknown"};` : "";
@@ -647,14 +756,18 @@ const tools: ToolDef[] = [
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
       }
       const res = result.data;
+      const normalized = normalizeRemoteRun(res);
       const timeNs = BigInt(res.time_ns ?? 0);
       const simulation = useSimulationStore.getState();
+      simulation.setRemoteSessionId(typeof res.session_id === "string" ? res.session_id : null);
       simulation.setTime(timeNs);
       for (const [portId, value] of Object.entries(res.outputs ?? {})) {
         if (typeof value === "boolean" || typeof value === "number") simulation.setPin(portId, value);
       }
+      simulation.setLastRun(normalized);
       const readings = Object.entries(res.outputs ?? {}).map(([key, value]) => `${key.split(":").pop()}=${value}`).join("  ");
-      simulation.appendSerial(`[${project.name}] remote runtime · t=${timeNs}ns${readings ? `  ${readings}` : ""}\n`);
+      simulation.appendSerial(`[${project.name}] remote runtime · t=${timeNs}ns${readings ? `  ${readings}` : ""}\n${normalized.serialOutput}`);
+      simulation.stop();
       return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
     },
   },
@@ -664,7 +777,9 @@ const tools: ToolDef[] = [
     inputSchema: { type: "object", properties: {} },
     execute: async () => {
       useSimulationStore.getState().stop();
-      const result = await fetchJson("/api/simulation/stop", { method: "POST" });
+      const sessionId = useSimulationStore.getState().remoteSessionId;
+      const result = await fetchJson("/api/simulation/stop", { method: "POST", body: JSON.stringify(sessionId ? { session_id: sessionId } : {}) });
+      useSimulationStore.getState().setRemoteSessionId(null);
       if (!result.available) return { content: [{ type: "text", text: "Simulation stopped locally (browser runtime)" }], data: { status: "stopped", runtime: "browser" } };
       if (!result.response?.ok) return { content: [{ type: "text", text: `Simulation stopped locally; backend returned HTTP ${result.response?.status ?? "unknown"}` }], data: result.data, isError: true };
       return { content: [{ type: "text", text: "Simulation stopped" }], data: result.data };
@@ -677,7 +792,7 @@ const tools: ToolDef[] = [
     annotations: { readOnlyHint: true },
     execute: async () => {
       const sim = useSimulationStore.getState();
-      const state = { running: sim.running, timeNs: sim.timeNs.toString(), pinStates: sim.pinStates, engineStatus: sim.engineStatus, lastRun: sim.lastRun, serialOutput: sim.serialOutput.slice(-500) };
+      const state = { running: sim.running, timeNs: sim.timeNs.toString(), pinStates: sim.pinStates, engineStatus: sim.engineStatus, remoteSessionId: sim.remoteSessionId, lastRun: sim.lastRun, serialOutput: sim.serialOutput.slice(-500) };
       return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }], data: state };
     },
   },
@@ -698,11 +813,22 @@ const tools: ToolDef[] = [
       const backendUrl = configuredBackend || localBackend;
       if (backendUrl) {
         try {
-          const wsUrl = new URL("/api/simulation/ws", backendUrl);
+          const auth = await getAuthSession();
+          const wsUrl = new URL(apiUrl("/api/simulation/ws"), backendUrl);
           wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
-          const ws = new WebSocket(wsUrl.toString());
+          // Browser WebSocket cannot set Authorization headers. Offer the
+          // short-lived ticket as a subprotocol instead of putting a bearer
+          // token in the URL where it can leak into logs, history, or proxy
+          // analytics. Local development can use its explicit local session
+          // credential when the ticket endpoint is not enabled.
+          let protocols = auth?.token ? ["schematic-bearer", `schematic-token.${auth.token}`] : ["schematic-local"];
+          if (auth?.token && auth.environment !== "local") {
+            const ticket = await fetchJson("/api/auth/ws-ticket", { method: "POST" });
+            if (ticket.response?.ok && typeof ticket.data?.ticket === "string") protocols = ["schematic-bearer", `schematic-ticket.${ticket.data.ticket}`];
+          }
+          const ws = new WebSocket(wsUrl.toString(), protocols);
           ws.onopen = () => {
-            ws.send(JSON.stringify({ op: "set_sensor_input", componentId, key, value }));
+            ws.send(JSON.stringify({ op: "set_sensor_input", componentId, key, value, session_id: useSimulationStore.getState().remoteSessionId }));
             ws.close();
           };
         } catch {}
@@ -800,7 +926,9 @@ const tools: ToolDef[] = [
     inputSchema: { type: "object", properties: { resultId: { type: "string" }, quantity: { type: "number" } }, required: ["resultId"] },
     execute: async ({ resultId, quantity }) => {
       const id = String(resultId);
-      if (!useShoppingStore.getState().results.some((result) => result.id === id)) return { content: [{ type: "text", text: `Unknown shopping result ${id}; search for the part first` }], isError: true };
+      const result = useShoppingStore.getState().results.find((item) => item.id === id);
+      if (!result) return { content: [{ type: "text", text: `Unknown shopping result ${id}; search for the part first` }], isError: true };
+      if (!result.exactMatch) return { content: [{ type: "text", text: `${result.title} is not an exact catalog match; verify the part number before adding it to the cart` }], isError: true };
       useShoppingStore.getState().addToCart(id, Number(quantity) || 1);
       return { content: [{ type: "text", text: JSON.stringify(useShoppingStore.getState().getQuote(), null, 2) }], data: useShoppingStore.getState().getQuote() };
     },
@@ -852,8 +980,11 @@ const tools: ToolDef[] = [
     execute: async ({ requiredCatalogIds }) => {
       const project = useProjectStore.getState().project;
       const ids = Array.isArray(requiredCatalogIds) && requiredCatalogIds.length ? requiredCatalogIds.map(String) : project.components.map((component) => component.definitionId);
+      const availableIds = new Set(useShoppingStore.getState().results.filter((result) => result.exactMatch).map((result) => result.catalogId));
+      const missingCatalogIds = [...new Set(ids)].filter((catalogId) => !availableIds.has(catalogId));
       useShoppingStore.getState().resetCart(ids);
-      return { content: [{ type: "text", text: JSON.stringify({ requiredCatalogIds: ids, quote: useShoppingStore.getState().getQuote() }, null, 2) }], data: { requiredCatalogIds: ids, quote: useShoppingStore.getState().getQuote() } };
+      const data = { requiredCatalogIds: ids, missingCatalogIds, quote: useShoppingStore.getState().getQuote() };
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], data };
     },
   },
   {
@@ -889,11 +1020,26 @@ const tools: ToolDef[] = [
   },
 ];
 
+/** Single source of truth for the tool count shown in the product UI. */
+export const WEBMCP_TOOL_COUNT = tools.length;
+
 let controllers: AbortController[] = [];
 
 async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> = {}) {
   const activityId = useWebMCPStore.getState().beginTool(tool.name, args);
   try {
+    // Keep the public landing page from becoming an unauthenticated mutation
+    // surface. Local development has the explicit development session; hosted
+    // builds must have a platform-verified identity before any agent action.
+    const hosted = typeof window !== "undefined" && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+    if (hosted && !(await getAuthSession())) {
+      const denied = {
+        content: [{ type: "text", text: "Sign in to use Schematic WebMCP tools; project state is scoped to your verified account." }],
+        isError: true,
+      };
+      useWebMCPStore.getState().finishTool(activityId, denied, true);
+      return denied;
+    }
     const result = await tool.execute(args);
     useWebMCPStore.getState().finishTool(activityId, result);
     return result;
@@ -956,6 +1102,12 @@ function installModelContextProducerPolyfill() {
   Object.defineProperty(nav, "modelContext", { configurable: true, value: mc });
 }
 
+function isAllowedAgentOrigin(origin: string) {
+  if (!origin) return false;
+  const ownOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  return origin === ownOrigin || origin === "https://chat.openai.com" || origin === "https://chatgpt.com" || origin.endsWith(".openai.com") || origin.endsWith(".chatgpt.com");
+}
+
 export async function registerWebMCPTools() {
   installModelContextProducerPolyfill();
   installModelContextTestingPolyfill();
@@ -967,9 +1119,9 @@ export async function registerWebMCPTools() {
   if (!(window as any).__webmcpMessageHandler) {
     (window as any).__webmcpMessageHandler = true;
     window.addEventListener("message", async (event) => {
-      // Allow any origin for demo, but verify tool exists and log. In production, check event.origin against allowlist.
       const data: any = event.data;
       if (!data || data.type !== "webmcp-call" || !data.tool) return;
+      if (!isAllowedAgentOrigin(event.origin)) return;
       const tool = tools.find((t) => t.name === data.tool);
       if (!tool) {
         event.source?.postMessage({ type: "webmcp-result", id: data.id, error: `Unknown tool ${data.tool}` }, event.origin as any);
@@ -994,7 +1146,7 @@ export async function registerWebMCPTools() {
       await mc.registerTool(
         {
           name: t.name,
-          description: t.description + " — Scoped to your per-user room (stored on device, isolated per SuperTokens user). Agent may place hardware on your behalf within your room only.",
+          description: t.description + " — Scoped to your verified account and its local project room. Agent may place hardware on your behalf within your room only.",
           inputSchema: t.inputSchema,
           annotations: t.annotations,
           execute: (args: Record<string, unknown>) => {
@@ -1014,7 +1166,7 @@ export async function registerWebMCPTools() {
   if ("ontoolchange" in mc) {
     mc.ontoolchange = () => console.log("[WebMCP] toolset changed");
   }
-  console.log(`[WebMCP] ready — ${tools.length} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
+  console.log(`[WebMCP] ready — ${WEBMCP_TOOL_COUNT} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
 }
 
 export function unregisterWebMCPTools() {

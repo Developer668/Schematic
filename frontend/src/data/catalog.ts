@@ -1,5 +1,6 @@
 import type { HardwarePort } from "@schematic/hardware-graph";
 import metadata from "../../public/components-metadata.json";
+import { inferModelContract, type ComponentModelContract } from "../simulation/modelContract.ts";
 
 export type CatalogCategory =
   | "board"
@@ -20,6 +21,7 @@ export interface CatalogProperty {
   type?: string;
   control?: string;
   defaultValue?: unknown;
+  options?: string[];
   description?: string;
 }
 
@@ -32,6 +34,7 @@ export interface CatalogComponent {
   description?: string;
   ports: HardwarePort[];
   models: Record<string, { engine: string; file: string; fidelity: string; verified: boolean }>;
+  model: ComponentModelContract;
   thumbnail?: string;
   tags?: string[];
   tagName?: string;
@@ -57,23 +60,55 @@ function port(id: string, domain: HardwarePort["domain"], direction: HardwarePor
 }
 
 const POWER = [port("VCC", "power", "power"), port("GND", "ground", "power")];
-const I2C = [...POWER, port("SDA", "i2c"), port("SCL", "i2c")];
+const I2C = [...POWER, { ...port("SDA", "i2c"), protocol: { role: "target" as const } }, { ...port("SCL", "i2c"), protocol: { role: "target" as const } }];
+const I2C_MPU6050 = [...POWER, { ...port("SDA", "i2c"), protocol: { role: "target" as const, address: 0x68 } }, { ...port("SCL", "i2c"), protocol: { role: "target" as const } }];
+const I2C_BMP280 = [...POWER, { ...port("SDA", "i2c"), protocol: { role: "target" as const, address: 0x76 } }, { ...port("SCL", "i2c"), protocol: { role: "target" as const } }];
+const I2C_HMC5883L = [...POWER, { ...port("SDA", "i2c"), protocol: { role: "target" as const, address: 0x1e } }, { ...port("SCL", "i2c"), protocol: { role: "target" as const } }];
+const DS3231_PORTS = [...POWER, { ...port("SDA", "i2c"), protocol: { role: "target" as const, address: 0x68 } }, { ...port("SCL", "i2c"), protocol: { role: "target" as const } }];
+const HC_SR04_PORTS = [...POWER, port("TRIG", "gpio", "input"), port("ECHO", "gpio", "output")];
+const HX711_PORTS = [...POWER, port("DOUT", "gpio", "output"), port("SCK", "gpio", "input")];
+// Some display modules label their SPI pins SCL/SDA. Preserve those physical
+// names while keeping the graph domain truthful.
+const SPI_DISPLAY_SCL_SDA = [...POWER, port("SCL", "spi"), port("SDA", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")];
 const GPIO_IN = [...POWER, port("OUT", "gpio", "output")];
+const ADC_SOURCE = [...POWER, port("OUT", "adc", "output")];
 const GPIO_ACT = [...POWER, port("IN", "gpio", "input")];
 const PASSIVE_2 = [port("A", "gpio", "bidirectional"), port("B", "gpio", "bidirectional")];
+const PASSIVE_ELECTRICAL_2 = [port("A", "power", "bidirectional"), port("B", "power", "bidirectional")];
+// Provisional two-pin aliases retained for legacy/reference parts.  They are
+// intentionally generic and receive validation-only model contracts.
+const GENERIC_P2 = [port("P1", "gpio", "bidirectional"), port("P2", "gpio", "bidirectional")];
 
 const BOARD_ESP32: HardwarePort[] = [
   port("3V3", "power", "power"),
   port("5V", "power", "power"),
   port("GND", "ground", "power"),
-  port("SDA", "i2c"),
-  port("SCL", "i2c"),
+  { ...port("SDA", "i2c"), protocol: { role: "controller" as const } },
+  { ...port("SCL", "i2c"), protocol: { role: "controller" as const } },
+  port("GPIO0", "gpio"),
   port("GPIO2", "gpio"),
+  port("GPIO4", "gpio"),
+  port("GPIO5", "gpio"),
+  port("GPIO12", "gpio"),
   port("GPIO13", "gpio"),
+  port("GPIO14", "gpio"),
+  port("GPIO15", "gpio"),
+  port("GPIO16", "gpio"),
+  port("GPIO17", "gpio"),
   port("GPIO18", "gpio"),
   port("GPIO19", "gpio"),
   port("GPIO21", "gpio"),
   port("GPIO22", "gpio"),
+  port("GPIO23", "gpio"),
+  port("GPIO25", "gpio"),
+  port("GPIO26", "gpio"),
+  port("GPIO27", "gpio"),
+  port("GPIO32", "gpio"),
+  port("GPIO33", "gpio"),
+  port("GPIO34", "gpio", "input"),
+  port("GPIO35", "gpio", "input"),
+  port("GPIO36", "gpio", "input"),
+  port("GPIO39", "gpio", "input"),
   port("TX", "uart"),
   port("RX", "uart"),
 ];
@@ -82,10 +117,102 @@ const BOARD_UNO: HardwarePort[] = [
   port("5V", "power", "power"),
   port("3V3", "power", "power"),
   port("GND", "ground", "power"),
-  port("SDA", "i2c"),
-  port("SCL", "i2c"),
-  port("D13", "gpio"),
-  port("A0", "adc", "input"),
+  { ...port("SDA", "i2c"), protocol: { role: "controller" as const } },
+  { ...port("SCL", "i2c"), protocol: { role: "controller" as const } },
+  ...Array.from({ length: 14 }, (_, i) => port(`D${i}`, "gpio", i === 0 ? "input" : i === 1 ? "output" : "bidirectional")),
+  ...Array.from({ length: 6 }, (_, i) => port(`A${i}`, "adc", "input")),
+];
+
+const BOARD_ARDUINO_MEGA: HardwarePort[] = [
+  ...BOARD_UNO.filter((candidate) => !/^D|^A/.test(candidate.id)),
+  ...Array.from({ length: 54 }, (_, i) => port(`D${i}`, "gpio")),
+  ...Array.from({ length: 16 }, (_, i) => port(`A${i}`, "adc", "input")),
+];
+
+const BOARD_ARDUINO_DUE: HardwarePort[] = [
+  ...BOARD_UNO.filter((candidate) => !/^D|^A/.test(candidate.id)),
+  ...Array.from({ length: 54 }, (_, i) => port(`D${i}`, "gpio")),
+  ...Array.from({ length: 12 }, (_, i) => port(`A${i}`, "adc", "input")),
+];
+
+const BOARD_ARDUINO_SAMD: HardwarePort[] = [
+  ...POWER,
+  { ...port("SDA", "i2c"), protocol: { role: "controller" as const } },
+  { ...port("SCL", "i2c"), protocol: { role: "controller" as const } },
+  ...Array.from({ length: 22 }, (_, i) => port(`D${i}`, "gpio")),
+  ...Array.from({ length: 8 }, (_, i) => port(`A${i}`, "adc", "input")),
+  port("SCK", "spi"),
+  port("MOSI", "spi"),
+  port("MISO", "spi"),
+  port("TX", "uart"),
+  port("RX", "uart"),
+];
+
+const BOARD_NRF: HardwarePort[] = [
+  ...POWER,
+  ...Array.from({ length: 32 }, (_, i) => port(`P0.${i}`, "gpio")),
+  port("SCK", "spi"),
+  port("MOSI", "spi"),
+  port("MISO", "spi"),
+  port("TX", "uart"),
+  port("RX", "uart"),
+];
+
+const BOARD_RP2040: HardwarePort[] = [
+  port("3V3", "power", "power"),
+  port("VBUS", "power", "power"),
+  port("GND", "ground", "power"),
+  { ...port("SDA", "i2c"), protocol: { role: "controller" as const } },
+  { ...port("SCL", "i2c"), protocol: { role: "controller" as const } },
+  ...Array.from({ length: 30 }, (_, i) => port(`GPIO${i}`, "gpio", "bidirectional")),
+  port("ADC0", "adc", "input"),
+  port("ADC1", "adc", "input"),
+  port("ADC2", "adc", "input"),
+  port("ADC3", "adc", "input"),
+];
+
+const BOARD_STM32: HardwarePort[] = [
+  ...POWER,
+  { ...port("SDA", "i2c"), protocol: { role: "controller" as const } },
+  { ...port("SCL", "i2c"), protocol: { role: "controller" as const } },
+  ...Array.from({ length: 16 }, (_, i) => port(`PA${i}`, "gpio")),
+  ...Array.from({ length: 16 }, (_, i) => port(`PB${i}`, "gpio")),
+  port("PC13", "gpio"),
+  port("SCK", "spi"),
+  port("MOSI", "spi"),
+  port("MISO", "spi"),
+  port("TX", "uart"),
+  port("RX", "uart"),
+];
+
+const BOARD_TEENSY: HardwarePort[] = [
+  ...POWER,
+  { ...port("SDA", "i2c"), protocol: { role: "controller" as const } },
+  { ...port("SCL", "i2c"), protocol: { role: "controller" as const } },
+  ...Array.from({ length: 42 }, (_, i) => port(`D${i}`, "gpio")),
+  port("SCK", "spi"),
+  port("MOSI", "spi"),
+  port("MISO", "spi"),
+  port("TX", "uart"),
+  port("RX", "uart"),
+];
+
+const BOARD_MICROBIT: HardwarePort[] = [
+  ...POWER,
+  port("P0", "gpio"),
+  port("P1", "gpio"),
+  port("P2", "gpio"),
+  port("P8", "gpio"),
+  port("P12", "gpio"),
+  port("P13", "gpio"),
+  port("P14", "gpio"),
+  port("P15", "gpio"),
+  port("P16", "gpio"),
+  { ...port("P19", "i2c"), protocol: { role: "controller" as const } },
+  { ...port("P20", "i2c"), protocol: { role: "controller" as const } },
+  port("SCK", "spi"),
+  port("MOSI", "spi"),
+  port("MISO", "spi"),
 ];
 
 const BOARD_PI: HardwarePort[] = [
@@ -113,26 +240,27 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "esp32-devkit-v1": BOARD_ESP32,
   "esp32-c3-devkit": BOARD_ESP32,
   "esp8266-nodemcu": BOARD_ESP32,
-  "stm32-bluepill": BOARD_ESP32,
+  "stm32-bluepill": BOARD_STM32,
   "esp32-cam": BOARD_ESP32,
   esp32: BOARD_ESP32,
   "arduino-uno": BOARD_UNO,
   "arduino-uno-r3": BOARD_UNO,
   "arduino-nano": BOARD_UNO,
   "arduino-nano-every": BOARD_UNO,
-  "arduino-mega": BOARD_UNO,
-  "teensy-4-1": BOARD_ESP32,
-  "bbc-microbit-v2": BOARD_ESP32,
-  "nano-rp2040-connect": BOARD_ESP32,
-  "raspberry-pi-pico": BOARD_ESP32,
-  "raspberry-pi-pico-w": BOARD_ESP32,
+  "arduino-mega": BOARD_ARDUINO_MEGA,
+  "teensy-4-1": BOARD_TEENSY,
+  "teensy-3-2": BOARD_TEENSY,
+  "bbc-microbit-v2": BOARD_MICROBIT,
+  "nano-rp2040-connect": BOARD_RP2040,
+  "raspberry-pi-pico": BOARD_RP2040,
+  "raspberry-pi-pico-w": BOARD_RP2040,
   "raspberry-pi-4b": BOARD_PI,
   "raspberry-pi-zero-2w": BOARD_PI,
-  bmp280: I2C,
-  bme280: I2C,
-  mpu6050: I2C,
-  ds1307: I2C,
-  ds3231: I2C,
+  bmp280: I2C_BMP280,
+  bme280: I2C_BMP280,
+  mpu6050: I2C_MPU6050,
+  ds1307: [...POWER, { ...port("SDA", "i2c"), protocol: { role: "target" as const, address: 0x68 } }, { ...port("SCL", "i2c"), protocol: { role: "target" as const } }],
+  ds3231: DS3231_PORTS,
   ssd1306: I2C,
   "sh1106-oled-1-3": I2C,
   "oled-0-91": I2C,
@@ -159,11 +287,16 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   ds18b20: [port("VCC", "power", "power"), port("GND", "ground", "power"), port("DQ", "gpio", "bidirectional")],
   "hc-sr04": [...POWER, port("TRIG", "gpio", "input"), port("ECHO", "gpio", "output")],
   "pir-motion-sensor": GPIO_IN,
-  "photoresistor-sensor": GPIO_IN,
+  "photoresistor-sensor": ADC_SOURCE,
   "ntc-temperature-sensor": GPIO_IN,
   "sound-ky038": [...POWER, port("AO", "adc", "output"), port("DO", "gpio", "output")],
   "soil-moisture-capacitive": [...POWER, port("AO", "adc", "output")],
   "joystick-ps2": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("VRx", "adc", "output"), port("VRy", "adc", "output"), port("SW", "gpio", "input")],
+  "small-sound-sensor": GENERIC_P2,
+  "big-sound-sensor": GENERIC_P2,
+  photodiode: GENERIC_P2,
+  "battery-coin-cell": GENERIC_P2,
+  "microsd-card": GENERIC_P2,
   pushbutton: PASSIVE_2,
   "pushbutton-6mm": PASSIVE_2,
   resistor: PASSIVE_2,
@@ -178,14 +311,14 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "esp32-c6-devkit": BOARD_ESP32,
   "arduino-pro-mini": BOARD_UNO,
   "arduino-leonardo": BOARD_UNO,
-  "stm32-nucleo-f401re": BOARD_ESP32,
-  "stm32-nucleo-g071rb": BOARD_ESP32,
+  "stm32-nucleo-f401re": BOARD_STM32,
+  "stm32-nucleo-g071rb": BOARD_STM32,
   "raspberry-pi-5-8gb": BOARD_PI,
-  "raspberry-pi-pico-2": BOARD_ESP32,
+  "raspberry-pi-pico-2": BOARD_RP2040,
   "beaglebone-black": BOARD_PI,
-  "adafruit-feather-m4": BOARD_ESP32,
-  "particle-photon": BOARD_ESP32,
-  "onion-omega2": BOARD_ESP32,
+  "adafruit-feather-m4": BOARD_ARDUINO_SAMD,
+  "particle-photon": BOARD_ARDUINO_SAMD,
+  "onion-omega2": BOARD_PI,
   "jetson-nano-devkit": BOARD_PI,
   "esp-01s": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TX", "uart", "output"), port("RX", "uart", "input"), port("CH_PD", "gpio", "input"), port("GPIO0", "gpio"), port("GPIO2", "gpio"), port("RST", "gpio", "input")],
   "hc-06-bluetooth": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TXD", "uart", "output"), port("RXD", "uart", "input")],
@@ -258,12 +391,12 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "air-quality-ens210-2": I2C,
   "am312-pir": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("OUT", "gpio", "output")],
   "apds9960-gesture": I2C,
-  "arduino-due": BOARD_ESP32,
-  "arduino-giga-r1": BOARD_ESP32,
-  "arduino-mkr-zero": BOARD_ESP32,
-  "arduino-nano-33-ble": BOARD_ESP32,
-  "arduino-nano-33-iot": BOARD_ESP32,
-  "arduino-portenta-h7": BOARD_ESP32,
+  "arduino-due": BOARD_ARDUINO_DUE,
+  "arduino-giga-r1": BOARD_ARDUINO_SAMD,
+  "arduino-mkr-zero": BOARD_ARDUINO_SAMD,
+  "arduino-nano-33-ble": BOARD_ARDUINO_SAMD,
+  "arduino-nano-33-iot": BOARD_ARDUINO_SAMD,
+  "arduino-portenta-h7": BOARD_ARDUINO_SAMD,
   "as5600-encoder-2": I2C,
   "as5600-magnetic-encoder": I2C,
   "battery-holder-18650": [port("VIN", "power", "power"), port("GND", "ground", "power"), port("VOUT", "power", "power")],
@@ -271,16 +404,16 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "bh1750-2": I2C,
   "bh1750-lux": I2C,
   "bl602-wifi-ble": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TX", "uart", "output"), port("RX", "uart", "input")],
-  "bme280-2": I2C,
-  "bme280-3": I2C,
+  "bme280-2": I2C_BMP280,
+  "bme280-3": I2C_BMP280,
   "bmp180-pressure": I2C,
-  "bmp280-2": I2C,
-  "bmp280-3": I2C,
+  "bmp280-2": I2C_BMP280,
+  "bmp280-3": I2C_BMP280,
   "bno055-imu": I2C,
   "bno085-imu": I2C,
   "boost-mt3608-2": [port("VIN", "power", "power"), port("GND", "ground", "power"), port("VOUT", "power", "power")],
   "boost-xl6009-2": [port("VIN", "power", "power"), port("GND", "ground", "power"), port("VOUT", "power", "power")],
-  "breadboard-power-supply": BOARD_ESP32,
+  "breadboard-power-supply": [port("VIN", "power", "power"), port("GND", "ground", "power"), port("3V3", "power", "power"), port("5V", "power", "power")],
   "buck-mp1584": [port("VIN", "power", "power"), port("GND", "ground", "power"), port("VOUT", "power", "power")],
   "buck-xl4015": [port("VIN", "power", "power"), port("GND", "ground", "power"), port("VOUT", "power", "power")],
   "buzzer-active-3v": PASSIVE_2,
@@ -297,8 +430,8 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "ds1307-2": I2C,
   "ds18b20-2": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("DATA", "gpio", "bidirectional")],
   "ds18b20-3": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("OUT", "gpio", "output")],
-  "ds3231-2": I2C,
-  "ds3231-3": I2C,
+  "ds3231-2": DS3231_PORTS,
+  "ds3231-3": DS3231_PORTS,
   "ens160-2": I2C,
   "ens160-voc": I2C,
   "epaper-1-54-v2": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")],
@@ -308,24 +441,24 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "esp32-c3-mini": BOARD_ESP32,
   "esp32-c5-devkit": BOARD_ESP32,
   "esp32-ethernet-kit": BOARD_ESP32,
-  "esp32-pico-v3": BOARD_PI,
+  "esp32-pico-v3": BOARD_ESP32,
   "esp32-s3-devkitc-1": BOARD_ESP32,
   "esp32-wroom-32u": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TX", "uart", "output"), port("RX", "uart", "input")],
   "fan-5v-30mm": PASSIVE_2,
-  "gy-273-hmc5883l": I2C,
-  "gy-521-mpu6050": I2C,
-  "gy-68-bmp280": I2C,
+  "gy-273-hmc5883l": I2C_HMC5883L,
+  "gy-521-mpu6050": I2C_MPU6050,
+  "gy-68-bmp280": I2C_BMP280,
   "hc-12-433": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TX", "uart", "output"), port("RX", "uart", "input")],
   "hc-sr501-pir": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("OUT", "gpio", "output")],
-  "hcsr04-2": I2C,
+  "hcsr04-2": HC_SR04_PORTS,
   "header-40pin": Array.from({length: 12}, (_, i) => port(`P${i+1}`, "gpio")),
   "header-female-40": Array.from({length: 12}, (_, i) => port(`P${i+1}`, "gpio")),
   "heater-cartridge-12v": PASSIVE_2,
   "ht16k33-7seg-4": I2C,
   "ht16k33-8x8-bicolor": I2C,
   "htu21d-temp-hum": I2C,
-  "hx711-2": I2C,
-  "hx711-3": I2C,
+  "hx711-2": HX711_PORTS,
+  "hx711-3": HX711_PORTS,
   "icm20948-imu": I2C,
   "ili9488-3-5-tft": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")],
   "ina219-2": I2C,
@@ -367,7 +500,7 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "mcp3424-adc": I2C,
   "mcp6002-opamp": PASSIVE_2,
   "mfrc522-2": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")],
-  "micro-sd-module": BOARD_ESP32,
+  "micro-sd-module": [...POWER, port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi")],
   "mlx90393-magnet": I2C,
   "mosfet-ao3400": GPIO_ACT,
   "mosfet-irf520-module": GPIO_ACT,
@@ -382,8 +515,8 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "nextion-2-4-basic": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TX", "uart", "output"), port("RX", "uart", "input")],
   "nextion-2-8-enhanced": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TX", "uart", "output"), port("RX", "uart", "input")],
   "nextion-5-0-enhanced": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TX", "uart", "output"), port("RX", "uart", "input")],
-  "nrf52840-dk": BOARD_ESP32,
-  "nrf5340-dk": BOARD_ESP32,
+  "nrf52840-dk": BOARD_NRF,
+  "nrf5340-dk": BOARD_NRF,
   "odroid-c4": BOARD_PI,
   "oled-1-3-sh1106-2": I2C,
   "oled-1-54-128x64": I2C,
@@ -412,8 +545,8 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "relay-solid-5v-2ch": GPIO_ACT,
   "rfm95-lora": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")],
   "rock-pi-4": BOARD_PI,
-  "rp2040-pro-micro": BOARD_ESP32,
-  "rp2040-zero": BOARD_ESP32,
+  "rp2040-pro-micro": BOARD_RP2040,
+  "rp2040-zero": BOARD_RP2040,
   "rs485-2": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TX", "uart", "output"), port("RX", "uart", "input")],
   "rv3028-rtc": I2C,
   "scd30-co2": I2C,
@@ -421,7 +554,7 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "scd41-co2": I2C,
   "sct013-30a-clamp": GPIO_IN,
   "sen55-env": I2C,
-  "sensebox-mcu": BOARD_ESP32,
+  "sensebox-mcu": BOARD_ARDUINO_SAMD,
   "servo-9g-sg90": [...POWER, port("SIG", "pwm", "input")],
   "servo-ds3218": [...POWER, port("SIG", "pwm", "input")],
   "servo-jx6221": [...POWER, port("SIG", "pwm", "input")],
@@ -447,12 +580,11 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "st7920-12864-lcd": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")],
   "stepper-28byj-48-5v": [...POWER, port("IN1", "gpio", "input"), port("IN2", "gpio", "input")],
   "stepper-tb6600": [...POWER, port("IN1", "gpio", "input"), port("IN2", "gpio", "input")],
-  "stm32-blackpill-f401": BOARD_PI,
-  "stm32-blackpill-f411": BOARD_PI,
-  "stm32-f411-blackpill": BOARD_PI,
-  "teensy-3-2": BOARD_ESP32,
-  "tft-1-3-st7796": I2C,
-  "tft-1-8-st7735-2": I2C,
+  "stm32-blackpill-f401": BOARD_STM32,
+  "stm32-blackpill-f411": BOARD_STM32,
+  "stm32-f411-blackpill": BOARD_STM32,
+  "tft-1-3-st7796": SPI_DISPLAY_SCL_SDA,
+  "tft-1-8-st7735-2": SPI_DISPLAY_SCL_SDA,
   "tft-2-0-st7789": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")],
   "tft-2-8-ili9341-touch": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")],
   "tft-3-5-hx8357": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")],
@@ -463,7 +595,7 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "tof10120-laser": I2C,
   "traic-bta16": GPIO_ACT,
   "triac-bt136": GPIO_ACT,
-  "us-015-ultrasonic": I2C,
+  "us-015-ultrasonic": HC_SR04_PORTS,
   "us-100-ultrasonic": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("TX", "uart", "output"), port("RX", "uart", "input")],
   "uv-sensor-guva-s12sd": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("OUT", "adc", "output")],
   "valve-solenoid-12v": PASSIVE_2,
@@ -517,23 +649,57 @@ function inferManufacturer(id: string, title: string, tags: string[]): string | 
   return undefined;
 }
 
-function defaultPorts(id: string, pinCount: number | undefined): HardwarePort[] {
-  if (PORTS_BY_ID[id]) return PORTS_BY_ID[id];
-  if (id.startsWith("resistor") || id.startsWith("cap") || id.startsWith("ind") || id.startsWith("diode") || id.startsWith("zener")) return PASSIVE_2;
-  const n = Math.max(pinCount && pinCount > 0 ? pinCount : 2, 2);
+function defaultPorts(item: RawComponent): HardwarePort[] {
+  const id = item.id.toLowerCase();
+  const text = [item.id, item.name, item.description, ...(item.tags ?? []), item.tagName].filter(Boolean).join(" ").toLowerCase();
+  if (PORTS_BY_ID[item.id]) return PORTS_BY_ID[item.id];
+  if (id.startsWith("resistor") || id.startsWith("cap") || id.startsWith("ind") || id.startsWith("diode") || id.startsWith("zener")) return PASSIVE_ELECTRICAL_2;
+  if (/arduino-due/.test(text)) return BOARD_ARDUINO_DUE;
+  if (/(arduino-mega|mega)/.test(text)) return BOARD_ARDUINO_MEGA;
+  if (/(arduino-giga|arduino-mkr|arduino-nano-33|arduino-portenta|feather-m4)/.test(text)) return BOARD_ARDUINO_SAMD;
+  if (/(arduino|uno|nano|leonardo|pro-mini)/.test(text)) return BOARD_UNO;
+  if (/(rp2040|pico)/.test(text)) return BOARD_RP2040;
+  if (/(raspberry|beaglebone|jetson|odroid|rock pi)/.test(text)) return BOARD_PI;
+  if (/stm32/.test(text) && (item.category === "boards" || item.category === "board")) return BOARD_STM32;
+  if (/teensy/.test(text) && (item.category === "boards" || item.category === "board")) return BOARD_TEENSY;
+  if (/microbit/.test(text) && (item.category === "boards" || item.category === "board")) return BOARD_MICROBIT;
+  if (/nrf52/.test(text) && (item.category === "boards" || item.category === "board")) return BOARD_NRF;
+  if (/(esp32|esp8266|nodemcu|particle|m5stack)/.test(text) && (item.category === "boards" || item.category === "board")) return BOARD_ESP32;
+  if (/(i2c|i²c|sda|scl)/.test(text)) {
+    const address = /(ds3231|ds1307)/.test(text) ? 0x68
+      : /(ssd1306|sh1106|oled)/.test(text) ? 0x3c
+        : /(bmp280|bme280)/.test(text) ? 0x76
+          : /(mpu6050|mpu-6050)/.test(text) ? 0x68
+            : undefined;
+    return [...POWER, { ...port("SDA", "i2c"), protocol: { role: "target" as const, ...(address === undefined ? {} : { address }) } }, { ...port("SCL", "i2c"), protocol: { role: "target" as const } }];
+  }
+  if (/(spi|mosi|miso|sck|sclk)/.test(text)) return [...POWER, port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi")];
+  if (/(uart|serial|txd|rxd|\btx\b|\brx\b)/.test(text)) return [...POWER, port("TX", "uart", "output"), port("RX", "uart", "input")];
+  if (/(servo|pwm)/.test(text)) return [...POWER, port("SIG", "pwm", "input")];
+  if (/(analog|adc|potentiometer|thermistor|temperature|humidity|light|lux|voltage|current)/.test(text)) return [...POWER, port("OUT", "adc", "output")];
+  if (/(button|switch|motion|pir|trigger|sensor|receiver)/.test(text)) return [...POWER, port("OUT", "gpio", "output")];
+  if (/(led|buzzer|relay|motor|solenoid|speaker|neopixel)/.test(text)) return [...POWER, port("IN", "gpio", "input")];
+  const n = Math.max(item.pinCount && item.pinCount > 0 ? item.pinCount : 2, 2);
+  // Unknown parts remain placeable with an explicitly generic pin map.  Their
+  // model contract is validation-only, so these pins cannot be mistaken for a
+  // device-specific simulation model.
   return Array.from({ length: Math.min(n, 12) }, (_, i) => port(`P${i + 1}`, "gpio"));
 }
 
 function fromRaw(item: RawComponent): CatalogComponent {
   const tags = item.tags ?? [];
+  const title = item.name ?? item.id;
+  const category = mapCategory(item.category, item.id, tags);
+  const ports = defaultPorts(item);
   return {
     id: item.id,
-    title: item.name ?? item.id,
-    manufacturer: inferManufacturer(item.id, item.name ?? item.id, tags),
-    category: mapCategory(item.category, item.id, tags),
+    title,
+    manufacturer: inferManufacturer(item.id, title, tags),
+    category,
     description: item.description,
-    ports: defaultPorts(item.id, item.pinCount),
+    ports,
     models: {},
+    model: inferModelContract({ id: item.id, title, category, description: item.description, tags, ports, models: {} }),
     thumbnail: item.thumbnail,
     tags,
     tagName: item.tagName,
@@ -542,51 +708,11 @@ function fromRaw(item: RawComponent): CatalogComponent {
   };
 }
 
-const extras: CatalogComponent[] = [
-  {
-    id: "esp32-s3",
-    title: "ESP32-S3",
-    manufacturer: "Espressif",
-    category: "board",
-    description: "ESP32-S3 Wi-Fi + BLE MCU board",
-    ports: BOARD_ESP32,
-    models: { wasmtime: { engine: "wasmtime", file: "esp32.wasm", fidelity: "wasm_behavioral", verified: false } },
-    tags: ["esp32", "board", "wifi"],
-  },
-  {
-    id: "arduino-uno-r3",
-    title: "Arduino Uno R3",
-    manufacturer: "Arduino",
-    category: "board",
-    description: "ATmega328P Arduino Uno R3",
-    ports: BOARD_UNO,
-    models: {},
-    tags: ["arduino", "uno"],
-  },
-  {
-    id: "raspberry-pi-pico-w",
-    title: "Raspberry Pi Pico W",
-    manufacturer: "Raspberry Pi",
-    category: "board",
-    description: "RP2040 + CYW43439 Wi-Fi",
-    ports: BOARD_ESP32,
-    models: {},
-    tags: ["pico", "rp2040"],
-  },
-  {
-    id: "active-buzzer",
-    title: "Active buzzer",
-    category: "actuator",
-    description: "Active piezo buzzer",
-    ports: GPIO_ACT,
-    models: {},
-    tags: ["buzzer", "actuator"],
-  },
-];
-
 const loaded = (metadata.components as RawComponent[]).map(fromRaw);
-const seen = new Set(loaded.map((c) => c.id));
-export const catalog: CatalogComponent[] = [...loaded, ...extras.filter((c) => !seen.has(c.id))];
+// The metadata JSON is the single catalog source consumed by both the
+// frontend build and the backend package. Port/model contracts are derived
+// deterministically from each entry; there is no second frontend-only list.
+export const catalog: CatalogComponent[] = loaded;
 
 /** O(1) definition lookup for graph, editor, inspector, and WebMCP operations. */
 export const catalogById = new Map(catalog.map((component) => [component.id, component] as const));

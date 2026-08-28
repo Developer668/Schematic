@@ -18,7 +18,7 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
-    "dev:backend": "python -m uvicorn app.main:app --reload --port 8001 --app-dir backend",
+    "dev:backend": "SCHEMATIC_DEPLOYMENT_ENV=local SCHEMATIC_AUTH_MODE=development python -m uvicorn app.main:app --reload --port 8001 --app-dir backend",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
   },
   "devDependencies": {

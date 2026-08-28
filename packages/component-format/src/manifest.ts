@@ -73,6 +73,7 @@ export const FILE_TYPE_MAP: Record<string, { engine: string; fidelity: string; d
   ".glb": { engine: "three", fidelity: "geometry", description: "Visual representation" },
   ".gltf": { engine: "three", fidelity: "geometry", description: "Visual representation" },
   ".kicad_sym": { engine: "kicad", fidelity: "symbol", description: "Symbol/pin metadata" },
+  ".kicad_sch": { engine: "kicad", fidelity: "schematic", description: "Schematic connectivity and symbols" },
   ".kicad_mod": { engine: "kicad", fidelity: "footprint", description: "PCB footprint" },
 };
 

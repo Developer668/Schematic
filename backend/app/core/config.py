@@ -6,12 +6,24 @@ class Settings(BaseSettings):
     RENODE_BIN: str = "renode"
     NGSPICE_LIB: str = ""
     WASMTIME_CACHE: str = "./data/wasmtime-cache"
-    # SuperTokens core — https://github.com/supertokens/supertokens-core
-    # Each user gets a room stored on their device (localStorage per userId), but the session
-    # is verified via SuperTokens so WebMCP mutations are scoped to that room.
-    SUPERTOKENS_CONNECTION_URI: str = "http://localhost:3567"
-    SUPERTOKENS_API_DOMAIN: str = "http://localhost:8001"
-    SUPERTOKENS_WEBSITE_DOMAIN: str = "http://localhost:3000"
+    # One platform-aware session boundary. Development intentionally uses a
+    # stable local identity so the project runs without Docker or a second
+    # auth service. Production must set this to cloudflare-access or
+    # chatgpt-sites and provide a secret at the API boundary.
+    # Deliberately unset: every process must explicitly declare local or
+    # hosted operation before the application starts serving requests.
+    SCHEMATIC_DEPLOYMENT_ENV: str = ""
+    SCHEMATIC_AUTH_MODE: str = "development"
+    SCHEMATIC_SESSION_SECRET: str = ""
+    SCHEMATIC_SESSION_AUDIENCE: str = "schematic-api"
+    SCHEMATIC_SESSION_TTL_SECONDS: int = 3600
+    SCHEMATIC_WS_TICKET_TTL_SECONDS: int = 60
+    SCHEMATIC_DEV_SUBJECT: str = "local-development"
+    SCHEMATIC_DEV_EMAIL: str = "local@localhost"
+    SCHEMATIC_TRUST_PLATFORM_HEADERS: bool = False
+    SCHEMATIC_PLATFORM_INGRESS_SECRET: str = ""
+    CF_ACCESS_TEAM_DOMAIN: str = ""
+    CF_ACCESS_AUDIENCE: str = ""
 
     class Config:
         env_file = ".env"

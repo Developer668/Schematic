@@ -42,6 +42,8 @@
     {
       "id": "fw-compute-1",
       "componentId": "compute-1",
+      "definitionId": "esp32-s3",
+      "boardFqbn": "esp32:esp32:esp32s3",
       "files": [
         {
           "name": "smart_glasses.ino",

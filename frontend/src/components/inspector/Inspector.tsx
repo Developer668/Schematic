@@ -10,6 +10,10 @@ export default function Inspector() {
   const activeId = useSelectionStore((s) => s.activeComponentId);
   const active = useMemo(() => project.components.find((c) => c.id === activeId), [project.components, activeId]);
   const def = useMemo(() => (active ? getCatalogComponent(active.definitionId) : null), [active]);
+  const executable = Boolean(def && (def.model.support === "behavioral" || def.model.support === "engine-backed"));
+  const executionClasses = executable
+    ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900"
+    : "bg-muted text-muted-foreground border-border";
 
   if (!active || !def) {
     return (
@@ -57,13 +61,24 @@ export default function Inspector() {
       </div>
 
       <div className="p-2 rounded border border-border bg-muted/20">
-        <div className="font-medium mb-1.5 text-xs">Fidelity</div>
+        <div className="font-medium mb-1.5 text-xs">Execution coverage</div>
         <ul className="space-y-1 text-xs">
-          <li className={`flex items-center gap-1.5 px-2 py-1 rounded border text-xs ${def.models["renode"] ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900" : "bg-muted text-muted-foreground border-border"}`}>{def.models["renode"] ? <Check size={11} /> : <X size={11} />} Renode {def.models["renode"]?.verified ? "(verified)" : ""}</li>
-          <li className={`flex items-center gap-1.5 px-2 py-1 rounded border ${def.models["spice"] ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 border-emerald-200" : "bg-muted text-muted-foreground border-border"}`}>{def.models["spice"] ? <Check size={11} /> : <X size={11} />} SPICE</li>
-          <li className={`flex items-center gap-1.5 px-2 py-1 rounded border ${def.models["wasmtime"] ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 border-emerald-200" : "bg-muted text-muted-foreground border-border"}`}>{def.models["wasmtime"] ? <Check size={11} /> : <X size={11} />} WASM</li>
-          <li className="flex items-center gap-1.5 px-2 py-1 rounded bg-muted text-muted-foreground border border-border"><X size={11} /> HW validated</li>
+          <li className={`flex items-center gap-1.5 px-2 py-1 rounded border ${executionClasses}`}>
+            {executable ? <Check size={11} /> : <X size={11} />} Browser runtime {executable ? "supported" : "not assigned"}
+          </li>
+          <li className="flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-muted text-muted-foreground"><Check size={11} /> Typed graph validation</li>
+          <li className="flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-muted text-muted-foreground"><X size={11} /> Physical hardware validation</li>
         </ul>
+      </div>
+
+      <div className="p-2 rounded border border-border bg-muted/20">
+        <div className="font-medium mb-1.5 text-xs">Simulation model</div>
+        <div className="space-y-1 text-[11px]">
+          <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">Support</span><span className={`px-1.5 py-0.5 rounded border font-mono ${def.model.support === "behavioral" || def.model.support === "engine-backed" ? "text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/20" : "text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/20"}`}>{def.model.support}</span></div>
+          <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">Family</span><span className="font-mono truncate" title={def.model.family}>{def.model.family}</span></div>
+          <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">Model ID</span><span className="font-mono truncate" title={def.model.modelId}>{def.model.modelId}</span></div>
+          {def.model.reason && <div className="pt-1 text-muted-foreground leading-snug">{def.model.reason}</div>}
+        </div>
       </div>
 
       <div>

@@ -14,7 +14,7 @@ import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { catalog, categories as allCategories, getCatalogComponent } from "../data/catalog.ts";
 import ComponentArtwork from "../components/ComponentArtwork.tsx";
 import LogoMark from "../components/LogoMark.tsx";
-import { useAuth, mockSignOut, getCurrentUserId } from "../auth/supertokens.ts";
+import { useAuth, signOut, getCurrentUserId } from "../auth/session.ts";
 import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User } from "lucide-react";
 
 function ThemeIcon({ theme }: { theme: string }) {
@@ -47,7 +47,7 @@ function UserRoomBadge() {
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
         Room {shortRoom} • {session.email || "local"}
       </span>
-      <button onClick={() => { mockSignOut().then(() => window.location.reload()); }} className="grid h-7 w-7 place-items-center rounded-full border border-border hover:bg-muted" title="Sign out (room stays on device)">
+      <button onClick={() => signOut()} className="grid h-7 w-7 place-items-center rounded-full border border-border hover:bg-muted" title="Sign out of the workspace">
         <LogOut size={12} />
       </button>
     </div>
@@ -132,7 +132,7 @@ export default function StudioPage() {
       switchProject(item.id);
       setShowProjectMenu(false);
       projectClickTimerRef.current = null;
-    }, 220);
+    }, 400);
   };
 
   const cancelProjectRename = () => {
@@ -190,7 +190,6 @@ export default function StudioPage() {
     const startX = event.clientX;
     const startWidth = rightPanelWidth;
     document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
     const onMove = (moveEvent: PointerEvent) => {
       if (isRightResizingRef.current) setRightPanelWidth(startWidth + startX - moveEvent.clientX);
     };

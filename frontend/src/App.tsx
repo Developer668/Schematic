@@ -3,8 +3,7 @@ import StudioPage from "./pages/StudioPage.tsx";
 import { lazy, Suspense, useEffect } from "react";
 import { registerWebMCPTools } from "./webmcp/tools.ts";
 import "./store/useThemeStore.ts";
-import { useAuth, getCurrentUserId } from "./auth/supertokens.ts";
-import { SuperTokensWrapper } from "supertokens-auth-react";
+import { useAuth, getCurrentUserId } from "./auth/session.ts";
 
 const LandingPage = lazy(() => import("./pages/LandingPage.tsx"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage.tsx"));
@@ -40,25 +39,37 @@ export default function App() {
   }, []);
 
   return (
-    <SuperTokensWrapper>
-      <BrowserRouter>
-        <Suspense fallback={<div className="min-h-screen bg-background" />}>
-          <Routes>
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/auth" element={<AuthGate />} />
-            <Route
-              path="/studio"
-              element={
-                <RequireAuth>
-                  <StudioPage />
-                </RequireAuth>
-              }
-            />
-            <Route path="/parts" element={<PartsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Routes>
-        </Suspense>
-      </BrowserRouter>
-    </SuperTokensWrapper>
+    <BrowserRouter>
+      <Suspense fallback={<div className="min-h-screen bg-background" />}>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/auth" element={<AuthGate />} />
+          <Route
+            path="/studio"
+            element={
+              <RequireAuth>
+                <StudioPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/parts"
+            element={
+              <RequireAuth>
+                <PartsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <RequireAuth>
+                <SettingsPage />
+              </RequireAuth>
+            }
+          />
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
   );
 }

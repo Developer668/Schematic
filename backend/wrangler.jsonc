@@ -1,0 +1,28 @@
+{
+  "name": "schematic-behavioral-api",
+  "main": "./worker.py",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["python_workers"],
+  "workers_dev": true,
+  "vars": {
+    "SCHEMATIC_AUTH_MODE": "cloudflare-access",
+    "SCHEMATIC_TRUST_PLATFORM_HEADERS": "false"
+  },
+  "env": {
+    "staging": {
+      "name": "schematic-behavioral-api-staging",
+      "vars": {
+        "SCHEMATIC_AUTH_MODE": "cloudflare-access",
+        "SCHEMATIC_TRUST_PLATFORM_HEADERS": "false"
+      }
+    },
+    "production": {
+      "name": "schematic-behavioral-api",
+      "workers_dev": false,
+      "vars": {
+        "SCHEMATIC_AUTH_MODE": "cloudflare-access",
+        "SCHEMATIC_TRUST_PLATFORM_HEADERS": "false"
+      }
+    }
+  }
+}

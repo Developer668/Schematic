@@ -142,8 +142,11 @@ export function resolveFirmwareBinding(project: HardwareProjectRef, componentId:
     definition,
     target,
     targetConfig,
-    definitionMatchesTarget: !target?.definitionId || target.definitionId === component?.definitionId,
-    fqbnMatchesDefinition: !target?.boardFqbn || !targetConfig || target.boardFqbn === targetConfig.fqbn,
+    // A missing binding is not a match. The UI keeps legacy targets optional
+    // so it can explain how to repair them; canonical graph validation and
+    // runtime execution require both values to be present.
+    definitionMatchesTarget: !target || (Boolean(target.definitionId) && target.definitionId === component?.definitionId),
+    fqbnMatchesDefinition: !target || (Boolean(target.boardFqbn) && (!targetConfig || target.boardFqbn === targetConfig.fqbn)),
   };
 }
 
@@ -174,16 +177,18 @@ export function resolveBoardPin(
 ): ConnectionEndpoint | null {
   const ports = componentPorts(project, boardId);
   const pinExpression = expression.trim().replace(/^\(+|\)+$/g, "");
+  const directPort = ports.find((candidate) => candidate.id.toLowerCase() === pinExpression.toLowerCase());
+  if (directPort) return { componentId: boardId, portId: directPort.id };
   const constantValue = constants.get(pinExpression);
   const numeric = typeof constantValue === "number"
     ? String(constantValue)
     : /^\d+$/.test(pinExpression)
       ? pinExpression
-      : pinExpression.match(/(?:GPIO|PIN|IO|D|A)[_ ]?(\d+)/i)?.[1];
+      : pinExpression.match(/(?:GPIO|PIN|IO|D|A|P)[_ ]?(\d+)/i)?.[1];
   if (!numeric) return null;
-  const names = new Set([`GPIO${numeric}`, `D${numeric}`, `A${numeric}`, `IO${numeric}`].map((name) => name.toLowerCase()));
+  const names = new Set([`GPIO${numeric}`, `D${numeric}`, `A${numeric}`, `IO${numeric}`, `P${numeric}`].map((name) => name.toLowerCase()));
   const port = ports.find((candidate) => names.has(candidate.id.toLowerCase()))
-    ?? ports.find((candidate) => candidate.id.match(/(?:GPIO|PIN|IO|D|A)[_ ]?(\d+)/i)?.[1] === numeric);
+    ?? ports.find((candidate) => candidate.id.match(/(?:GPIO|PIN|IO|D|A|P)[_ ]?(\d+)/i)?.[1] === numeric);
   return port ? { componentId: boardId, portId: port.id } : null;
 }
 

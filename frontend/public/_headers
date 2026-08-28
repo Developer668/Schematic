@@ -1,5 +1,5 @@
 /*
-  Permissions-Policy: tools=(self "https://chat.openai.com" "https://chatgpt.com" "https://*.openai.com" "https://*.chatgpt.com" "https://*.supertokens.com" "https://*.supertokens.io"), modelContext=(self "https://chat.openai.com" "https://chatgpt.com")
+  Permissions-Policy: tools=(self "https://chat.openai.com" "https://chatgpt.com" "https://*.openai.com" "https://*.chatgpt.com"), modelContext=(self "https://chat.openai.com" "https://chatgpt.com")
   Origin-Agent-Cluster: ?1
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

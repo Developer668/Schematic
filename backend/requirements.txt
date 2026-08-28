@@ -12,5 +12,4 @@ PyYAML>=6.0
 python-multipart>=0.0.9
 aiosqlite>=0.20.0
 JSV>=0.1.0
-supertokens-python==0.21.0
 cryptography>=42.0.0

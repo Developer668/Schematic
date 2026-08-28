@@ -35,7 +35,7 @@ export default function PartsPage() {
         <div className="mx-auto flex h-full min-h-0 max-w-[1560px] flex-col p-3 sm:p-5">
           <div className="parts-page-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm">
             <div className="parts-print-hidden flex shrink-0 items-center justify-between gap-3 border-b border-border bg-muted/20 px-4 py-3">
-              <div className="min-w-0"><div className="kicker">Procurement workspace</div><h1 className="mt-1 truncate text-base font-semibold tracking-tight">Parts for {project.name}</h1><p className="mt-0.5 text-[11px] text-muted-foreground">Exact identities, live retailer offers, alternatives, and a build-ready cart in one place.</p></div>
+              <div className="min-w-0"><div className="kicker">Procurement workspace</div><h1 className="mt-1 truncate text-base font-semibold tracking-tight">Parts for {project.name}</h1><p className="mt-0.5 text-[11px] text-muted-foreground">Exact identities, agent/provider offers when connected, alternatives, and a build-ready cart in one place.</p></div>
               <div className="hidden shrink-0 items-center gap-2 text-right sm:block"><div className="font-mono text-sm font-semibold tabular-nums">{project.components.length} parts in design</div><div className="text-[11px] text-muted-foreground">{cartCount} cart line{cartCount === 1 ? "" : "s"}</div></div>
             </div>
             <div className="parts-page-shopping min-h-0 flex-1"><ShoppingWorkspace fullPage /></div>

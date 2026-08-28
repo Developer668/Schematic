@@ -1,7 +1,7 @@
 from app.simulation.engine import SimulationEngine, CompiledSubgraph, PortValue
 
 class StubEngine(SimulationEngine):
-    """Stub for unimplemented engines — returns architecture_ready without executing."""
+    """Placeholder adapter that explicitly refuses to claim simulation support."""
     def __init__(self, name: str, purpose: str):
         self.name = name
         self.purpose = purpose
@@ -15,4 +15,10 @@ class StubEngine(SimulationEngine):
     async def restore(self, snapshot: bytes): self._snap = snapshot
     async def shutdown(self): pass
 
-    def status(self): return {"engine": self.name, "status": "architecture_ready", "purpose": self.purpose}
+    def status(self):
+        return {
+            "engine": self.name,
+            "status": "unsupported",
+            "purpose": self.purpose,
+            "reason": "This adapter is a placeholder and does not execute a hardware model.",
+        }

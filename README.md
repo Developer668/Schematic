@@ -42,10 +42,17 @@ Start the backend in another terminal:
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate
 pip install -r backend/requirements.txt
-python -m uvicorn app.main:app --port 8001 --app-dir backend
+SCHEMATIC_DEPLOYMENT_ENV=local SCHEMATIC_AUTH_MODE=development python -m uvicorn app.main:app --port 8001 --app-dir backend
 ```
+
+Local development uses one explicit development session issued by the backend;
+it does not require Docker or SuperTokens. Hosted deployments must provide a
+strong `SCHEMATIC_SESSION_SECRET` and use the configured Cloudflare Access or
+ChatGPT Sites boundary. The ChatGPT Sites build keeps the same frontend and
+WebMCP code while its server route exchanges the platform identity for the
+same signed API session contract.
 
 API documentation is available at `http://localhost:8001/api/docs`.
 
@@ -58,7 +65,7 @@ pnpm --filter frontend build
 python -m pytest backend/tests -q
 ```
 
-External simulation engines such as Renode, QEMU, Verilator, and ngspice are detected from the local system. Missing engines are reported as unavailable instead of being simulated as successful.
+The verified runtime currently executes an isolated Arduino subset in the browser/backend behavioral session (GPIO, ADC, PWM, serial transport, SPI/I²C traces, and deterministic DS3231 register reads). Most sensor, display, UART, and SPI definitions remain validation-only until an exact device model is assigned; external adapters such as Renode, QEMU, Verilator, and ngspice are reported as unsupported until their graph adapters execute real models. They are never reported as successful simulation.
 
 ## License
 

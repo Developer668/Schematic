@@ -50,7 +50,7 @@ function ResultCard({ result, cartLine, onAdd, onRemove, onQuantity, onOffer, on
             <button type="button" onClick={onRemove} className="grid h-7 w-7 place-items-center rounded border border-border text-muted-foreground hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-500" aria-label={`Remove ${result.title} from cart`}><Trash2 size={12} /></button>
           </div>
         ) : (
-          <button type="button" onClick={onAdd} className="shrink-0 rounded bg-foreground px-2 py-1 text-[10px] font-semibold text-background hover:opacity-85">Add</button>
+          <button type="button" onClick={onAdd} disabled={!result.exactMatch} className="shrink-0 rounded bg-foreground px-2 py-1 text-[10px] font-semibold text-background hover:opacity-85 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground" title={result.exactMatch ? "Add exact catalog match" : "Review the part number before adding this listing"}>{result.exactMatch ? "Add" : "Review"}</button>
         )}
       </div>
       <div className="border-t border-border bg-muted/20 px-2 py-1 text-[10px] leading-snug text-muted-foreground">{result.matchNote}</div>

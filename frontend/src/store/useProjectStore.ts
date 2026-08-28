@@ -10,7 +10,7 @@ export interface HardwareGraph {
   description?: string;
   components: { id: string; definitionId: string; position: { x: number; y: number }; rotation: number; properties: Record<string, unknown>; label?: string }[];
   connections: { id: string; source: { componentId: string; portId: string }; target: { componentId: string; portId: string }; domain: string }[];
-  firmwareTargets: { id: string; componentId: string; definitionId?: string; language?: string; boardFqbn?: string; files: { name: string; content: string }[]; compiledArtifact?: { success: boolean; log: string; hexB64?: string; elfB64?: string; binB64?: string } }[];
+  firmwareTargets: { id: string; componentId: string; definitionId?: string; language?: string; boardFqbn?: string; files: { name: string; content: string }[]; compiledArtifact?: { success: boolean; log: string; hexB64?: string; elfB64?: string; binB64?: string; identity?: Record<string, unknown> } }[];
   simulation?: { mode: "interactive" | "batch"; durationMs?: number; engines: Record<string, { enabled: boolean; fidelity: "fast" | "high" }> };
   createdAt?: string;
   updatedAt?: string;
@@ -33,6 +33,7 @@ interface ProjectState {
   loadProject: (graph: HardwareGraph) => void;
   updateComponentProps: (id: string, props: Record<string, unknown>) => void;
   updateFirmware: (componentId: string, files: { name: string; content: string }[], metadata?: { language?: string; boardFqbn?: string }) => void;
+  setCompiledArtifact: (componentId: string, artifact: { success: boolean; log: string; hexB64?: string; elfB64?: string; binB64?: string; identity?: Record<string, unknown> }) => void;
   saveProject: () => { projectId: string; savedAt: string };
   createProject: (name?: string) => string;
   duplicateProject: (projectId?: string, name?: string) => string | null;
@@ -41,7 +42,7 @@ interface ProjectState {
   listProjects: () => HardwareGraph[];
 }
 
-import { getCurrentUserId } from "../auth/supertokens.ts";
+import { getCurrentUserId } from "../auth/session.ts";
 
 function storageKey() {
   const uid = getCurrentUserId();
@@ -54,9 +55,10 @@ function legacyKey() {
 const PROJECTS_STORAGE_KEY = "schematic-projects";
 const LEGACY_PROJECT_STORAGE_KEY = "schematic-project";
 const projectChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("schematic-project-sync") : null;
+let loadedRoomId = getCurrentUserId();
 
-// Per-user room: projects are stored on device keyed by userId (localStorage)
-// so WebMCP mutates only your room, never global. See supertokens-core.
+// Per-user room: projects are stored on device keyed by the verified session
+// subject. The browser never chooses a different user's room.
 
 type StoredProjects = { version: 1; activeProjectId: string; projects: HardwareGraph[] };
 
@@ -80,9 +82,10 @@ function defaultSimulation() {
   return {
     mode: "interactive" as const,
     engines: {
-      renode: { enabled: true, fidelity: "fast" as const },
-      ngspice: { enabled: true, fidelity: "fast" as const },
-      wasmtime: { enabled: true, fidelity: "fast" as const },
+      behavioral: { enabled: true, fidelity: "fast" as const },
+      renode: { enabled: false, fidelity: "fast" as const },
+      ngspice: { enabled: false, fidelity: "fast" as const },
+      wasmtime: { enabled: false, fidelity: "fast" as const },
     },
   };
 }
@@ -118,6 +121,16 @@ export function normalizeProject(stored: unknown, fallbackId?: string): Hardware
       language: typeof target?.language === "string" ? target.language : "arduino",
       boardFqbn: typeof target?.boardFqbn === "string" ? target.boardFqbn : undefined,
       files: Array.isArray(target?.files) ? target.files.map((file: any) => ({ name: String(file?.name ?? "sketch.ino"), content: String(file?.content ?? "") })) : [],
+      compiledArtifact: target?.compiledArtifact && typeof target.compiledArtifact === "object"
+        ? {
+            success: target.compiledArtifact.success === true,
+            log: String(target.compiledArtifact.log ?? ""),
+            ...(typeof target.compiledArtifact.hexB64 === "string" ? { hexB64: target.compiledArtifact.hexB64 } : {}),
+            ...(typeof target.compiledArtifact.elfB64 === "string" ? { elfB64: target.compiledArtifact.elfB64 } : {}),
+            ...(typeof target.compiledArtifact.binB64 === "string" ? { binB64: target.compiledArtifact.binB64 } : {}),
+            ...(target.compiledArtifact.identity && typeof target.compiledArtifact.identity === "object" ? { identity: target.compiledArtifact.identity } : {}),
+          }
+        : undefined,
     })) : [],
     simulation: value.simulation && typeof value.simulation === "object"
       ? { ...defaultSimulation(), ...value.simulation, engines: { ...defaultSimulation().engines, ...(value.simulation.engines ?? {}) } }
@@ -136,8 +149,13 @@ function emptyProject(name = "Untitled"): HardwareGraph {
 function readStoredState(): StoredProjects {
   try {
     if (typeof localStorage === "undefined") return { version: 1, activeProjectId: "", projects: [emptyProject()] };
-    // Try per-user key first, then fallback to global, then legacy
-    const tryKeys = [storageKey(), PROJECTS_STORAGE_KEY, legacyKey(), LEGACY_PROJECT_STORAGE_KEY];
+    const userId = getCurrentUserId();
+    // A hosted account must never inherit the anonymous/global room. Keep the
+    // fallback only for local development and for the short pre-auth bootstrap
+    // before the session lookup has resolved.
+    const tryKeys = userId && userId !== "local-development"
+      ? [storageKey()]
+      : [storageKey(), PROJECTS_STORAGE_KEY, legacyKey(), LEGACY_PROJECT_STORAGE_KEY];
     for (const key of tryKeys) {
       const raw = localStorage.getItem(key);
       if (!raw) continue;
@@ -145,8 +163,9 @@ function readStoredState(): StoredProjects {
       if (stored && Array.isArray(stored.projects) && stored.projects.length > 0) {
         const projects = stored.projects.map((project: unknown) => normalizeProject(project));
         const activeProjectId = projects.some((project: HardwareGraph) => project.id === stored.activeProjectId) ? stored.activeProjectId : projects[0].id;
-        // If we loaded from a fallback global key but we have a user, migrate to per-user key
-        if (key !== storageKey()) {
+        // Migrate legacy keys only inside the local development room. Never
+        // copy an anonymous/global room into a hosted user's account.
+        if (key !== storageKey() && (!userId || userId === "local-development")) {
           try { localStorage.setItem(storageKey(), JSON.stringify({ version: 1, activeProjectId, projects })); } catch {}
         }
         return { version: 1, activeProjectId, projects };
@@ -154,12 +173,14 @@ function readStoredState(): StoredProjects {
       if (stored && typeof stored === "object" && !Array.isArray(stored.projects)) {
         // Legacy single project shape
         const project = normalizeProject(stored);
-        try { localStorage.setItem(storageKey(), JSON.stringify({ version: 1, activeProjectId: project.id, projects: [project] })); } catch {}
+        if (!userId || userId === "local-development") {
+          try { localStorage.setItem(storageKey(), JSON.stringify({ version: 1, activeProjectId: project.id, projects: [project] })); } catch {}
+        }
         return { version: 1, activeProjectId: project.id, projects: [project] };
       }
     }
     // Also try legacy singletons
-    for (const key of [legacyKey(), LEGACY_PROJECT_STORAGE_KEY]) {
+    for (const key of userId && userId !== "local-development" ? [] : [legacyKey(), LEGACY_PROJECT_STORAGE_KEY]) {
       const legacy = JSON.parse(localStorage.getItem(key) ?? "null");
       if (legacy && typeof legacy === "object") {
         const project = normalizeProject(legacy);
@@ -181,9 +202,13 @@ function persistState(projects: HardwareGraph[], activeProjectId: string, broadc
 }
 
 export function reloadForCurrentUser() {
+  const nextRoomId = getCurrentUserId();
+  const roomChanged = nextRoomId !== loadedRoomId;
+  loadedRoomId = nextRoomId;
   const next = readStoredState();
   const proj = next.projects.find((p) => p.id === next.activeProjectId) ?? next.projects[0];
   useProjectStore.setState({ projects: next.projects, activeProjectId: next.activeProjectId, project: proj });
+  if (roomChanged) resetProjectRuntime();
   // Also notify other tabs with the room
   projectChannel?.postMessage({ type: "projects:update", state: { ...next, _room: getCurrentUserId() } });
 }
@@ -351,6 +376,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
   },
 
+  setCompiledArtifact(componentId, artifact) {
+    set((state) => {
+      const targetExists = state.project.firmwareTargets.some((target) => target.componentId === componentId);
+      if (!targetExists) return state;
+      const firmwareTargets = state.project.firmwareTargets.map((target) => target.componentId === componentId ? { ...target, compiledArtifact: artifact } : target);
+      const project = { ...state.project, firmwareTargets, updatedAt: now() };
+      const projects = state.projects.map((item) => item.id === project.id ? project : item);
+      persistState(projects, state.activeProjectId);
+      return { project, projects };
+    });
+  },
+
   saveProject() {
     const state = get();
     const savedAt = now();
@@ -436,10 +473,9 @@ projectChannel?.addEventListener("message", (event) => {
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (event) => {
     if (!event.newValue) return;
-    if (event.key !== storageKey() && event.key !== PROJECTS_STORAGE_KEY) return;
+    if (event.key !== storageKey()) return;
     try { applyRemoteState(JSON.parse(event.newValue)); } catch {}
   });
-  // When user signs in/out, reload to their room (stored on device, per-user key)
-  window.addEventListener("st-mock-login" as any, () => reloadForCurrentUser());
-  window.addEventListener("supertokens-session" as any, () => reloadForCurrentUser());
+  // When the verified session changes, reload to that subject's room.
+  window.addEventListener("schematic-session", () => reloadForCurrentUser());
 }

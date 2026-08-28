@@ -1,0 +1,17 @@
+[project]
+name = "schematic-behavioral-api"
+version = "0.1.0"
+description = "FastAPI behavioral API packaged for Cloudflare Python Workers"
+requires-python = ">=3.13"
+dependencies = [
+  "fastapi==0.115.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.6.0",
+  "python-multipart>=0.0.9",
+]
+
+[dependency-groups]
+dev = [
+  "workers-py",
+  "workers-runtime-sdk",
+]
