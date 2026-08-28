@@ -1,6 +1,6 @@
 # ChatGPT Site implementation progress
 
-Last updated: 2026-08-28 (ChatGPT Site version 8 deployed and verified)
+Last updated: 2026-08-28 (ChatGPT Site version 9 deployed and verified)
 Owner: Codex; Sol (gpt-5.6-sol, medium) is the architecture and release authority.
 
 ## Scope
@@ -56,7 +56,7 @@ Focused checks: capability registry, runtime, and hardware tests pass (26/26 in 
 - WASM and metadata are independent bundler URLs, so fingerprinting does not turn the metadata request into `button-led-<hash>.wasm.json`.
 - Vite and Vinext production outputs emit explicit hashed WASM and metadata files (400-byte WASM plus 687-byte metadata); the runtime uses streaming-first for unverified generic loads and a hash-before-instantiation buffered path for the verified bundled artifact.
 - The local Vinext Node server serves the WASM with `application/octet-stream`; the loader’s buffered fallback was exercised successfully, and Pages `_headers` now declares `application/wasm` for the deployed asset path.
-- The published ChatGPT Site serves version 8 from commit `22e867503afcdf9a72b64409a8a159fa1ea5962c`. Its studio route redirects unauthenticated users to ChatGPT sign-in, its session endpoint issues the ChatGPT Site session under platform identity, and its hashed WASM/metadata assets are delivered over HTTPS.
+- The published ChatGPT Site serves version 9 from commit `fa37bc7d612a6d93c0316ea3a39c80bcfbab48b2`. Its studio route redirects unauthenticated users to ChatGPT sign-in, its session endpoint issues the ChatGPT Site session under platform identity, and its hashed WASM/metadata assets are delivered over HTTPS.
 
 ### Adversarial review handoff
 
@@ -85,7 +85,7 @@ Focused checks: capability registry, runtime, and hardware tests pass (26/26 in 
 
 ### Production release evidence
 
-- GitHub `main` contains commit `22e867503afcdf9a72b64409a8a159fa1ea5962c`; ChatGPT Site version 8 was saved from that same source commit and deployment `appgdep_6a9207d62e308191af9eda4dc5dfab4f` succeeded.
+- GitHub `main` contains commit `fa37bc7d612a6d93c0316ea3a39c80bcfbab48b2`; ChatGPT Site version 9 was saved from that same source commit and deployment `appgdep_6a92099e9bc08191a042d9db04819d75` succeeded.
 - Production URL: `https://schematic-hardware-workspace.decipherer71.chatgpt.site`.
 - HTTPS `/api/health` returned 200 JSON with `api_boundary: same-origin`; `/api/docs` returned 200 JSON; the live Settings page showed `API connected`, `/api · same-origin API`, and 5 engines reported.
 - Live browser verification found the project selector/menu, component search (ESP32 results), Parts navigation/agent-only gate, workspace menu, and both resize separators. The browser rendered the WebMCP compatibility bridge; native WebMCP was not available in that session and is not represented as proven.
