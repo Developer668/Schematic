@@ -231,7 +231,7 @@ export default function StudioPage() {
             </button>
             <span className="status-pill hidden sm:inline-flex">Saved locally</span>
             {showProjectMenu && (
-              <div role="menu" aria-label="Projects" className="absolute left-0 top-[calc(100%+0.5rem)] z-[70] w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border-2 border-border bg-background opacity-100 shadow-2xl ring-4 ring-foreground/5">
+              <div role="menu" aria-label="Projects" className="absolute left-0 top-full z-[70] mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-border bg-card shadow-xl">
                 <div className="flex items-center justify-between border-b border-border px-3 py-2">
                   <div><div className="kicker">Projects</div><div className="text-[11px] text-muted-foreground">Double-click a name to rename</div></div>
                   <span className="count-badge">{projects.length}</span>
@@ -303,7 +303,7 @@ export default function StudioPage() {
               <Menu size={14} strokeWidth={1.8} />
             </button>
             {showOverflowMenu && (
-              <div role="menu" aria-label="Workspace actions" className="absolute right-0 top-[calc(100%+0.5rem)] z-[70] w-56 overflow-hidden rounded-lg border-2 border-border bg-background p-1.5 opacity-100 shadow-2xl ring-4 ring-foreground/5">
+              <div role="menu" aria-label="Workspace actions" className="absolute right-0 top-full z-[70] mt-2 w-56 overflow-hidden rounded-lg border border-border bg-card p-1.5 shadow-xl">
                 <button type="button" role="menuitem" onClick={() => { toggle(); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><ThemeIcon theme={theme} /> {theme === "dark" ? "Use light theme" : "Use dark theme"}</button>
                 <Link role="menuitem" to="/settings" onClick={() => setShowOverflowMenu(false)} className="flex items-center gap-2 rounded px-2.5 py-2 text-xs hover:bg-muted"><Settings size={13} /> Settings</Link>
                 <button type="button" role="menuitem" onClick={() => { setShowImport(true); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><Download size={13} /> Import design</button>

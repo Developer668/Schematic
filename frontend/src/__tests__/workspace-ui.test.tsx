@@ -67,7 +67,8 @@ describe("workspace UI", () => {
     act(() => selector?.click());
     const menu = container.querySelector<HTMLElement>("[role='menu'][aria-label='Projects']");
     expect(menu).toBeTruthy();
-    expect(menu?.className).toContain("bg-background");
+    expect(menu?.className).toContain("bg-card");
+    expect(menu?.className).toContain("border border-border");
     expect(menu?.className).toContain("z-[70]");
 
     const projectName = menu?.querySelector<HTMLElement>("[role='menuitem'] span[title='Double-click to rename']");
