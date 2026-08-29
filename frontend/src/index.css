@@ -452,6 +452,11 @@ html.light .react-flow__pane {
   .workbench aside.w-\[292px\] { width: 248px; }
 }
 
+/* Dock the code panel on tablets while leaving enough room for the canvas. */
+@media (min-width: 768px) and (max-width: 1279px) {
+  .workbench .workbench-code-panel { max-width: 48vw; }
+}
+
 /* Keep compact engineering controls usable on touch screens without changing desktop density. */
 @media (pointer: coarse) {
   .workbench .workspace-icon-button { width: 40px; height: 40px; }

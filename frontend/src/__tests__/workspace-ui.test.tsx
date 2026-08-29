@@ -174,6 +174,43 @@ describe("workspace UI", () => {
     expect(container.querySelector("[role='menu'][aria-label='Workspace actions']")).toBeNull();
   });
 
+  it("docks the code panel beside the canvas at tablet widths", async () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+    try {
+      const container = studio();
+      const overflow = container.querySelector<HTMLButtonElement>("button[aria-label='Open workspace menu']");
+      expect(overflow).toBeTruthy();
+
+      act(() => overflow?.click());
+      const menu = container.querySelector<HTMLElement>("[role='menu'][aria-label='Workspace actions']");
+      const showCode = Array.from(menu?.querySelectorAll<HTMLButtonElement>("button") ?? []).find((button) => button.textContent?.includes("Show code panel"));
+      expect(showCode).toBeTruthy();
+      await act(async () => {
+        showCode?.click();
+        await Promise.resolve();
+      });
+
+      const dockedPanel = container.querySelector<HTMLElement>("[data-testid='docked-code-panel']");
+      expect(dockedPanel).toBeTruthy();
+      expect(dockedPanel?.classList.contains("md:flex")).toBe(true);
+      expect(container.querySelector("[data-testid='canvas']")).toBeTruthy();
+      expect(container.querySelector("[data-testid='bottom-dock']")).toBeTruthy();
+      expect(container.querySelector<HTMLElement>("[data-testid='code-panel-mobile-region']")?.classList.contains("md:hidden")).toBe(true);
+
+      act(() => overflow?.click());
+      const hideCode = Array.from(container.querySelectorAll<HTMLButtonElement>("[role='menu'] button")).find((button) => button.textContent?.includes("Hide code panel"));
+      expect(hideCode).toBeTruthy();
+      await act(async () => {
+        hideCode?.click();
+        await Promise.resolve();
+      });
+      expect(container.querySelector("[data-testid='docked-code-panel']")).toBeNull();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  }, 15_000);
+
   it("renders no redundant copy actions in the right panel", () => {
     const component = useProjectStore.getState().addComponent("led");
     useSelectionStore.getState().setActive(component.id);

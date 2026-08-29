@@ -471,15 +471,15 @@ export default function StudioPage() {
                 if (event.key === "Home") setRightPanelWidth(720);
                 if (event.key === "End") setRightPanelWidth(300);
               }}
-              className="workbench-resize-handle hidden xl:flex"
+              className="workbench-resize-handle hidden md:flex"
               title="Drag to resize the code panel"
             />
-            <aside style={{ width: `${rightPanelWidth}px` }} className="panel-enter hidden shrink-0 flex-col border-l border-border bg-card xl:flex">
+            <aside data-testid="docked-code-panel" style={{ width: `${rightPanelWidth}px` }} className="workbench-code-panel panel-enter hidden shrink-0 flex-col border-l border-border bg-card md:flex">
             <RightPanel />
             </aside>
           </>
         ) : (
-          <div className="hidden xl:flex w-7 shrink-0 flex-col items-center gap-1.5 border-l border-border bg-card py-1.5">
+          <div className="hidden md:flex w-7 shrink-0 flex-col items-center gap-1.5 border-l border-border bg-card py-1.5">
             <button type="button" onClick={() => setRightCollapsed(false)} className="grid h-6 w-6 place-items-center rounded bg-foreground text-background" aria-label="Open code panel" title="Open code panel">
               <PanelRight size={11} strokeWidth={1.7} />
             </button>
@@ -487,9 +487,9 @@ export default function StudioPage() {
         )}
       </div>
 
-      <div className="xl:hidden">
+      <div data-testid="code-panel-mobile-region" className="md:hidden">
         {!rightCollapsed && (
-          <div className="fixed inset-0 z-30 flex">
+          <div data-testid="code-panel-overlay" className="fixed inset-0 z-30 flex">
             <div className="flex-1 bg-foreground/10 backdrop-blur-[1px]" onClick={() => setRightCollapsed(true)} />
             <div className="flex w-[84vw] max-w-[320px] flex-col border-l border-border bg-card">
               <div className="flex h-7 items-center justify-between border-b border-border px-2.5">
