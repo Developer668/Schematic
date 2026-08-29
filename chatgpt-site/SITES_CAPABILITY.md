@@ -29,7 +29,7 @@ Verified locally without deployment:
 - the static worker fixture is present and contains no network, WebSocket, or dynamic-code execution;
 - the small WASM fixture validates in Node and is below 1 KiB;
 - the capability page contains all six browser probes and no compile/simulation API call;
-- `npm run build` runs `scripts/verify-build-assets.mjs`, which checks the built worker, WASM, metadata JSON, preview PNG, and explicit `/_headers` 404 route;
+- `npm run build` runs `scripts/verify-build-assets.mjs`, which checks the built worker, WASM, metadata JSON, and preview PNG, removes Vinext's generated client `_headers`, and verifies none remain in the Site archive;
 - the project-storage package has unit coverage for repository and migration behavior;
 - the Site TypeScript/build checks can compile the new route and package alias once the existing Site build prerequisites are available.
 

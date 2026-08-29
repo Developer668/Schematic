@@ -1,4 +1,4 @@
-import { access, readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,9 +39,11 @@ if (!parsedMetadata || typeof parsedMetadata !== "object" || !Array.isArray(pars
 const preview = await requiredFile("social-preview.png");
 if (!preview.bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error("The built social preview is not a PNG.");
 
+// Vinext generates Pages deployment metadata here even for a Site archive.
+// Remove only that known generated file before the archive is handed to Sites;
+// the explicit app/%5Fheaders route remains the runtime 404 boundary.
+await rm(resolve(clientRoot, "_headers"), { force: true });
 const headersFiles = await findHeadersFiles(clientRoot);
-if (headersFiles.length > 1 || (headersFiles.length === 1 && !headersFiles[0].endsWith("/dist/client/_headers"))) {
-  throw new Error(`Unexpected _headers artifact outside Vinext's generated client metadata: ${headersFiles.join(", ")}`);
-}
+if (headersFiles.length > 0) throw new Error(`The Site archive must not contain _headers artifacts: ${headersFiles.join(", ")}`);
 
-console.log("Verified Site static assets: worker, WASM, metadata JSON, social preview PNG; /_headers is handled by the explicit 404 route.");
+console.log("Verified Site static assets: worker, WASM, metadata JSON, social preview PNG; removed generated _headers and verified none remain.");
