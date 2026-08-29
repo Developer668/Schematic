@@ -50,6 +50,37 @@ export interface AgentPublication {
   publishedAt: string;
 }
 
+export type ShoppingRequestStatus = "idle" | "staged" | "searching" | "ready" | "partial" | "failed";
+
+/**
+ * Stable handoff contract for an agent that can browse suppliers but cannot
+ * publish into the page in the same turn. Keeping this JSON-shaped and free
+ * of provider secrets lets another model resume the lookup safely.
+ */
+export interface ShoppingHandoff {
+  schemaVersion: "schematic.parts.lookup.v1";
+  requestId: string;
+  requestType: "exact_parts_lookup";
+  query: string;
+  quantity: number;
+  requiredCatalogIds: string[];
+  providerFallbackOrder: string[];
+  returnTool: "shopping.search";
+  returnFormat: "json";
+  constraints: {
+    exactMatch: true;
+    maxOffersPerListing: 3;
+    maxListingAgeHours: 24;
+    requireHttpsRetailerUrl: true;
+    requireRecentTimestamp: true;
+    noInventedCatalogIds: true;
+  };
+  listingFields: string[];
+  offerFields: string[];
+  publicationFields: string[];
+  requestedAt: string;
+}
+
 export interface CartLine {
   resultId: string;
   quantity: number;
@@ -63,8 +94,12 @@ export interface ShoppingState {
   budget: number | null;
   lastSearchAt: number | null;
   publicationError: string | null;
+  requestStatus: ShoppingRequestStatus;
+  handoff: ShoppingHandoff | null;
   undoStack: CartLine[][];
   setQuery: (query: string) => void;
+  setRequestStatus: (requestStatus: ShoppingRequestStatus) => void;
+  setHandoff: (handoff: ShoppingHandoff | null) => void;
   setResults: (results: ShoppingResult[]) => void;
   publishAgentResults: (results: unknown, publication: AgentPublication) => { accepted: boolean; rejected: number; message?: string };
   addToCart: (resultId: string, quantity?: number) => void;
@@ -141,6 +176,37 @@ function storageKey() {
   return userId && userId !== "local-development" ? ANONYMOUS_STORAGE_KEY + ":" + userId : ANONYMOUS_STORAGE_KEY;
 }
 
+function makeRequestId() {
+  const randomUuid = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10);
+  return `parts-${Date.now()}-${randomUuid}`;
+}
+
+export function createShoppingHandoff(query: string, quantity = 1, requiredCatalogIds: string[] = []): ShoppingHandoff {
+  return {
+    schemaVersion: "schematic.parts.lookup.v1",
+    requestId: makeRequestId(),
+    requestType: "exact_parts_lookup",
+    query: query.trim(),
+    quantity: safeQuantity(quantity),
+    requiredCatalogIds: [...new Set(requiredCatalogIds.map(String).map((id) => id.trim()).filter(Boolean))],
+    providerFallbackOrder: ["mouser", "digikey", "element14", "adafruit"],
+    returnTool: "shopping.search",
+    returnFormat: "json",
+    constraints: {
+      exactMatch: true,
+      maxOffersPerListing: 3,
+      maxListingAgeHours: 24,
+      requireHttpsRetailerUrl: true,
+      requireRecentTimestamp: true,
+      noInventedCatalogIds: true,
+    },
+    listingFields: ["id", "catalogId", "title", "manufacturer", "partNumber", "requestedQuantity", "exactMatch", "matchNote", "offers", "alternatives", "updatedAt"],
+    offerFields: ["id", "retailer", "title", "price", "currency", "url", "availability", "fetchedAt", "provider"],
+    publicationFields: ["provider", "publishedAt"],
+    requestedAt: new Date().toISOString(),
+  };
+}
+
 function roomId() {
   return getCurrentUserId();
 }
@@ -178,16 +244,20 @@ const initial = readState();
 export const useShoppingStore = create<ShoppingState>((set, get) => ({
   ...initial,
   publicationError: null,
+  requestStatus: "idle",
+  handoff: null,
   undoStack: [],
   setQuery(query) { set({ query }); persist(get()); },
+  setRequestStatus(requestStatus) { set({ requestStatus }); },
+  setHandoff(handoff) { set({ handoff, requestStatus: handoff ? "staged" : "idle" }); },
   setResults() {
-    set({ results: [], cart: [], lastSearchAt: null, publicationError: "Parts shopping requires a connected, authenticated WebMCP agent. Unpublished or fallback listings were blocked." });
+    set({ results: [], cart: [], lastSearchAt: null, requestStatus: "failed", publicationError: "Parts shopping needs a connected, authenticated WebMCP agent before listings can be shown. The lookup request is ready to hand off." });
     persist(get());
   },
   publishAgentResults(rawResults, publication) {
     const results = Array.isArray(rawResults) ? rawResults : [];
     if (!validPublication(publication)) {
-      set({ results: [], cart: [], lastSearchAt: null, publicationError: "Listing publication rejected: the WebMCP agent authentication or provider provenance is missing or invalid." });
+      set({ results: [], cart: [], lastSearchAt: null, requestStatus: "failed", publicationError: "Listing publication rejected: the WebMCP agent authentication or provider provenance is missing or invalid." });
       persist(get());
       return { accepted: false, rejected: results.length, message: get().publicationError ?? undefined };
     }
@@ -199,11 +269,11 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     const rejected = results.length - normalized.length;
     if (normalized.length === 0) {
       const message = "Listing publication rejected: every listing needs a canonical catalogId, exactMatch=true, part number, an HTTPS retailer URL, a recent timestamp, currency, and provider provenance.";
-      set({ results: [], cart: [], lastSearchAt: null, publicationError: message });
+      set({ results: [], cart: [], lastSearchAt: null, requestStatus: "failed", publicationError: message });
       persist(get());
       return { accepted: false, rejected, message };
     }
-    set({ results: normalized, cart: [], lastSearchAt: Date.now(), publicationError: rejected ? `${rejected} malformed listing${rejected === 1 ? " was" : "s were"} rejected; showing only authenticated agent-sourced exact listings.` : null });
+    set({ results: normalized, cart: [], lastSearchAt: Date.now(), requestStatus: rejected ? "partial" : "ready", handoff: null, publicationError: rejected ? `${rejected} malformed listing${rejected === 1 ? " was" : "s were"} rejected; showing only authenticated agent-sourced exact listings.` : null });
     persist(get());
     return { accepted: true, rejected };
   },
@@ -279,7 +349,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     });
   },
   clearResults() {
-    set({ results: [], lastSearchAt: null });
+    set({ results: [], lastSearchAt: null, requestStatus: "idle", handoff: null });
     persist(get());
   },
   getQuote() {
@@ -304,7 +374,7 @@ shoppingChannel?.addEventListener("message", (event) => {
 
 export function reloadShoppingForCurrentUser() {
   const next = readState();
-  useShoppingStore.setState({ ...next, undoStack: [] });
+  useShoppingStore.setState({ ...next, requestStatus: "idle", handoff: null, publicationError: null, undoStack: [] });
   shoppingChannel?.postMessage({ type: "shopping:update", state: { ...next, _room: roomId() } });
 }
 
@@ -314,7 +384,7 @@ if (typeof window !== "undefined") {
     if (event.key !== storageKey() || !event.newValue) return;
     try {
       const next = JSON.parse(event.newValue) as PersistedShopping;
-      if (next && typeof next === "object") useShoppingStore.setState({ ...next, undoStack: [] });
+      if (next && typeof next === "object") useShoppingStore.setState({ ...next, requestStatus: "idle", handoff: null, publicationError: null, undoStack: [] });
     } catch {}
   });
 }

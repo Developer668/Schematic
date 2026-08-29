@@ -43,7 +43,7 @@ export default function SettingsPage() {
   const apiBaseUrl = apiUrl("/api");
   const apiBoundaryLabel = apiBaseUrl.startsWith("/") ? "same-origin API" : "configured API";
   const webmcpStatus = webmcpRegistration.state === "native"
-    ? "Native WebMCP connected"
+    ? webmcpRegistration.discovery === "verified" ? "Native WebMCP verified" : "Native WebMCP registered · discovery unverified"
     : webmcpRegistration.state === "fallback"
       ? "Local compatibility bridge"
       : webmcpRegistration.state === "error"
@@ -51,7 +51,7 @@ export default function SettingsPage() {
         : webmcpRegistration.state === "unavailable"
           ? "WebMCP unavailable"
           : "Checking WebMCP…";
-  const webmcpCount = webmcpRegistration.state === "checking" ? `${toolCount} declared` : `${webmcpRegistration.registeredCount}/${toolCount} registered`;
+  const webmcpCount = webmcpRegistration.state === "checking" ? `${toolCount} declared` : `${webmcpRegistration.registeredCount}/${webmcpRegistration.declaredCount || toolCount} registered${webmcpRegistration.discoveredCount ? ` · ${webmcpRegistration.discoveredCount} discovered` : ""}`;
 
   const checkApi = useCallback(async () => {
     setApiStatus("checking");
@@ -299,7 +299,7 @@ export default function SettingsPage() {
                     <div className="text-xs font-medium flex items-center gap-1"><Shield size={12} /> WebMCP</div>
                     <div className="text-[11px] text-muted-foreground">{webmcpCount} tools · {webmcpStatus}</div>
                   </div>
-                  <span className={`text-[11px] px-2 py-1 rounded-full ${webmcpRegistration.state === "native" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : webmcpRegistration.state === "error" || webmcpRegistration.state === "unavailable" ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-primary text-primary-foreground"}`}>{webmcpRegistration.state === "native" ? "Connected" : webmcpRegistration.state === "fallback" ? "Fallback" : webmcpRegistration.state === "checking" ? "Checking" : "Review"}</span>
+                  <span className={`text-[11px] px-2 py-1 rounded-full ${webmcpRegistration.state === "native" && webmcpRegistration.discovery === "verified" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : webmcpRegistration.state === "error" || webmcpRegistration.state === "unavailable" || webmcpRegistration.state === "native" ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-primary text-primary-foreground"}`}>{webmcpRegistration.state === "native" && webmcpRegistration.discovery === "verified" ? "Connected" : webmcpRegistration.state === "native" ? "Review" : webmcpRegistration.state === "fallback" ? "Fallback" : webmcpRegistration.state === "checking" ? "Checking" : "Review"}</span>
                 </div>
               </div>
 

@@ -48,9 +48,13 @@ browsers, but it is not proof of native WebMCP discovery.
 - Same-origin Site API routes that reuse `functions/api/_runtime.ts` for
   catalog, validation, behavioral HTTP simulation, sessions, and compile
   preflight.
-- Agent-only parts publication: listings do not appear until an authenticated
-  WebMCP agent supplies exact catalog identity, part number, URL, timestamp,
-  currency, offer, and provenance.
+- Provider-assisted parts sourcing: `shopping.search` can ask the same-origin
+  server for a bounded, cached fallback chain (Mouser, Digi-Key, Newark/
+  element14, Adafruit, or deployment-configured adapters). Candidates never
+  become cart listings automatically; an authenticated WebMCP agent still
+  verifies exact catalog identity, part number, URL, timestamp, currency,
+  offer, and provenance before publication. If providers are unavailable, the
+  tool returns a stable JSON handoff for another browsing agent.
 
 The Site does not claim arbitrary C/C++ compilation, MCU-library execution,
 full analog/RF simulation, or a native simulator. `firmware.compile` on the

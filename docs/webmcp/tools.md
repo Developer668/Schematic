@@ -91,7 +91,7 @@ operation may change browser-local state. All tools use an object input schema.
 
 |   # | Name                          | Input schema                                                                                                     | Mode | Operation                                                                                                             |
 | --: | ----------------------------- | ---------------------------------------------------------------------------------------------------------------- | :--: | --------------------------------------------------------------------------------------------------------------------- |
-|  32 | `shopping.search`             | `{query?: string, quantity?: number, listings: Listing[], publication: {provider: string, publishedAt: string}}` | M,U  | Publish exact, authenticated agent-sourced listings; no local/provider fallback. The exact `Listing` schema is below. |
+|  32 | `shopping.search`             | `{query?: string, quantity?: number, listings?: Listing[], publication?: {provider: string, publishedAt: string}}` | M,U  | With listings omitted, query the bounded provider fallback chain and return a handoff/candidates; with both fields supplied, publish exact authenticated listings. The exact `Listing` schema is below. |
 |  33 | `shopping.get_state`          | `{}`                                                                                                             | RO,U | Return published results, cart lines, budget, and quote.                                                              |
 |  34 | `shopping.cart_add`           | `{resultId: string, quantity?: number}`                                                                          | M,U  | Add an exact published result to the cart.                                                                            |
 |  35 | `shopping.cart_remove`        | `{resultId: string}`                                                                                             | M,U  | Remove a cart line.                                                                                                   |
@@ -110,7 +110,7 @@ operation may change browser-local state. All tools use an object input schema.
 
 ### `shopping.search` listing schema
 
-The source schema requires `listings` and `publication`. Each listing must have:
+When publishing, provide both `listings` and `publication`. Each listing must have:
 
 ```text
 {

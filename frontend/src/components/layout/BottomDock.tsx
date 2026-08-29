@@ -65,7 +65,7 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
 // ---- WebMCP CLI ----
 function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
   const [history, setHistory] = useState<{ cmd: string; out: string; isError?: boolean }[]>([
-    { cmd: "help", out: "WebMCP CLI — type a tool name and JSON args. Examples:\n  component.search {\"query\":\"esp32\"}\n  component.add {\"componentId\":\"esp32-devkit-v1\"}\n  project.get_graph\n  validation.check\n\nTools: " + toolNames.join(", ") },
+    { cmd: "help", out: "WebMCP CLI — type a tool name and JSON args. Examples:\n  component.search {\"query\":\"esp32\"}\n  component.add {\"componentId\":\"esp32-devkit-v1\"}\n  component.list_ports {\"componentId\":\"esp32-devkit-v1-1\"}\n  connection.connect {\"source\":{\"componentId\":\"board-1\",\"portId\":\"GPIO18\"},\"target\":{\"componentId\":\"button-1\",\"portId\":\"A\"}}\n  shopping.search {\"query\":\"ESP32-S3\"}\n  project.get_graph\n  validation.check\n\nTools: " + toolNames.join(", ") },
   ]);
   const [input, setInput] = useState("");
   const [filter, setFilter] = useState("");

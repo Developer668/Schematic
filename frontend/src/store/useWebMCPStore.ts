@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 export type ToolActivityStatus = "running" | "success" | "error";
 export type WebMCPRegistrationState = "checking" | "native" | "fallback" | "unavailable" | "error";
+export type WebMCPDiscoveryState = "verified" | "unverified" | "polyfill" | "unavailable";
 
 export interface ToolActivity {
   id: string;
@@ -19,6 +20,9 @@ interface WebMCPState {
   registration: {
     state: WebMCPRegistrationState;
     registeredCount: number;
+    declaredCount: number;
+    discoveredCount: number;
+    discovery: WebMCPDiscoveryState;
     error?: string;
   };
   beginTool: (name: string, args: Record<string, unknown>) => string;
@@ -44,7 +48,7 @@ function resultText(result: any) {
 
 export const useWebMCPStore = create<WebMCPState>((set) => ({
   activities: [],
-  registration: { state: "checking", registeredCount: 0 },
+  registration: { state: "checking", registeredCount: 0, declaredCount: 0, discoveredCount: 0, discovery: "unavailable" },
   beginTool(name, args) {
     const id = `tool-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const activity = { id, name, args, status: "running" as const, startedAt: Date.now() };

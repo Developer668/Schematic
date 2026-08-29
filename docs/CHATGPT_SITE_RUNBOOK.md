@@ -110,7 +110,7 @@ an acceptance failure until it is recorded and resolved.
 | Unsupported source                               | A sketch outside the exact contract returns an explicit unsupported result/API list; no fake binary or silent success.                                                              |
 | Compile boundary                                 | Site `firmware.compile` returns source/target preflight or unavailable; it does not claim arbitrary binary compilation.                                                             |
 | Save/reload                                      | `project.save` followed by reload or project switch preserves the graph, connections, and firmware in the verified-user browser-local room.                                         |
-| Parts boundary                                   | Results remain empty until an authenticated WebMCP agent publishes exact catalog/provenance-backed listings.                                                                        |
+| Parts boundary                                   | `shopping.search` may return bounded provider candidates or a JSON handoff; results/cart remain empty until an authenticated WebMCP agent publishes exact catalog/provenance-backed listings. |
 | Engine boundary                                  | Behavioral runtime is reported only where its model contract applies; native compiler/simulator paths are unavailable or unsupported on the Site.                                   |
 | Transport boundary                               | Raw WebSocket is unavailable on the Site; browser runtime or same-origin HTTP simulation remains usable.                                                                            |
 

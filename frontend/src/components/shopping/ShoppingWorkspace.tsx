@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { ArrowUpRight, BadgeCheck, CircleAlert, PackageCheck, RotateCcw, Search, ShieldCheck, ShoppingCart, Trash2, Undo2, Wifi } from "lucide-react";
+import { ArrowUpRight, BadgeCheck, Check, CircleAlert, Clock3, PackageCheck, RotateCcw, Search, ShieldCheck, ShoppingCart, Sparkles, Trash2, Undo2, Wifi } from "lucide-react";
 import { getCatalogComponent } from "../../data/catalog.ts";
 import { useProjectStore } from "../../store/useProjectStore.ts";
-import { useShoppingStore, type PartOffer, type ShoppingResult, type ShoppingState } from "../../store/useShoppingStore.ts";
+import { createShoppingHandoff, useShoppingStore, type PartOffer, type ShoppingRequestStatus, type ShoppingResult, type ShoppingState } from "../../store/useShoppingStore.ts";
 
 type ShoppingSnapshot = ShoppingState;
 type ShoppingQuote = ReturnType<ShoppingSnapshot["getQuote"]>;
@@ -17,6 +17,32 @@ function dateLabel(value: number | string | null | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Timestamp unavailable";
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function requestStatusLabel(status: ShoppingRequestStatus | undefined, resultCount: number) {
+  if (resultCount > 0 || status === "ready" || status === "partial") return status === "partial" ? "Review partial match" : "Offers ready";
+  if (status === "searching") return "Checking suppliers";
+  if (status === "staged") return "Request staged";
+  if (status === "failed") return "Needs sourcing agent";
+  return "Ready to source";
+}
+
+function SourcingProgress({ status, resultCount, projectPartCount }: { status?: ShoppingRequestStatus; resultCount: number; projectPartCount: number }) {
+  const active = resultCount > 0 || status === "ready" || status === "partial" ? 3 : status === "searching" ? 2 : status === "staged" ? 1 : 0;
+  const steps = ["Request", "Compare", "Verify"];
+  return (
+    <div className="shopping-request-card" aria-live="polite">
+      <div className="shopping-request-icon"><Sparkles size={15} /></div>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2"><span className="kicker">Sourcing pipeline</span><span className={`shopping-state-pill is-${active === 3 ? "ready" : active > 0 ? "active" : "idle"}`}>{requestStatusLabel(status, resultCount)}</span></div>
+        <p className="shopping-request-title">{resultCount > 0 ? `${resultCount} verified design part${resultCount === 1 ? "" : "s"} ready to compare` : `${projectPartCount} design part${projectPartCount === 1 ? "" : "s"} queued for supplier lookup`}</p>
+        <p className="shopping-request-copy">The sourcing agent checks configured suppliers, preserves the exact graph identity, and returns a short list of offers for review.</p>
+      </div>
+      <div className="shopping-request-steps" aria-label="Sourcing progress">
+        {steps.map((step, index) => <div key={step} className={`shopping-request-step ${active >= index + 1 ? "is-active" : ""}`}><span className="shopping-step-dot">{active >= index + 1 ? <Check size={10} /> : index + 1}</span><span>{step}</span>{index < steps.length - 1 && <span className="shopping-step-line" aria-hidden="true" />}</div>)}
+      </div>
+    </div>
+  );
 }
 
 function cheapestOfferId(result: ShoppingResult) {
@@ -139,20 +165,21 @@ function CartSummary({ shopping, quote, onReset, detailed = false }: { shopping:
   );
 }
 
-function AgentEmptyState({ query }: { query: string }) {
+function AgentEmptyState({ query, requiredIds, status, onStageQuery, onStageDesign }: { query: string; requiredIds: string[]; status?: ShoppingRequestStatus; onStageQuery: () => void; onStageDesign: () => void }) {
+  const requiredParts = requiredIds.map((catalogId) => getCatalogComponent(catalogId)).filter(Boolean);
   return (
-    <div className="rounded-lg border border-dashed border-border bg-muted/10 px-4 py-5" aria-live="polite">
+    <div className="shopping-empty-state" aria-live="polite">
       <div className="flex items-start gap-3">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300"><Wifi size={16} strokeWidth={1.7} /></div>
-        <div className="min-w-0 flex-1"><div className="kicker">WebMCP gate</div><h2 className="mt-1 text-sm font-semibold">Waiting for the WebMCP agent</h2><p className="mt-1 max-w-[62ch] text-[10px] leading-relaxed text-muted-foreground">Agent publication required. This desk stays empty until a connected, authenticated agent finds and publishes exact catalog matches with sourced retailer offers.</p></div>
-        <span className="hidden shrink-0 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-1 font-mono text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300 sm:inline-flex">Agent only</span>
+        <div className="shopping-empty-icon"><Wifi size={16} strokeWidth={1.7} /></div>
+        <div className="min-w-0 flex-1"><div className="kicker">Ready when you are</div><h2 className="mt-1 text-sm font-semibold">Waiting for the WebMCP agent</h2><p className="mt-1 max-w-[62ch] text-[10px] leading-relaxed text-muted-foreground">Agent publication required. This desk stays empty until a connected, authenticated agent finds and publishes exact catalog matches with sourced retailer offers.</p></div>
+        <span className={`shopping-state-pill hidden shrink-0 sm:inline-flex is-${status === "failed" ? "error" : status === "staged" ? "active" : "idle"}`}>{status === "failed" ? "Action needed" : status === "staged" ? "Staged" : "Agent only"}</span>
       </div>
-      <div className="mt-5 grid gap-2 sm:grid-cols-3">
-        <div className="border-t border-border pt-2.5"><span className="font-mono text-[10px] text-muted-foreground">01</span><p className="mt-1 text-[10px] font-semibold">Resolve identity</p><p className="mt-1 text-[10px] leading-snug text-muted-foreground">Match the request to a real catalog part number.</p></div>
-        <div className="border-t border-border pt-2.5"><span className="font-mono text-[10px] text-muted-foreground">02</span><p className="mt-1 text-[10px] font-semibold">Source offers</p><p className="mt-1 text-[10px] leading-snug text-muted-foreground">Attach up to three recently reported retailer URLs and prices.</p></div>
-        <div className="border-t border-border pt-2.5"><span className="font-mono text-[10px] text-muted-foreground">03</span><p className="mt-1 text-[10px] font-semibold">Publish to this desk</p><p className="mt-1 text-[10px] leading-snug text-muted-foreground">Call <code className="font-mono text-foreground">shopping.search</code> with provenance.</p></div>
+      <div className="shopping-empty-actions"><button type="button" onClick={onStageQuery} disabled={!query.trim()} className="shopping-primary-action"><Search size={12} /> Request this part</button><button type="button" onClick={onStageDesign} disabled={!requiredIds.length} className="shopping-secondary-action"><PackageCheck size={12} /> Source required design</button><span className="shopping-empty-note"><Clock3 size={12} /> Supplier results stay reviewable until added to the cart.</span></div>
+      <div className="shopping-empty-lower">
+        <div className="shopping-empty-flow"><div className="shopping-empty-flow-item"><span>01</span><div><p>Resolve identity</p><small>Match every request to a real catalog part number.</small></div></div><div className="shopping-empty-flow-item"><span>02</span><div><p>Compare offers</p><small>Keep the best supplier options side by side.</small></div></div><div className="shopping-empty-flow-item"><span>03</span><div><p>Build the cart</p><small>Choose quantities only after the exact match is verified.</small></div></div></div>
+        {requiredParts.length > 0 && <div className="shopping-required-parts"><div className="kicker">Parts in this design</div><div className="shopping-required-list">{requiredParts.slice(0, 8).map((part, index) => <div key={`${part?.id}-${index}`} className="shopping-required-part"><span className="shopping-required-index">{String(index + 1).padStart(2, "0")}</span><span className="truncate">{part?.title ?? part?.id}</span><code>{part?.id}</code></div>)}</div>{requiredParts.length > 8 && <span className="shopping-required-more">+ {requiredParts.length - 8} more components</span>}</div>}
       </div>
-      <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-[10px]"><span className="kicker">Agent request</span><code className="min-w-0 truncate font-mono text-foreground">{query || "Enter a part or board above"}</code></div>
+      <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-[10px]"><span className="kicker">Agent request</span><code className="min-w-0 truncate font-mono text-foreground">{query || "Enter a part or board above"}</code><span className="sr-only">Return verified listings through shopping.search.</span></div>
     </div>
   );
 }
@@ -167,6 +194,7 @@ export default function ShoppingWorkspace({ fullPage = false }: { fullPage?: boo
   const requiredIds = useMemo(() => project.components.map((component) => component.definitionId), [project.components]);
   const providers = useMemo(() => [...new Set(shopping.results.map((result) => result.provenance.provider))].join(" · "), [shopping.results]);
   const offerCount = useMemo(() => shopping.results.reduce((count, result) => count + Math.min(result.offers.length, 3), 0), [shopping.results]);
+  const requestStatus = shopping.requestStatus ?? "idle";
 
   const resetToProject = () => {
     if (!requiredIds.length) {
@@ -184,31 +212,48 @@ export default function ShoppingWorkspace({ fullPage = false }: { fullPage?: boo
 
   const stageQuery = () => {
     const trimmed = query.trim();
-    setMessage(trimmed ? `Query staged for the connected WebMCP agent: call shopping.search for “${trimmed}”.` : "Enter an exact part, board, or manufacturer first.");
+    if (!trimmed) {
+      setMessage("Enter an exact part, board, or manufacturer first.");
+      return;
+    }
+    shopping.setHandoff(createShoppingHandoff(trimmed, 1, requiredIds));
+    setMessage(`Lookup staged for “${trimmed}”. The sourcing agent can now compare configured suppliers and return verified offers.`);
+  };
+
+  const stageDesign = () => {
+    if (!requiredIds.length) {
+      setMessage("Add a component to the design before sourcing a bill of materials.");
+      return;
+    }
+    const designQuery = `${project.name} required parts`;
+    shopping.setQuery(designQuery);
+    shopping.setHandoff(createShoppingHandoff(designQuery, 1, requiredIds));
+    setMessage(`Design lookup staged for ${requiredIds.length} required part${requiredIds.length === 1 ? "" : "s"}.`);
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card text-xs">
-      <div className="shrink-0 border-b border-border bg-muted/10 px-3 py-3 sm:px-4">
+    <div className="shopping-workspace flex h-full min-h-0 flex-col bg-card text-xs">
+      <div className="shopping-header shrink-0 border-b border-border bg-muted/10 px-3 py-3 sm:px-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="kicker">Agent procurement</div>
-            <div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold tracking-tight">Parts desk</h2><span className="inline-flex items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> WebMCP only</span></div>
-            <p className="mt-1 max-w-[70ch] text-[10px] leading-relaxed text-muted-foreground">The agent searches the exact design identities, compares agent-sourced offers, and publishes validated listings here. There is no local catalog or price fallback.</p>
+            <div className="kicker">Sourcing workspace</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold tracking-tight">Build-ready parts</h2><span className="shopping-agent-chip"><span className="shopping-agent-dot" /> Agent assisted</span></div>
+            <p className="mt-1 max-w-[70ch] text-[10px] leading-relaxed text-muted-foreground">Compare verified supplier offers for the exact components already in your hardware graph, then move the choices into one build cart.</p>
           </div>
-          <div className="hidden shrink-0 text-right sm:block"><div className="font-mono text-[10px] font-semibold tabular-nums">{shopping.results.length ? `${shopping.results.length} exact part${shopping.results.length === 1 ? "" : "s"}` : "No published listings"}</div><div className="mt-1 text-[10px] text-muted-foreground">{shopping.results.length ? `${offerCount} offers · ${providers}` : "Connected agent required"}</div></div>
+          <div className="shopping-header-stats hidden shrink-0 sm:flex"><div><span className="shopping-stat-value">{project.components.length}</span><span className="shopping-stat-label">in design</span></div><div><span className="shopping-stat-value">{shopping.results.length}</span><span className="shopping-stat-label">verified</span></div><div><span className="shopping-stat-value">{shopping.cart.length}</span><span className="shopping-stat-label">cart lines</span></div></div>
         </div>
         <div className="mt-3">
-          <div className="mb-1.5 flex items-center justify-between gap-2"><label htmlFor="shopping-agent-request" className="kicker">Agent request</label><span className="text-[10px] text-muted-foreground">Enter stages the query; the agent publishes results</span></div>
-          <div className="relative min-w-0"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input id="shopping-agent-request" value={query} onChange={(event) => shopping.setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); stageQuery(); } }} placeholder="Exact part, board, or manufacturer" aria-label="Search exact parts" className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-16 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-foreground/30 focus:ring-2 focus:ring-ring/10" /><kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">Enter</kbd></div>
+          <div className="mb-1.5 flex items-center justify-between gap-2"><label htmlFor="shopping-agent-request" className="kicker">Find a part</label><span className="text-[10px] text-muted-foreground">Enter to stage a supplier lookup</span></div>
+          <div className="shopping-search-row"><div className="relative min-w-0 flex-1"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input id="shopping-agent-request" value={query} onChange={(event) => shopping.setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); stageQuery(); } }} placeholder="Exact part, board, or manufacturer" aria-label="Search exact parts" className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-16 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-foreground/30 focus:ring-2 focus:ring-ring/10" /><kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">Enter</kbd></div><button type="button" onClick={stageQuery} disabled={!query.trim()} className="shopping-request-button"><Search size={12} /> Request sourcing</button></div>
         </div>
-        <div className="mt-2 flex items-start gap-2 rounded-md border border-border/70 bg-card/70 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" /><span><strong className="font-semibold text-foreground">Validated listings only.</strong> A connected, authenticated WebMCP agent must provide the catalog identity, exact part number, provider, recent timestamp, HTTPS URL, currency, and offer price before anything appears or enters the cart. Confirm stock and final pricing with the retailer.</span></div>
+        <SourcingProgress status={requestStatus} resultCount={shopping.results.length} projectPartCount={project.components.length} />
+        <div className="shopping-trust-note mt-2 flex items-start gap-2 rounded-md border border-border/70 bg-card/70 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" /><span><strong className="font-semibold text-foreground">Verified before checkout.</strong> A listing needs the exact catalog identity, part number, provider, recent timestamp, secure retailer URL, currency, and offer price before it can enter the cart. Confirm stock, shipping, and final pricing with the retailer.</span></div>
         {(message || shopping.publicationError) && <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-relaxed text-amber-700 dark:text-amber-300" role="status"><CircleAlert size={13} className="mt-0.5 shrink-0" /><span>{shopping.publicationError ?? message}</span></div>}
       </div>
 
       <div className={`${fullPage ? "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-1" : "flex min-h-0 flex-1 flex-col"}`}>
         <section className="shopping-results-scroll min-h-0 overflow-y-auto px-3 py-3 sm:px-4" aria-label="Agent sourced parts">
-          {shopping.results.length === 0 ? <AgentEmptyState query={query} /> : (
+          {shopping.results.length === 0 ? <AgentEmptyState query={query} requiredIds={requiredIds} status={requestStatus} onStageQuery={stageQuery} onStageDesign={stageDesign} /> : (
             <div className="space-y-3">
               <div className="flex items-end justify-between gap-3 border-b border-border pb-2"><div><div className="kicker">Validated results</div><p className="mt-1 text-[10px] text-muted-foreground">{shopping.results.length} exact catalog match{shopping.results.length === 1 ? "" : "es"} · {offerCount} sourced offer{offerCount === 1 ? "" : "s"}</p></div><div className="text-right text-[10px] text-muted-foreground"><div>{providers}</div><div className="mt-1 font-mono">{dateLabel(shopping.lastSearchAt)}</div></div></div>
               {shopping.results.map((result) => {

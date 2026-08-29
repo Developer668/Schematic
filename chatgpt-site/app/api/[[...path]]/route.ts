@@ -15,6 +15,7 @@ import {
   unauthorized,
 } from "../../../../functions/api/_runtime";
 import { siteAuthEnv } from "../site-auth";
+import { partsSearch } from "../../../../functions/api/parts/search";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,7 @@ function apiDocs(request: Request) {
       componentSearch: "GET /api/components/search?q=esp32",
       component: "GET /api/components/:catalogId",
       componentPorts: "GET /api/components/ports/:catalogId",
-      parts: "GET /api/parts/search (agent-only; listings are published through WebMCP)",
+      parts: "GET /api/parts/search (server-side provider fallback candidates; final listings are published through WebMCP)",
       compile: "POST /api/compile",
       importAnalyze: "POST /api/components/import/analyze",
       simulationRun: "POST /api/simulation/run",
@@ -89,15 +90,7 @@ export async function GET(request: Request, context: RouteContext) {
   if (path.startsWith("components/ports/")) return componentPorts(request, env, path.slice("components/ports/".length));
   if (path.startsWith("components/") && path.split("/").length === 2) return componentById(request, env, path.slice("components/".length));
   if (path === "parts/search") {
-    if (!(await requireApiIdentity({ request, env }))) return unauthorized(request);
-    return jsonResponse(request, {
-      code: "PARTS_PROVIDER_NOT_CONFIGURED",
-      message: "Live parts listings are agent-only on the ChatGPT Site.",
-      query: new URL(request.url).searchParams.get("query") ?? "",
-      quantity: Number(new URL(request.url).searchParams.get("quantity") ?? 1),
-      liveOffers: false,
-      hint: "Use the shopping.search WebMCP tool to publish exact, provenance-backed listings.",
-    }, 503);
+    return partsSearch(request, env);
   }
   if (path === "simulation/state") return simulationState(request, env);
   return notFound(request);

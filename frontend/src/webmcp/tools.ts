@@ -9,7 +9,7 @@ import { useSelectionStore } from "../store/useSelectionStore.ts";
 import { useWorkspaceStore, type BottomPanel } from "../store/useWorkspaceStore.ts";
 import { useValidationStore, validateFirmwareFiles, validateProject } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
-import { useShoppingStore, type AgentPublication, type PartOffer, type ShoppingResult } from "../store/useShoppingStore.ts";
+import { createShoppingHandoff, useShoppingStore, type AgentPublication, type PartOffer, type ShoppingResult } from "../store/useShoppingStore.ts";
 import { waitForProjectPersistence } from "../store/projectPersistence.ts";
 import { runFirmwareRuntime } from "../simulation/runtime.ts";
 import { hasPortableButtonLedContract, PortableHarnessUnavailableError, runPortableButtonLedHarness } from "../simulation/portableHarness.ts";
@@ -46,6 +46,55 @@ type TrustedToolContext = {
   subject: string;
   environment: string;
 };
+
+function toolFailure(code: string, message: string, data: Record<string, unknown> = {}) {
+  return {
+    content: [{ type: "text", text: message }],
+    isError: true,
+    error: { code, message, retryable: false },
+    data: { code, ...data },
+  };
+}
+
+function connectionEndpointDetails(project: HardwareGraph, componentId: string, portId: string) {
+  const component = project.components.find((item) => item.id === componentId);
+  const definition = component ? getCatalogComponent(component.definitionId) : undefined;
+  const port = definition?.ports.find((item) => item.id === portId);
+  return {
+    componentId,
+    portId,
+    exists: Boolean(component && port),
+    definitionId: component?.definitionId,
+    port: port ? { id: port.id, name: port.name, domain: port.domain, direction: port.direction } : undefined,
+  };
+}
+
+function connectionFailure(error: unknown, requested: { source: { componentId: string; portId: string }; target: { componentId: string; portId: string } }, project: HardwareGraph) {
+  const message = error instanceof Error ? error.message : String(error);
+  const source = connectionEndpointDetails(project, requested.source.componentId, requested.source.portId);
+  const target = connectionEndpointDetails(project, requested.target.componentId, requested.target.portId);
+  const code = message.includes("existing component ports")
+    ? "ENDPOINT_NOT_FOUND"
+    : message.includes("itself")
+      ? "SELF_CONNECTION"
+      : message.includes("already connected")
+        ? "DUPLICATE_CONNECTION"
+        : message.includes("Incompatible domains")
+          ? "INCOMPATIBLE_DOMAINS"
+          : "CONNECTION_REJECTED";
+  const hint = code === "ENDPOINT_NOT_FOUND"
+    ? "Use the instance id returned by component.add and a port id returned by component.list_ports."
+    : code === "INCOMPATIBLE_DOMAINS"
+      ? "The graph keeps typed electrical domains strict; choose compatible ports or add the required interface/level-shifter component."
+      : code === "DUPLICATE_CONNECTION"
+        ? "Read connection.get_connections before retrying; the wire may already exist even if the canvas did not refresh."
+        : undefined;
+  return toolFailure(code, `Connection failed [${code}]: ${message}${hint ? ` ${hint}` : ""}`, {
+    requested,
+    endpoints: { source, target },
+    ...(hint ? { hint } : {}),
+  });
+}
 
 const BLUEPRINTS: Record<string, unknown> = { "meta-glasses": metaGlassesBlueprint };
 
@@ -644,36 +693,68 @@ const tools: ToolDef[] = [
   },
   {
     name: "component.list_ports",
-    description: "List ports for a component instance (or definition if no instance)",
-    inputSchema: { type: "object", properties: { componentId: { type: "string", description: "Instance id or definition id" } }, required: ["componentId"] },
+    description: "List ports for a component instance (or catalog definition). Use componentId; instanceId is accepted as a compatibility alias.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        componentId: { type: "string", description: "Instance id or catalog definition id" },
+        instanceId: { type: "string", description: "Compatibility alias for componentId" },
+      },
+      anyOf: [{ required: ["componentId"] }, { required: ["instanceId"] }],
+    },
     annotations: { readOnlyHint: true },
-    execute: async ({ componentId }) => {
-      const inst = useProjectStore.getState().project.components.find((c) => c.id === componentId);
-      const defId = inst?.definitionId ?? componentId;
+    execute: async ({ componentId, instanceId }) => {
+      const requestedId = typeof componentId === "string" && componentId.trim() ? componentId.trim() : typeof instanceId === "string" ? instanceId.trim() : "";
+      if (!requestedId) return toolFailure("INVALID_COMPONENT_ID", "component.list_ports needs a componentId or instanceId string.");
+      const inst = useProjectStore.getState().project.components.find((c) => c.id === requestedId);
+      const defId = inst?.definitionId ?? requestedId;
       const def = getCatalogComponent(defId);
-      if (!def) return { content: [{ type: "text", text: `Unknown ${componentId}` }], isError: true };
+      if (!def) return toolFailure("UNKNOWN_COMPONENT", `Unknown component or catalog definition ${requestedId}.`, { componentId: requestedId });
       return { content: [{ type: "text", text: JSON.stringify(def.ports, null, 2) }], data: def.ports };
     },
   },
   {
     name: "connection.connect",
-    description: "Connect two ports: source component.port → target component.port. Validates typed domains.",
+    description: "Connect two existing ports. Use instance IDs from component.add and port IDs from component.list_ports; source and target may be supplied in either direction and the graph will orient them. Typed domains, self-wiring, duplicates, and missing endpoints are rejected with structured repair details.",
     inputSchema: {
       type: "object",
       properties: {
-        sourceComponentId: { type: "string" },
-        sourcePortId: { type: "string" },
-        targetComponentId: { type: "string" },
-        targetPortId: { type: "string" },
+        sourceComponentId: { type: "string", minLength: 1, description: "Instance id returned by component.add" },
+        sourcePortId: { type: "string", minLength: 1, description: "Port id returned by component.list_ports" },
+        targetComponentId: { type: "string", minLength: 1, description: "Instance id returned by component.add" },
+        targetPortId: { type: "string", minLength: 1, description: "Port id returned by component.list_ports" },
+        source: { type: "object", description: "Compatibility shape: {componentId|instanceId, portId}", properties: { componentId: { type: "string" }, instanceId: { type: "string" }, portId: { type: "string" } }, required: ["portId"] },
+        target: { type: "object", description: "Compatibility shape: {componentId|instanceId, portId}", properties: { componentId: { type: "string" }, instanceId: { type: "string" }, portId: { type: "string" } }, required: ["portId"] },
       },
-      required: ["sourceComponentId", "sourcePortId", "targetComponentId", "targetPortId"],
+      anyOf: [
+        { required: ["sourceComponentId", "sourcePortId", "targetComponentId", "targetPortId"] },
+        { required: ["source", "target"] },
+      ],
     },
-    execute: async ({ sourceComponentId, sourcePortId, targetComponentId, targetPortId }) => {
+    execute: async ({ sourceComponentId, sourcePortId, targetComponentId, targetPortId, source, target }) => {
+      const sourceObject = source && typeof source === "object" ? source as Record<string, unknown> : {};
+      const targetObject = target && typeof target === "object" ? target as Record<string, unknown> : {};
+      const requested = {
+        source: { componentId: typeof sourceComponentId === "string" && sourceComponentId.trim() ? sourceComponentId.trim() : String(sourceObject.componentId ?? sourceObject.instanceId ?? "").trim(), portId: typeof sourcePortId === "string" && sourcePortId.trim() ? sourcePortId.trim() : String(sourceObject.portId ?? "").trim() },
+        target: { componentId: typeof targetComponentId === "string" && targetComponentId.trim() ? targetComponentId.trim() : String(targetObject.componentId ?? targetObject.instanceId ?? "").trim(), portId: typeof targetPortId === "string" && targetPortId.trim() ? targetPortId.trim() : String(targetObject.portId ?? "").trim() },
+      };
+      if (!requested.source.componentId || !requested.source.portId || !requested.target.componentId || !requested.target.portId) {
+        return toolFailure("INVALID_ENDPOINT", "connection.connect needs four non-empty strings: sourceComponentId, sourcePortId, targetComponentId, and targetPortId.", { requested });
+      }
+      const projectBefore = useProjectStore.getState().project;
       try {
-        const { id } = useProjectStore.getState().connectPorts({ componentId: sourceComponentId, portId: sourcePortId }, { componentId: targetComponentId, portId: targetPortId });
-        return { content: [{ type: "text", text: `Connected ${sourceComponentId}.${sourcePortId} → ${targetComponentId}.${targetPortId} as ${id}` }], data: { connectionId: id } };
+        const created = useProjectStore.getState().connectPorts(requested.source, requested.target);
+        return {
+          content: [{ type: "text", text: `Connected ${created.source.componentId}.${created.source.portId} → ${created.target.componentId}.${created.target.portId} as ${created.id} (${created.domain})` }],
+          data: {
+            connectionId: created.id,
+            domain: created.domain,
+            requested,
+            resolved: { source: created.source, target: created.target },
+          },
+        };
       } catch (e) {
-        return { content: [{ type: "text", text: `Failed: ${(e as Error).message}` }], isError: true };
+        return connectionFailure(e, requested, projectBefore);
       }
     },
   },
@@ -1067,15 +1148,16 @@ const tools: ToolDef[] = [
   },
   {
     name: "shopping.search",
-    description: "Publish exact part listings found by an authenticated WebMCP shopping agent. The UI and frontend never generate fallback listings or retailer links.",
+    description: "Search the configured parts-provider fallback chain when listings are omitted, then publish exact listings into the Parts desk after verifying them. A provider lookup never invents catalog identities or retailer links; return the handoff JSON to another agent when publication is unavailable.",
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string", description: "Exact part, board, manufacturer, or catalog id" },
-        quantity: { type: "number", description: "Required quantity" },
+        quantity: { type: "integer", minimum: 1, maximum: 999, description: "Required quantity" },
         listings: {
           type: "array",
           minItems: 1,
+          maxItems: 24,
           description: "Agent-found listings only; every item must identify one canonical catalog part and its exact sourced offers.",
           items: {
             type: "object",
@@ -1103,38 +1185,55 @@ const tools: ToolDef[] = [
                   },
                 },
               },
-              alternatives: { type: "array", description: "Optional context-aware alternatives; publish each alternative as its own exact listing too." },
+              alternatives: { type: "array", maxItems: 3, description: "Optional context-aware alternatives; publish each alternative as its own exact listing too." },
             },
           },
         },
-        publication: { type: "object", description: "Sourcing provenance supplied by the agent. Authentication and agent identity come from the verified WebMCP session, not from these fields. publishedAt must be recent.", properties: { provider: { type: "string" }, publishedAt: { type: "string", format: "date-time" } }, required: ["provider", "publishedAt"] },
+        publication: { type: "object", description: "Sourcing provenance supplied by the agent. Authentication and agent identity come from the verified WebMCP session, not from these fields. publishedAt must be recent.", properties: { provider: { type: "string", minLength: 1 }, publishedAt: { type: "string", format: "date-time" } }, required: ["provider", "publishedAt"] },
       },
-      required: ["listings", "publication"],
+      description: "Omit listings/publication to run the provider lookup and receive a handoff request. Include both to publish verified results.",
     },
     annotations: { untrustedContentHint: true },
-    execute: async ({ query = "", quantity = 1, listings, publication, __trustedAuth }) => {
+    execute: async ({ query = "", quantity = 1, listings, publication, __trustedAuth }, { signal } = {}) => {
       const requestedQuantity = Math.max(1, Math.min(999, Math.round(Number(quantity) || 1)));
       const searchQuery = String(query ?? "");
       const shopping = useShoppingStore.getState();
       shopping.setQuery(searchQuery);
+      const requiredCatalogIds = useProjectStore.getState().project.components.map((component) => component.definitionId);
+      const handoff = createShoppingHandoff(searchQuery, requestedQuantity, requiredCatalogIds);
+      const trustedAuth = __trustedAuth as TrustedToolContext | undefined;
       if (!Array.isArray(listings) || listings.length === 0) {
         shopping.setResults([]);
-        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true };
-        return { content: [{ type: "text", text: "Parts shopping requires a connected, authenticated WebMCP agent to publish listings. No local or provider fallback was used." }], data, isError: true };
+        shopping.setHandoff(handoff);
+        let providerFallback: Record<string, unknown> = { attempted: false, reason: "trusted_webmcp_session_required" };
+        if (trustedAuth?.authenticated && trustedAuth.subject) {
+          const lookup = await fetchJson(`/api/parts/search?query=${encodeURIComponent(searchQuery)}&quantity=${requestedQuantity}`, { signal });
+          providerFallback = {
+            attempted: true,
+            available: Boolean(lookup.response?.ok),
+            ...(lookup.data && typeof lookup.data === "object" ? lookup.data : {}),
+            ...(lookup.error ? { error: lookup.error } : {}),
+          };
+        }
+        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff, providerFallback };
+        const hasCandidates = Array.isArray(providerFallback.results) && providerFallback.results.length > 0;
+        const message = hasCandidates
+          ? "Provider candidates are ready. Verify canonical catalog IDs, exact part numbers, timestamps, and HTTPS offers, then call shopping.search again with listings and publication."
+          : "Parts shopping requires a connected, authenticated WebMCP agent to publish listings. The provider fallback was checked and the handoff JSON is ready for another agent.";
+        return toolFailure("AGENT_PUBLICATION_REQUIRED", message, data);
       }
-      const trustedAuth = __trustedAuth as TrustedToolContext | undefined;
       if (!trustedAuth?.authenticated || !trustedAuth.subject) {
         shopping.setResults([]);
-        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true };
-        return { content: [{ type: "text", text: "Listing publication was rejected because no trusted WebMCP session was present." }], data, isError: true };
+        shopping.setHandoff(handoff);
+        return toolFailure("AUTH_REQUIRED", "Listing publication was rejected because no trusted WebMCP session was present. The handoff JSON can be resumed after authentication.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff });
       }
       const requestedPublication = publication && typeof publication === "object" ? publication as Record<string, unknown> : {};
       const provider = String(requestedPublication.provider ?? "").trim();
       const publishedAt = String(requestedPublication.publishedAt ?? "").trim();
       if (!provider || !publishedAt) {
         shopping.setResults([]);
-        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true };
-        return { content: [{ type: "text", text: "Each WebMCP publication must include the parts provider and the time the agent sourced the listings." }], data, isError: true };
+        shopping.setHandoff(handoff);
+        return toolFailure("PUBLICATION_METADATA_REQUIRED", "Each WebMCP publication must include the parts provider and the time the agent sourced the listings.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff });
       }
       const trustedPublication: AgentPublication = {
         authenticated: true,
@@ -1157,6 +1256,7 @@ const tools: ToolDef[] = [
         rejected: publicationResult.rejected,
         results,
         requiresWebMCPAgent: true,
+        handoff: publicationResult.accepted ? null : handoff,
       };
       if (!publicationResult.accepted) {
         return { content: [{ type: "text", text: publicationResult.message ?? "The WebMCP agent publication was rejected." }], data, isError: true };
@@ -1175,7 +1275,7 @@ const tools: ToolDef[] = [
     execute: async () => {
       const shopping = useShoppingStore.getState();
       const quote = shopping.getQuote();
-      const state = { query: shopping.query, results: shopping.results, cart: shopping.cart, budget: shopping.budget, lastSearchAt: shopping.lastSearchAt, quote };
+      const state = { query: shopping.query, results: shopping.results, cart: shopping.cart, budget: shopping.budget, lastSearchAt: shopping.lastSearchAt, requestStatus: shopping.requestStatus, handoff: shopping.handoff, quote };
       return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }], data: state };
     },
   },
@@ -1377,13 +1477,18 @@ function installModelContextProducerPolyfill() {
 }
 
 export async function registerWebMCPTools() {
+  // React StrictMode and hot reload can invoke startup twice. Abort the old
+  // lease before creating a new one so a native registry never accumulates
+  // duplicate callbacks for the same tool name.
+  for (const controller of controllers) controller.abort();
+  controllers = [];
   const generation = ++registrationGeneration;
   // Auth and persistence share startup gates with App. Waiting here keeps a
   // direct Site import safe as well as the Vite entrypoint.
   await waitForAuth();
   await waitForProjectPersistence();
   if (generation !== registrationGeneration) return;
-  useWebMCPStore.getState().setRegistration({ state: "checking", registeredCount: 0, error: undefined });
+  useWebMCPStore.getState().setRegistration({ state: "checking", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: undefined });
   const existingModelContext: any = (document as any).modelContext ?? (navigator as any).modelContext;
   const hasNativeModelContext = typeof existingModelContext?.registerTool === "function";
   installModelContextProducerPolyfill();
@@ -1393,8 +1498,14 @@ export async function registerWebMCPTools() {
   // document.modelContext registration below; this same-origin object is not a
   // cross-origin mutation bridge.
   (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(t, args, executionSignal(context))]));
+  (window as any).__schematicWebMCP = {
+    version: "schematic-webmcp.v1",
+    declaredToolNames: getRegisteredToolNames(),
+    getRegistration: () => useWebMCPStore.getState().registration,
+    listTools: () => getRegisteredToolNames(),
+  };
   if (!mc || typeof mc.registerTool !== "function") {
-    useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, error: "The browser did not expose document.modelContext." });
+    useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: "The browser did not expose document.modelContext." });
     console.warn("[WebMCP] modelContext not available — run in the supported in-app browser, or use the test/degraded-runtime fallback");
     return;
   }
@@ -1426,11 +1537,28 @@ export async function registerWebMCPTools() {
   if ("ontoolchange" in mc) {
     mc.ontoolchange = () => console.log("[WebMCP] toolset changed");
   }
+  let discoveredCount = 0;
+  let discovery: "verified" | "unverified" | "polyfill" = hasNativeModelContext ? "unverified" : "polyfill";
+  if (typeof mc.getTools === "function") {
+    try {
+      const discovered = await mc.getTools();
+      discoveredCount = Array.isArray(discovered) ? discovered.filter((tool: any) => typeof tool?.name === "string").length : 0;
+      if (hasNativeModelContext && discoveredCount === registeredCount && registeredCount === WEBMCP_TOOL_COUNT) discovery = "verified";
+    } catch (error) {
+      console.warn("[WebMCP] native tool discovery check failed:", error);
+    }
+  } else if (!hasNativeModelContext) {
+    discoveredCount = registeredCount;
+  }
   useWebMCPStore.getState().setRegistration({
     state: registrationErrors > 0 ? "error" : hasNativeModelContext ? "native" : "fallback",
     registeredCount,
+    declaredCount: WEBMCP_TOOL_COUNT,
+    discoveredCount,
+    discovery,
     ...(registrationErrors > 0 ? { error: `${registrationErrors} tool registration${registrationErrors === 1 ? "" : "s"} failed.` } : { error: undefined }),
   });
+  (window as any).__schematicWebMCP.getRegistration = () => useWebMCPStore.getState().registration;
   console.log(`[WebMCP] ready — ${WEBMCP_TOOL_COUNT} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
 }
 
