@@ -16,6 +16,7 @@ export interface AuthSession {
 const SESSION_EVENT = "schematic-session";
 let cachedSession: AuthSession | null | undefined;
 let sessionRequest: Promise<AuthSession | null> | null = null;
+let authReadyPromise: Promise<AuthSession | null> | null = null;
 let cachedSessionExpiresAt = 0;
 const SESSION_REFRESH_SKEW_MS = 30_000;
 
@@ -89,14 +90,15 @@ function announceSession() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(SESSION_EVENT));
 }
 
-export async function getAuthSession(force = false): Promise<AuthSession | null> {
+export async function getAuthSession(force = false, signal?: AbortSignal): Promise<AuthSession | null> {
+  if (signal?.aborted) throw new DOMException("The auth session request was aborted", "AbortError");
   const sessionFresh = !cachedSession?.token || !cachedSessionExpiresAt || cachedSessionExpiresAt - Date.now() > SESSION_REFRESH_SKEW_MS;
   if (!force && cachedSession !== undefined && sessionFresh) return cachedSession;
   if (!force && sessionRequest) return sessionRequest;
 
   sessionRequest = (async () => {
     try {
-      const response = await fetch(authUrl("/api/auth/session"), { credentials: "include", headers: { Accept: "application/json" } });
+      const response = await fetch(authUrl("/api/auth/session"), { credentials: "include", headers: { Accept: "application/json" }, signal });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(`Session endpoint returned HTTP ${response.status}`);
       const session = normalizeSession(payload);
@@ -120,7 +122,13 @@ export async function getAuthSession(force = false): Promise<AuthSession | null>
 }
 
 export function initAuth() {
-  void getAuthSession();
+  if (!authReadyPromise) authReadyPromise = getAuthSession();
+  return authReadyPromise;
+}
+
+/** Shared startup gate for auth-aware hydration and native tool registration. */
+export function waitForAuth(): Promise<AuthSession | null> {
+  return initAuth();
 }
 
 export function useAuth() {
@@ -147,8 +155,8 @@ export function useAuth() {
   return { session, loading, isAuthenticated: Boolean(session) };
 }
 
-export async function getAuthHeaders(force = false): Promise<Record<string, string>> {
-  const session = await getAuthSession(force);
+export async function getAuthHeaders(force = false, signal?: AbortSignal): Promise<Record<string, string>> {
+  const session = await getAuthSession(force, signal);
   return session?.token ? { Authorization: `Bearer ${session.token}` } : {};
 }
 
@@ -183,6 +191,7 @@ export function authLogoutUrl(returnTo = "/") {
 export function signOut() {
   cachedSession = null;
   sessionRequest = null;
+  authReadyPromise = null;
   cachedSessionExpiresAt = 0;
   announceSession();
   if (typeof window !== "undefined") window.location.assign(authLogoutUrl());

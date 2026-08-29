@@ -77,7 +77,7 @@ export async function GET(request: Request, context: RouteContext) {
   const env = await siteAuthEnv();
 
   if (path === "health") {
-    return jsonResponse(request, { status: "ok", version: "1.0.0", runtime: "chatgpt-site-behavioral", api_boundary: "same-origin" });
+    return jsonResponse(request, { status: "ok", version: "1.1.0", runtime: "chatgpt-site-behavioral", api_boundary: "same-origin" });
   }
   if (path === "docs") return apiDocs(request);
   if (path === "simulation/ws" || path === "auth/ws-ticket") {

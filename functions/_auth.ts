@@ -7,6 +7,8 @@ export type SessionIdentity = {
 
 export type AuthEnv = {
   SCHEMATIC_AUTH_MODE?: string;
+  /** Hosted deployments set this explicitly so secret policy is fail-closed. */
+  SCHEMATIC_DEPLOYMENT_ENV?: string;
   SCHEMATIC_TRUST_PLATFORM_HEADERS?: string | boolean;
   SCHEMATIC_PLATFORM_INGRESS_SECRET?: string;
   SCHEMATIC_SESSION_SECRET?: string;
@@ -48,7 +50,16 @@ function enabled(value: string | boolean | undefined) {
 async function hmacKey(env: AuthEnv) {
   const secret = String(env.SCHEMATIC_SESSION_SECRET ?? "");
   if (!secret) return null;
-  return crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+  const deployment = String(env.SCHEMATIC_DEPLOYMENT_ENV ?? "").trim().toLowerCase();
+  const authMode = mode(env);
+  const hosted = deployment === "hosted" || deployment === "production"
+    || authMode === "production" || authMode === "cloudflare-access" || authMode === "chatgpt-sites";
+  const secretBytes = new TextEncoder().encode(secret);
+  // HMAC accepts short keys, but a hosted session issuer must not silently
+  // downgrade to a trivially guessable signing secret. Local development can
+  // still use a compact test secret when it opts into development mode.
+  if (hosted && secretBytes.byteLength < 32) return null;
+  return crypto.subtle.importKey("raw", secretBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 
 export async function issueSessionToken(identity: SessionIdentity, env: AuthEnv, options: { audience?: string; ttlSeconds?: number } = {}) {

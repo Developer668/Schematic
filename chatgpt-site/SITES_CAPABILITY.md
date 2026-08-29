@@ -29,8 +29,11 @@ Verified locally without deployment:
 - the static worker fixture is present and contains no network, WebSocket, or dynamic-code execution;
 - the small WASM fixture validates in Node and is below 1 KiB;
 - the capability page contains all six browser probes and no compile/simulation API call;
+- `npm run build` runs `scripts/verify-build-assets.mjs`, which checks the built worker, WASM, metadata JSON, preview PNG, and explicit `/_headers` 404 route;
 - the project-storage package has unit coverage for repository and migration behavior;
 - the Site TypeScript/build checks can compile the new route and package alias once the existing Site build prerequisites are available.
+
+Known local-preview blocker: with Vinext `1.0.0-beta.3`, `vinext start` currently routes these public asset requests through the catch-all HTML page instead of serving `dist/client` files. Treat the deterministic build-artifact check as authoritative until the preview static-file routing is fixed; this does not affect the checked-in asset outputs.
 
 Not verifiable in the current non-browser local process:
 
@@ -42,7 +45,7 @@ Not verifiable in the current non-browser local process:
 - Web Serial/WebUSB permissions;
 - real browser memory limits for future compiler bundles.
 
-The first five items must be run at `/capabilities` in the published Site or an equivalent HTTPS browser preview before treating the Site capability track as accepted. This change does not deploy the Site.
+The first five items must be run at `/capabilities` in the published Site before treating the Site capability track as accepted. Record the result with the deployed Site version; a local build alone is not production acceptance.
 
 ## Release assumptions
 

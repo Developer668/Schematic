@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "pretest": "pnpm --filter @schematic/firmware-harness verify:wasm",
     "test": "vitest run",
     "test:watch": "vitest",

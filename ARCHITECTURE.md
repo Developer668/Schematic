@@ -1,110 +1,181 @@
-# Schematic Architecture — Agent-Native Hardware Workbench
+# Schematic architecture — ChatGPT Site release path
 
-> Implements `HardwareWebMCP.md`. Three reusable layers: universal component format → per-engine adapter → typed connection.
+Schematic's primary release is the authenticated ChatGPT Site:
 
-## Diagram
+`ChatGPT in-app browser → chatgpt-site wrapper → shared React frontend/store → 42 WebMCP tools → browser runtime and same-origin Site API`
 
+The canonical live Site is [schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site). Production acceptance is performed in the ChatGPT in-app browser that will judge the submission.
+
+## Canonical request and execution path
+
+```text
+ChatGPT in-app browser
+        │  verified ChatGPT identity; native WebMCP host
+        ▼
+chatgpt-site/app/[[...path]]/SchematicClient.tsx
+        │  dynamic client-only import
+        ▼
+frontend/src/App.tsx
+        │
+        ├── shared React UI and Zustand stores
+        │     project graph · selection · workspace · validation
+        │     simulation · shopping · browser-local persistence
+        │
+        ├── frontend/src/webmcp/tools.ts
+        │     42 semantic tools; the same store actions as the UI
+        │
+        └── simulation.run
+              ├── exact button→LED recognizer
+              │     packages/firmware-harness/generated/button-led.wasm
+              │     portable C core · C/WASM ABI v2 · verified SHA-256
+              │
+              └── bounded TypeScript behavioral interpreter
+                    graph/topology checks · protocol/device adapters
+
+Same-origin Site API (/api)
+        │
+        ▼
+chatgpt-site/app/api/[[...path]]/route.ts
+        │  imports functions/api/_runtime.ts directly
+        ▼
+catalog · validation · behavioral HTTP simulation · compile preflight
 ```
-                    BROWSER (React + TS + Vite)
-  ┌─────────────────────────────────────────────────────────┐
-  │  Component Library   Hardware Canvas  Inspector+Validate │
-  │                          │                               │
-  │                    @xyflow/react                         │
-  │                          │                               │
-  │  Monaco Workspace   Hardware Graph   Console/Serial       │
-  │                          │                               │
-  │                     Zustand Stores                        │
-  │                          │                               │
-  │                    WebMCP Tools (18)                      │
-  └──────────────────────────┬───────────────────────────────┘
-                             │  HTTP + WebSocket
-  ┌──────────────────────────┴───────────────────────────────┐
-  │                Python FastAPI Orchestrator                │
-  │  Registry  Validator  Importer  Scheduler  Session         │
-  │      ┌─────────┬──────────┬─────────┬───────┐             │
-  │      ▼         ▼          ▼         ▼       ▼             │
-  │   Renode   ngspice   Wasmtime   QEMU*   Verilator*        │
-  │   firmware electrical sandbox   Linux    HDL              │
-  │   (* = stub, architecture ready)                         │
-  └───────────────────────────────────────────────────────────┘
-```
 
-## Layer 1 — Universal Hardware Graph (TS owns canonical state)
+The wrapper owns the Site route and identity boundary; it does not fork the
+workbench. The React application, graph model, stores, tool callbacks, and
+browser runtime are shared with the standalone frontend. The API route is also
+same-origin: it imports the tested runtime functions from
+`functions/api/_runtime.ts` instead of forwarding requests to another service.
 
-`packages/hardware-graph/src/types.ts`:
-- `HardwareProject`, `ComponentInstance`, `ComponentDefinition`, `HardwarePort`, `Connection`, `FirmwareTarget`, `SimulationConfig`.
-- `PortDomain` union (power, gpio, adc, pwm, i2c, spi, uart, usb, can, pcie, rf, mechanical…).
-- Zod schemas in `schemas.ts` + `graph.ts` helpers (`createEmptyProject`, `addComponent`, `connectPorts`, `validateProjectShape`).
-- React Flow only renders; translation `project ↔ nodes/edges` is pure function.
+## Boundaries and data flow
 
-## Layer 2 — Typed Ports & Validation
+1. The Site protects `/studio`, `/parts`, and `/settings` with the ChatGPT
+   identity boundary. `/api/auth/session` exchanges that verified identity for
+   a short-lived Schematic session signed with the server-only
+   `SCHEMATIC_SESSION_SECRET`.
+2. `SchematicClient` loads the shared `frontend/src/App.tsx`. The app hydrates
+   the active project from the browser-local project repository (IndexedDB,
+   with localStorage compatibility migration), scoped to the verified user
+   room. It broadcasts changes to same-origin tabs; this is not cloud backup or
+   cross-device synchronization.
+3. Human UI actions and WebMCP callbacks call the same Zustand store methods.
+   `frontend/src/webmcp/tools.ts` registers exactly 42 tools when the host
+   exposes the native `document.modelContext`/`navigator.modelContext` API.
+   Compatibility shims exist for local tests and constrained browsers; they are
+   not evidence of native WebMCP discovery by a judge.
+4. A tool result is structured (`content`, optional `data`, and `isError`) and
+   is reflected in the WebMCP activity panel. Mutating tools change the active
+   browser-local room; read-only tools report state without changing the graph.
+5. `simulation.run` validates the graph and chooses the narrowest honest
+   execution path:
+   - A source that matches the exact button→LED grammar is executed by the
+     checked-in C/WASM artifact. The harness resolves the actual board pins and
+     connected button/LED endpoints, uses ABI version 2, and returns the
+     artifact SHA-256.
+   - Other supported source shapes use the bounded TypeScript interpreter and
+     explicit protocol/device adapters. Results identify unsupported APIs and
+     model limits; a generic pin map is not silently promoted to a device
+     model.
+   - A source or device outside those contracts returns an explicit
+     unsupported/unavailable result. The Site never claims arbitrary C/C++,
+     MCU-library, analog, RF, or binary execution.
+6. When a tool needs the API, the client calls the Site's same-origin `/api`
+   route. The route reuses `_runtime.ts` for catalog lookup, validation, HTTP
+   behavioral simulation, session checks, and compile preflight. The Site does
+   not launch a compiler subprocess, native simulator, or raw WebSocket.
 
-`packages/validation/src/index.ts`:
-- `validateProject(project, lookup)` checks 15+ rules: wrong voltage, missing ground, output→output, I2C collision, missing pull-ups, TX→TX, SPI CS, power insufficiency, USB host-host, PCIe EP-EP, RF impedance, physical collision, thermal.
-- Returns `ValidationResult { valid, issues[] }` with `autoFix` hints. UI shows exactly what's modeled (never blanket “fully supported”).
-- Bridge: `frontend/src/simulation/bridges.ts` provides generic bridges (GPIO, I2C generic `{protocol,address,operation,register,length,time_ns}`, SPI, UART, CAN, USB, RF…) — any sensor can respond.
+## Capability matrix
 
-## Layer 3 — Universal Component Format (.hwpkg)
+| Surface                                           | ChatGPT Site status                   | Boundary / truthful interpretation                                                                                                                                                                           |
+| ------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Site wrapper and shared app                       | Production wired                      | The Site route dynamically loads the shared React app; there is one graph/store implementation.                                                                                                              |
+| Hardware graph, catalog, typed wiring, validation | Production wired                      | Components can be searched, placed, inspected, connected, saved, and validated. Device execution still depends on the model contract.                                                                        |
+| Native WebMCP                                     | Integrated, host-dependent            | `tools.ts` exposes 42 native registrations when the in-app browser supplies `modelContext`; local compatibility shims are test aids, not a native-agent acceptance result.                                   |
+| Button→LED C/WASM harness                         | Production wired, deliberately narrow | Exact recognized source only; portable C core through C/WASM ABI v2, deterministic virtual I/O, artifact hash, pressed/released evidence.                                                                    |
+| TypeScript behavioral interpreter                 | Production wired                      | Bounded Arduino-like execution and graph-aware protocol/device adapters; supports only the APIs and model contracts reported in the result.                                                                  |
+| Same-origin Site API                              | Production wired                      | `chatgpt-site/app/api/.../route.ts` imports `functions/api/_runtime.ts`; health, catalog, validation, behavioral HTTP simulation, and compile preflight are available.                                       |
+| Firmware compilation on the Site                  | Preflight only                        | `firmware.compile` checks source/target and reports that a binary compiler is unavailable. It must not be presented as an arbitrary binary compiler.                                                         |
+| Project persistence                               | Production wired                      | Browser-local IndexedDB repository, localStorage migration, verified-user room keying, and same-origin tab synchronization.                                                                                  |
+| Parts sourcing                                    | Agent-only                            | `shopping.search` accepts only authenticated WebMCP publications with canonical catalog IDs, exact part numbers, URLs, timestamps, currency, and provenance. No frontend/provider fallback creates listings. |
+| Native external engines                           | Not production wired                  | Site engine status reports native simulator/compiler gaps explicitly; no native process is launched by the Site.                                                                                             |
+| Raw WebSocket transport                           | Not available on the Site             | Use the browser runtime or the same-origin HTTP simulation routes.                                                                                                                                           |
 
-`packages/component-format`:
-- `.hwpkg` = ZIP: `manifest.json/yaml + symbol.svg + footprint + geometry.step/.glb + electrical.lib + io.ibs + behavior.wasm + renode.cs/.py + verilog.v + fmu + license.json`.
-- `manifest.ts` defines `FILE_TYPE_MAP` (doc table) and `HwpkgManifestSchema`.
-- `package.ts` packs/unpacks ZIP via JSZip; `importer.ts` implements 10-step pipeline (search→download→identify→license→extract→match→choose engine→generate→test→add).
-- L1 auto-import (resistor, cap…), L2 generic templates (`templates/i2c-register-sensor.yaml` — no code), L3 custom WASM/Renode C# (sandboxed via Wasmtime).
+## Reference and dormant paths
 
-## Simulation: One Adapter per Engine
+These paths remain useful for development, lineage, experiments, or future
+work. They are not the ChatGPT Site production execution path:
 
-`frontend/src/simulation/SimulationEngine.ts` + `backend/app/simulation/engine.py`:
-```ts
-interface SimulationEngine { initialize(model:CompiledSubgraph):Promise<void>; advanceTo(timeNs:bigint):Promise<void>; writePort(portId,value):Promise<void>; readPort(portId):Promise<PortValue>; snapshot():Promise<Uint8Array>; restore(s):Promise<void>; shutdown():Promise<void> }
-```
-Adapters in `backend/app/engines/`:
-- **Renode** — generates `.repl`, `Python.PythonPeripheral`, talks via Monitor telnet, handles `.repl`/`C#`/`Python` models.
-- **ngspice** — shared-library callbacks (preferred) + `ngspice-wasm` fallback; Union-Find netlist via frontend `NetlistBuilder` pattern.
-- **Wasmtime** — `Config(wasm_component_model=True, epoch_interruption=True)`, 20s/40MB limits, community WASM.
-- **Stubs** (`base.py` StubEngine) for QEMU (QMP), Verilator (`verilator --cc`), FMI (FMPy), Gazebo, scikit-rf, GNU Radio, openEMS/Meep (offline→reduced model pattern: high-fidelity solver → S-params/pattern → fast lookup).
+| Path / component                                                                | Status            | What the label means                                                                                                                      |
+| ------------------------------------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `frontend/` standalone Vite app                                                 | Reference/local   | A separately runnable Vite frontend and its local API proxy; useful for development and regression tests, not the canonical Site wrapper. |
+| `backend/app/` Python/FastAPI service                                           | Reference/local   | Optional local API and orchestration service. It is not called by the deployed ChatGPT Site.                                              |
+| `backend/app/engines/renode.py`, `ngspice.py`, `wasmtime.py`                    | Dormant/reference | Adapter sketches and local experiments; no Site subprocess or native engine is wired into production.                                     |
+| `vendor/velxio-simulation/` and `backend/app/velxio_reference/`                 | Reference/lineage | Vendored/reference material for the original hardware-workbench direction; not imported by the canonical Site runtime.                    |
+| `packages/avr-runtime/` and `packages/browser-toolchain/`                       | Dormant/reference | Toolchain/runtime packages retained for future compiler work; they do not make Site firmware compilation available.                       |
+| `backend/worker.py` (Cloudflare worker entrypoint) and `backend/wrangler.jsonc` | Reference/dormant | A separate worker entrypoint/configuration, not wired to the ChatGPT Site release path.                                                   |
+| QEMU, Verilator, FMI, Gazebo, RF, and full SPICE plans                          | Future/reference  | Architectural targets only. They are not capabilities of the current Site and must not be shown as live demo features.                    |
 
-Orchestrator `backend/app/simulation/orchestrator.py` partitions graph, deterministic event queue, advances all engines to same `time_ns`, handles snapshots, crash isolation (each engine = worker process; future: gRPC/local-socket).
+## Contract details
 
-## Backend (Python + FastAPI)
+### Shared graph and stores
 
-`backend/app/main.py`: `CORSMiddleware` (5173-5175 + Tauri), `lifespan`, routers `/api/compile`, `/api/simulation` (REST + WebSocket `/ws`), `/api/components` (search, ports, import analyze), `/api/health`, `/api/engines`.
-- Workers: `workers/` subprocesses (Renode dotnet, ngspice shared lib, wasmtime) — not merged source trees → crash isolation + license separation.
+`frontend/src/store/useProjectStore.ts` owns the canonical `HardwareGraph`:
+component instances, typed connections, firmware targets, and simulation
+metadata. Selection, workspace panels, validation, shopping, and simulation
+state live in adjacent stores. React Flow renders the graph; it is not the
+source of truth. The project-storage package persists the workspace locally and
+keeps user rooms separate.
 
-## Frontend (React + Vite, no Next.js)
+### WebMCP registration
 
-- **Vite**: `vite.config.ts` mirrors Velxio (`preserveSymlinks`, `proxy /api → 127.0.0.1:8001`, `manualChunks`, `assetsInclude *.wasm`).
-- **Stores**: Zustand `useProjectStore` (graph CRUD, `addComponent`, `connectPorts`→validate), `useSimulationStore` (engine status, serial), `useSelectionStore`, `useComponentCatalogStore`.
-- **Canvas**: `@xyflow/react` `HardwareCanvas.tsx` + `HardwareNode.tsx` (custom node per component, handles per port, edge style per domain: power━, gpio─, i2c═, uart dashed).
-- **Web Components rule**: any wireable board must be `class X extends HTMLElement` with `get pinInfo()` — prevents (0,0) wire bug (Velxio CLAUDE.md §6a).
-- **Monaco**: `MonacoWorkspace.tsx` (multi-file, compile toolbar → `/api/compile`).
-- **Validation**: `ValidationPanel.tsx` (run check, explain_error, auto-fix).
-- **Import**: `ImportDialog.tsx` (10-step pipeline UI).
+`frontend/src/webmcp/tools.ts` is the single tool registry and exports
+`WEBMCP_TOOL_COUNT = tools.length`. Each native registration carries the tool
+name, description, input schema, annotations, and an execution callback that
+delegates to the shared stores. The current implementation follows the WebMCP
+draft dated 26 August 2026. The browser testing flag documentation is for
+Chrome v149+; the judge target here is the ChatGPT in-app browser, whose native
+producer availability must be checked at acceptance time.
 
-## WebMCP (Centerpiece)
+### Browser simulation
 
-`frontend/src/webmcp/tools.ts` — 18 tools via `document.modelContext.registerTool({name,description,inputSchema,execute,annotations},{signal})` (WebMCP draft 2026-08-19, SecureContext, Permissions-Policy `allow="tools"`).
-- Tools: `project.get_graph/clear`, `component.search/inspect/add/remove/list_ports`, `connection.connect/disconnect/get_connections`, `firmware.write/compile`, `simulation.run/stop/get_state/set_input`, `validation.check/explain_error`, `design.auto_layout`.
-- Each `execute` reuses same Zustand function human UI uses → agent and human share logic. Fallback `window.__schematicTools` when flag off.
-- `getTools()` discovery + `executeTool()` mediation, AbortSignal cleanup, `ontoolchange`.
+The portable harness is intentionally an exact contract, not a general
+compiler. It recognizes one safe `setup`/`loop` shape that reads a connected
+button and writes a connected LED. The generated module is a 400-byte,
+hash-verified artifact with ABI v2. The same portable C core has a source-only
+ESP32 Arduino export, but that export is not an ESP32 binary and does not make
+physical-device testing part of the Site.
 
-## Fidelity & Offline Models
+The TypeScript runtime is the bounded fallback. It performs topology checks
+even when firmware execution is unavailable, caps requested run duration, and
+reports code/model coverage through `executionEngine`, `unsupportedApis`,
+`targetIssues`, protocol traces, and validation summaries.
 
-Per doc § Do not run every engine at full fidelity continuously:
-- Offline solver (openEMS/Meep) → generate `radiation pattern / S-params / coupling / FOV map` → fast runtime lookup (scikit-rf/GNU Radio) during interactive sim. `services/reduce_model.py` caches.
+### Site API
 
-## Data & Persistence
+`chatgpt-site/app/api/[[...path]]/route.ts` maps same-origin requests to the
+shared functions in `functions/api/_runtime.ts`. The route provides health,
+catalog search/inspection, import analysis, behavioral simulation state/run/
+stop, parts-provider rejection, and compile preflight. API sessions are
+short-lived bearer tokens issued after the Site verifies ChatGPT identity. A
+missing or weak server secret is a release failure, not a reason to fall back
+to anonymous access.
 
-- SQLite `schematic.db` + `data/hwpkg/` filestore.
-- `.vlx` (Velxio pattern) `frontend/src/utils/vllxFile.ts`: `{format:"schematic-project",version:1,exportedAt,project,pinStates}` → Blob download. Backend also serves JSON.
+## Release truth
 
-## Build Order
+The repository's initial commit is dated 25 August 2026. Git history shows a
+substantial WebMCP extension after that date: `00d9956` added the hardware
+WebMCP studio on 26 August, `de54b96` fixed the WebMCP testing environment on
+26 August, `7d2c587` completed the hardware workflow and `7d3f702` verified it
+on 27 August, and `6e59adf`/`67b6783` bound the Site and authenticated
+workspace runtime on 28 August. This history describes what landed; it does
+not imply that dormant engines or a native Site MCP server are production
+features.
 
-1. **First usable (this repo)**: Velxio canvas + Renode + ngspice + importer + Wasmtime → Arduino/ESP32/RP2040/STM32, sensors/motors/displays/power/multi-MCU/custom import.
-2. **Second**: QEMU + Verilator + FMI/OpenModelica → Linux SBCs, FPGA, batteries/thermal.
-3. **Third**: Gazebo + Open CASCADE → arms/cameras/LiDAR/enclosures.
-4. **Final**: scikit-rf + GNU Radio + openEMS + Meep + HIL → radar/AR/phased arrays.
+See [README.md](README.md) for local checks and
+[docs/CHATGPT_SITE_RUNBOOK.md](docs/CHATGPT_SITE_RUNBOOK.md) for publication and
+acceptance gates.
 
 ## License
 
-AGPL-3.0 (Velxio-derived portions remain AGPL per license). See `LICENSE` + `NOTICE` for Renode MIT, Wasmtime Apache-2.0, QEMU GPL-2.0, Verilator LGPL, etc. Workers run isolated → separation preserved.
+Schematic is AGPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for
+third-party notices.

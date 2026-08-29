@@ -10,19 +10,28 @@ import { useWorkspaceStore, type BottomPanel } from "../store/useWorkspaceStore.
 import { useValidationStore, validateFirmwareFiles, validateProject } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
 import { useShoppingStore, type AgentPublication, type PartOffer, type ShoppingResult } from "../store/useShoppingStore.ts";
+import { waitForProjectPersistence } from "../store/projectPersistence.ts";
 import { runFirmwareRuntime } from "../simulation/runtime.ts";
 import { hasPortableButtonLedContract, PortableHarnessUnavailableError, runPortableButtonLedHarness } from "../simulation/portableHarness.ts";
 import { getCatalogComponent, searchCatalog } from "../data/catalog.ts";
 import { isBoardDefinition, resolveFirmwareBinding } from "../data/hardware.ts";
-import { apiUrl, getAuthHeaders, getAuthSession } from "../auth/session.ts";
+import { apiUrl, getAuthHeaders, getAuthSession, waitForAuth } from "../auth/session.ts";
 import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.json";
+
+type ToolAnnotations = {
+  readOnlyHint?: boolean;
+  /** Result may contain content supplied by an external provider or agent. */
+  untrustedContentHint?: boolean;
+};
+
+type ToolExecutionContext = { signal?: AbortSignal };
 
 type ToolDef = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  execute: (args: any) => Promise<any>;
-  annotations?: { readOnlyHint?: boolean };
+  execute: (args: any, context?: ToolExecutionContext) => Promise<any>;
+  annotations?: ToolAnnotations;
 };
 
 type ApiJsonResult = {
@@ -54,12 +63,37 @@ function base64FromHex(hex: string) {
   return btoa(binary);
 }
 
+function abortError() {
+  try {
+    return new DOMException("The WebMCP tool call was aborted", "AbortError");
+  } catch {
+    const error = new Error("The WebMCP tool call was aborted");
+    error.name = "AbortError";
+    return error;
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw abortError();
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return Boolean(value && typeof value === "object" && "aborted" in value && "addEventListener" in value);
+}
+
+function executionSignal(value: unknown): AbortSignal | undefined {
+  if (isAbortSignal(value)) return value;
+  if (value && typeof value === "object" && isAbortSignal((value as { signal?: unknown }).signal)) return (value as { signal: AbortSignal }).signal;
+  return undefined;
+}
+
 /**
  * Pages serves the SPA fallback for unknown /api routes. Read the body once
  * and identify that case before calling JSON.parse, so WebMCP gets a useful
  * result instead of "Unexpected end of JSON input".
  */
 export async function fetchJson(path: string, init?: RequestInit): Promise<ApiJsonResult> {
+  throwIfAborted(init?.signal ?? undefined);
   try {
     const request = async (authHeaders: Record<string, string>) => {
       const headers = new Headers(init?.headers);
@@ -67,17 +101,19 @@ export async function fetchJson(path: string, init?: RequestInit): Promise<ApiJs
       for (const [key, value] of Object.entries(authHeaders)) headers.set(key, value);
       return fetch(apiUrl(path), { credentials: "include", ...init, headers });
     };
-    let response = await request(await getAuthHeaders());
+    let response = await request(await getAuthHeaders(false, init?.signal || undefined));
+    throwIfAborted(init?.signal ?? undefined);
     // A Site session is intentionally short-lived. Retry one time with a
     // freshly issued session so an agent action does not fail just because a
     // tab was left open. All current WebMCP requests use replayable JSON
     // bodies; avoid replaying an arbitrary streaming request.
     if (response.status === 401 && (!init?.body || typeof init.body === "string")) {
-      response = await request(await getAuthHeaders(true));
+      response = await request(await getAuthHeaders(true, init?.signal || undefined));
     }
     const responseText = typeof response.text === "function" ? await response.text() : null;
 
     if (responseText !== null) {
+      throwIfAborted(init?.signal ?? undefined);
       if (!responseText.trim()) {
         return { response, data: null, available: false, error: `API ${path} returned an empty response` };
       }
@@ -89,8 +125,11 @@ export async function fetchJson(path: string, init?: RequestInit): Promise<ApiJs
     }
 
     // Lightweight fetch mocks and older WebViews may only expose response.json().
-    return { response, data: await response.json(), available: true };
+    const data = await response.json();
+    throwIfAborted(init?.signal ?? undefined);
+    return { response, data, available: true };
   } catch (e) {
+    if (init?.signal?.aborted || (e instanceof Error && e.name === "AbortError")) throw e;
     return { response: null, data: null, available: false, error: (e as Error).message };
   }
 }
@@ -739,7 +778,7 @@ const tools: ToolDef[] = [
     name: "firmware.compile",
     description: "Compile firmware for a board; uses the remote compiler when connected and a browser preflight on static deployments",
     inputSchema: { type: "object", properties: { componentId: { type: "string" }, boardFqbn: { type: "string", description: "e.g. arduino:avr:uno" } }, required: ["componentId"] },
-    execute: async ({ componentId, boardFqbn }) => {
+    execute: async ({ componentId, boardFqbn }, { signal } = {}) => {
       const proj = useProjectStore.getState().project;
       const id = String(componentId ?? "");
       const binding = resolveFirmwareBinding(proj, id);
@@ -777,7 +816,7 @@ const tools: ToolDef[] = [
         return { content: [{ type: "text", text: message }], data: { componentId: id, definitionId: binding.component.definitionId, available: false, error: message, codeIssues } };
       }
       useValidationStore.getState().setCompile({ status: "checking", boardFqbn: fqbn, log: "Checking source…", checkedAt: Date.now() });
-      const result = await fetchJson("/api/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: tgt.files, board_fqbn: fqbn, component_id: id, definition_id: binding.component.definitionId, language: tgt.language ?? binding.targetConfig?.language }) });
+      const result = await fetchJson("/api/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: tgt.files, board_fqbn: fqbn, component_id: id, definition_id: binding.component.definitionId, language: tgt.language ?? binding.targetConfig?.language }), signal });
       // A hosted Pages/Sites Function can be reachable while still lacking a
       // native arduino-cli binary. Treat its explicit preflight contract like
       // the fully static fallback instead of reporting a malformed compiler
@@ -834,7 +873,7 @@ const tools: ToolDef[] = [
     name: "simulation.run",
     description: "Run simulation for current project (uses remote engines when connected, otherwise a browser runtime)",
     inputSchema: { type: "object", properties: { durationMs: { type: "number", description: "Duration ms, default 1000" } } },
-    execute: async ({ durationMs }) => {
+    execute: async ({ durationMs }, { signal } = {}) => {
       const project = useProjectStore.getState().project;
       const inputs = useSimulationStore.getState().pinStates;
       const boundedDurationMs = durationMs ?? 1000;
@@ -857,7 +896,7 @@ const tools: ToolDef[] = [
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
       }
       const sessionId = useSimulationStore.getState().remoteSessionId;
-      const result = await fetchJson("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, inputs, duration_ns: boundedDurationMs * 1e6, ...(sessionId ? { session_id: sessionId } : {}) }) });
+      const result = await fetchJson("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, inputs, duration_ns: boundedDurationMs * 1e6, ...(sessionId ? { session_id: sessionId } : {}) }), signal });
       const remoteContract = result.available && result.data && typeof result.data === "object" && result.data.runtime === "remote" && result.data.execution_mode === "behavioral";
       const remotePayload = remoteContract && result.response?.ok;
       const degradedRemote = remoteContract && DEGRADED_RUN_STATUSES.has(String(result.data.status));
@@ -896,28 +935,28 @@ const tools: ToolDef[] = [
       }
       const res = result.data;
       const normalized = enrichRunResult(normalizeRemoteRun(res, topology), topology, validation);
-      const timeNs = BigInt(res.time_ns ?? 0);
+      const timeNs = BigInt(normalized.durationMs * 1_000_000);
       const simulation = useSimulationStore.getState();
       simulation.setRemoteSessionId(typeof res.session_id === "string" ? res.session_id : null);
       simulation.setTime(timeNs);
-      for (const [portId, value] of Object.entries(res.outputs ?? {})) {
+      for (const [portId, value] of Object.entries(normalized.outputs)) {
         if (typeof value === "boolean" || typeof value === "number") simulation.setPin(portId, value);
       }
       simulation.setLastRun(normalized);
-      const readings = Object.entries(res.outputs ?? {}).map(([key, value]) => `${key.split(":").pop()}=${value}`).join("  ");
+      const readings = Object.entries(normalized.outputs).map(([key, value]) => `${key.split(":").pop()}=${value}`).join("  ");
       simulation.appendSerial(`[${project.name}] remote runtime · t=${timeNs}ns${readings ? `  ${readings}` : ""}\n${normalized.serialOutput}`);
       simulation.stop();
-      return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
+      return { content: [{ type: "text", text: JSON.stringify(normalized, null, 2) }], data: normalized };
     },
   },
   {
     name: "simulation.stop",
     description: "Stop simulation",
     inputSchema: { type: "object", properties: {} },
-    execute: async () => {
+    execute: async (_args, { signal } = {}) => {
       useSimulationStore.getState().stop();
       const sessionId = useSimulationStore.getState().remoteSessionId;
-      const result = await fetchJson("/api/simulation/stop", { method: "POST", body: JSON.stringify(sessionId ? { session_id: sessionId } : {}) });
+      const result = await fetchJson("/api/simulation/stop", { method: "POST", body: JSON.stringify(sessionId ? { session_id: sessionId } : {}), signal });
       useSimulationStore.getState().setRemoteSessionId(null);
       if (!result.available) return { content: [{ type: "text", text: "Simulation stopped locally (browser runtime)" }], data: { status: "stopped", runtime: "browser" } };
       if (!result.response?.ok) return { content: [{ type: "text", text: `Simulation stopped locally; backend returned HTTP ${result.response?.status ?? "unknown"}` }], data: result.data, isError: true };
@@ -939,7 +978,8 @@ const tools: ToolDef[] = [
     name: "simulation.set_input",
     description: "Set sensor input (e.g. motion=true, temperature=25) for simulation",
     inputSchema: { type: "object", properties: { componentId: { type: "string" }, key: { type: "string" }, value: {} } , required: ["componentId", "key", "value"]},
-    execute: async ({ componentId, key, value }) => {
+    execute: async ({ componentId, key, value }, { signal } = {}) => {
+      throwIfAborted(signal);
       const component = useProjectStore.getState().project.components.find((item) => item.id === componentId);
       if (!component) return { content: [{ type: "text", text: `Unknown component ${componentId}` }], isError: true };
       if (typeof value !== "boolean" && typeof value !== "number") return { content: [{ type: "text", text: "Simulation input must be a boolean or number" }], isError: true };
@@ -951,8 +991,12 @@ const tools: ToolDef[] = [
       const localBackend = ["localhost", "127.0.0.1", "::1"].includes(location.hostname) ? `${location.protocol}//${location.hostname}:8001` : undefined;
       const backendUrl = configuredBackend || localBackend;
       if (backendUrl) {
+        let ws: WebSocket | undefined;
+        const closeOnAbort = () => ws?.close();
+        signal?.addEventListener("abort", closeOnAbort, { once: true });
         try {
-          const auth = await getAuthSession();
+          const auth = await getAuthSession(false, signal);
+          throwIfAborted(signal);
           const wsUrl = new URL(apiUrl("/api/simulation/ws"), backendUrl);
           wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
           // Browser WebSocket cannot set Authorization headers. Offer the
@@ -962,16 +1006,28 @@ const tools: ToolDef[] = [
           // credential when the ticket endpoint is not enabled.
           let protocols = auth?.token ? ["schematic-bearer", `schematic-token.${auth.token}`] : ["schematic-local"];
           if (auth?.token && auth.environment !== "local") {
-            const ticket = await fetchJson("/api/auth/ws-ticket", { method: "POST" });
+            const ticket = await fetchJson("/api/auth/ws-ticket", { method: "POST", signal });
+            throwIfAborted(signal);
             if (ticket.response?.ok && typeof ticket.data?.ticket === "string") protocols = ["schematic-bearer", `schematic-ticket.${ticket.data.ticket}`];
           }
-          const ws = new WebSocket(wsUrl.toString(), protocols);
-          ws.onopen = () => {
-            ws.send(JSON.stringify({ op: "set_sensor_input", componentId, key, value, session_id: useSimulationStore.getState().remoteSessionId }));
-            ws.close();
+          throwIfAborted(signal);
+          const socket = new WebSocket(wsUrl.toString(), protocols);
+          ws = socket;
+          socket.onopen = () => {
+            if (signal?.aborted) {
+              socket.close();
+              return;
+            }
+            socket.send(JSON.stringify({ op: "set_sensor_input", componentId, key, value, session_id: useSimulationStore.getState().remoteSessionId }));
+            socket.close();
           };
-        } catch {}
+        } catch (error) {
+          if (signal?.aborted || (error as Error)?.name === "AbortError") throw signal?.aborted ? abortError() : error;
+        } finally {
+          signal?.removeEventListener("abort", closeOnAbort);
+        }
       }
+      throwIfAborted(signal);
       return { content: [{ type: "text", text: `Set ${componentId}.${key}=${JSON.stringify(value)}` }], data: { componentId, key, value, pin: `${componentId}:${key}`, forwarded: Boolean(backendUrl) } };
     },
   },
@@ -1031,7 +1087,7 @@ const tools: ToolDef[] = [
               partNumber: { type: "string", description: "Manufacturer or distributor part number" },
               requestedQuantity: { type: "integer", minimum: 1 },
               exactMatch: { const: true },
-              updatedAt: { type: "string", format: "date-time" },
+              updatedAt: { type: "string", format: "date-time", description: "Recent time at which the agent refreshed this catalog match." },
               offers: {
                 type: "array",
                 minItems: 1,
@@ -1042,8 +1098,8 @@ const tools: ToolDef[] = [
                   properties: {
                     id: { type: "string" }, retailer: { type: "string" }, title: { type: "string" },
                     price: { anyOf: [{ type: "number", minimum: 0 }, { type: "null" }] },
-                    currency: { type: "string", pattern: "^[A-Z]{3}$" }, url: { type: "string", format: "uri" },
-                    fetchedAt: { type: "string", format: "date-time" }, provider: { type: "string" },
+                    currency: { type: "string", pattern: "^[A-Z]{3}$" }, url: { type: "string", format: "uri", description: "HTTPS retailer URL supplied by the agent; the UI does not verify the page." },
+                    fetchedAt: { type: "string", format: "date-time", description: "Recent time at which the agent observed this offer." }, provider: { type: "string" },
                   },
                 },
               },
@@ -1051,10 +1107,11 @@ const tools: ToolDef[] = [
             },
           },
         },
-        publication: { type: "object", description: "Sourcing provenance supplied by the agent. Authentication and agent identity come from the verified WebMCP session, not from these fields.", properties: { provider: { type: "string" }, publishedAt: { type: "string" } }, required: ["provider", "publishedAt"] },
+        publication: { type: "object", description: "Sourcing provenance supplied by the agent. Authentication and agent identity come from the verified WebMCP session, not from these fields. publishedAt must be recent.", properties: { provider: { type: "string" }, publishedAt: { type: "string", format: "date-time" } }, required: ["provider", "publishedAt"] },
       },
       required: ["listings", "publication"],
     },
+    annotations: { untrustedContentHint: true },
     execute: async ({ query = "", quantity = 1, listings, publication, __trustedAuth }) => {
       const requestedQuantity = Math.max(1, Math.min(999, Math.round(Number(quantity) || 1)));
       const searchQuery = String(query ?? "");
@@ -1091,7 +1148,11 @@ const tools: ToolDef[] = [
       const data = {
         query: searchQuery,
         source: "webmcp-agent",
-        liveOffers: results.some((result) => result.offers.some((offer) => offer.price !== null)),
+        // A price value is not proof that a retailer page is live or in stock.
+        // Preserve the legacy field as a conservative capability flag and
+        // expose the useful fact separately for callers that need it.
+        liveOffers: false,
+        pricedOffers: results.some((result) => result.offers.some((offer) => offer.price !== null)),
         accepted: publicationResult.accepted,
         rejected: publicationResult.rejected,
         results,
@@ -1108,9 +1169,9 @@ const tools: ToolDef[] = [
   },
   {
     name: "shopping.get_state",
-    description: "Read live part listings, cart lines, budget, and cheapest-price quote for the current build",
+    description: "Read agent-sourced part listings, cart lines, budget, and cheapest-price quote for the current build",
     inputSchema: { type: "object", properties: {} },
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     execute: async () => {
       const shopping = useShoppingStore.getState();
       const quote = shopping.getQuote();
@@ -1122,6 +1183,7 @@ const tools: ToolDef[] = [
     name: "shopping.cart_add",
     description: "Add an exact shopping result to the build cart",
     inputSchema: { type: "object", properties: { resultId: { type: "string" }, quantity: { type: "number" } }, required: ["resultId"] },
+    annotations: { untrustedContentHint: true },
     execute: async ({ resultId, quantity }) => {
       const id = String(resultId);
       const result = useShoppingStore.getState().results.find((item) => item.id === id);
@@ -1135,6 +1197,7 @@ const tools: ToolDef[] = [
     name: "shopping.cart_remove",
     description: "Remove a part from the shopping cart",
     inputSchema: { type: "object", properties: { resultId: { type: "string" } }, required: ["resultId"] },
+    annotations: { untrustedContentHint: true },
     execute: async ({ resultId }) => {
       const id = String(resultId);
       if (!useShoppingStore.getState().cart.some((line) => line.resultId === id)) return { content: [{ type: "text", text: `Shopping result ${id} is not in the cart` }], isError: true };
@@ -1146,6 +1209,7 @@ const tools: ToolDef[] = [
     name: "shopping.cart_set_quantity",
     description: "Set the quantity for a shopping cart line, or remove it with zero",
     inputSchema: { type: "object", properties: { resultId: { type: "string" }, quantity: { type: "number" } }, required: ["resultId", "quantity"] },
+    annotations: { untrustedContentHint: true },
     execute: async ({ resultId, quantity }) => {
       const id = String(resultId);
       if (!useShoppingStore.getState().cart.some((line) => line.resultId === id)) return { content: [{ type: "text", text: `Shopping result ${id} is not in the cart` }], isError: true };
@@ -1157,6 +1221,7 @@ const tools: ToolDef[] = [
     name: "shopping.cart_set_budget",
     description: "Set or clear the target build budget in USD",
     inputSchema: { type: "object", properties: { budget: { type: ["number", "null"] } }, required: ["budget"] },
+    annotations: { untrustedContentHint: true },
     execute: async ({ budget }) => {
       useShoppingStore.getState().setBudget(budget === null ? null : Number(budget));
       return { content: [{ type: "text", text: JSON.stringify(useShoppingStore.getState().getQuote(), null, 2) }], data: useShoppingStore.getState().getQuote() };
@@ -1166,6 +1231,7 @@ const tools: ToolDef[] = [
     name: "shopping.cart_undo",
     description: "Undo the last cart change",
     inputSchema: { type: "object", properties: {} },
+    annotations: { untrustedContentHint: true },
     execute: async () => {
       useShoppingStore.getState().undoCart();
       return { content: [{ type: "text", text: JSON.stringify(useShoppingStore.getState().getQuote(), null, 2) }], data: useShoppingStore.getState().getQuote() };
@@ -1175,6 +1241,7 @@ const tools: ToolDef[] = [
     name: "shopping.cart_reset",
     description: "Reset the cart to one of every catalog part currently required by the project, after listings have been searched",
     inputSchema: { type: "object", properties: { requiredCatalogIds: { type: "array", items: { type: "string" } } } },
+    annotations: { untrustedContentHint: true },
     execute: async ({ requiredCatalogIds }) => {
       const project = useProjectStore.getState().project;
       const ids = Array.isArray(requiredCatalogIds) && requiredCatalogIds.length ? requiredCatalogIds.map(String) : project.components.map((component) => component.definitionId);
@@ -1189,6 +1256,7 @@ const tools: ToolDef[] = [
     name: "shopping.choose_alternative",
     description: "Replace a cart part with an agent-recommended context-aware alternative",
     inputSchema: { type: "object", properties: { resultId: { type: "string" }, catalogId: { type: "string" } }, required: ["resultId", "catalogId"] },
+    annotations: { untrustedContentHint: true },
     execute: async ({ resultId, catalogId }) => {
       const changed = useShoppingStore.getState().chooseAlternative(String(resultId), String(catalogId));
       if (!changed) return { content: [{ type: "text", text: "Alternative is not available as a searched result yet" }], isError: true };
@@ -1197,9 +1265,9 @@ const tools: ToolDef[] = [
   },
   {
     name: "shopping.quote",
-    description: "Calculate the total using the cheapest live offer per cart line and report missing prices or budget overage",
+    description: "Calculate the total using the cheapest priced agent-sourced offer per cart line and report missing prices or budget overage",
     inputSchema: { type: "object", properties: {} },
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     execute: async () => {
       const quote = useShoppingStore.getState().getQuote();
       return { content: [{ type: "text", text: JSON.stringify(quote, null, 2) }], data: quote };
@@ -1222,15 +1290,17 @@ const tools: ToolDef[] = [
 export const WEBMCP_TOOL_COUNT = tools.length;
 
 let controllers: AbortController[] = [];
+let registrationGeneration = 0;
 
-async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> = {}) {
+async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> = {}, signal?: AbortSignal) {
+  throwIfAborted(signal);
   const activityId = useWebMCPStore.getState().beginTool(tool.name, args);
   try {
     // Keep the public landing page from becoming an unauthenticated mutation
     // surface. Local development has the explicit development session; hosted
     // builds must have a platform-verified identity before any agent action.
     const hosted = typeof window !== "undefined" && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
-    const session = await getAuthSession();
+    const session = await getAuthSession(false, signal);
     if (hosted && !session) {
       const denied = {
         content: [{ type: "text", text: "Sign in to use Schematic WebMCP tools; project state is scoped to your verified account." }],
@@ -1242,7 +1312,9 @@ async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> 
     const trustedAuth: TrustedToolContext | undefined = session
       ? { authenticated: true, subject: session.subject, environment: session.environment }
       : undefined;
-    const result = await tool.execute({ ...args, __trustedAuth: trustedAuth });
+    throwIfAborted(signal);
+    const result = await tool.execute({ ...args, __trustedAuth: trustedAuth }, { signal });
+    throwIfAborted(signal);
     useWebMCPStore.getState().finishTool(activityId, result);
     return result;
   } catch (e) {
@@ -1304,50 +1376,32 @@ function installModelContextProducerPolyfill() {
   Object.defineProperty(nav, "modelContext", { configurable: true, value: mc });
 }
 
-function isAllowedAgentOrigin(origin: string) {
-  if (!origin) return false;
-  const ownOrigin = typeof window !== "undefined" ? window.location.origin : "";
-  return origin === ownOrigin || origin === "https://chat.openai.com" || origin === "https://chatgpt.com" || origin.endsWith(".openai.com") || origin.endsWith(".chatgpt.com");
-}
-
 export async function registerWebMCPTools() {
+  const generation = ++registrationGeneration;
+  // Auth and persistence share startup gates with App. Waiting here keeps a
+  // direct Site import safe as well as the Vite entrypoint.
+  await waitForAuth();
+  await waitForProjectPersistence();
+  if (generation !== registrationGeneration) return;
   useWebMCPStore.getState().setRegistration({ state: "checking", registeredCount: 0, error: undefined });
   const existingModelContext: any = (document as any).modelContext ?? (navigator as any).modelContext;
   const hasNativeModelContext = typeof existingModelContext?.registerTool === "function";
   installModelContextProducerPolyfill();
   installModelContextTestingPolyfill();
   const mc: any = (document as any).modelContext ?? (navigator as any).modelContext;
-  // Always expose fallback for agents that use window.__schematicTools or postMessage
-  (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>) => executeToolWithActivity(t, args)]));
-  // Also expose via postMessage for cross-origin agents (e.g., chat.openai.com acting on behalf of user)
-  // The agent can do: window.postMessage({type: 'webmcp-call', tool: 'component.add', args: {...}}, '*')
-  if (!(window as any).__webmcpMessageHandler) {
-    (window as any).__webmcpMessageHandler = true;
-    window.addEventListener("message", async (event) => {
-      const data: any = event.data;
-      if (!data || data.type !== "webmcp-call" || !data.tool) return;
-      if (!isAllowedAgentOrigin(event.origin)) return;
-      const tool = tools.find((t) => t.name === data.tool);
-      if (!tool) {
-        event.source?.postMessage({ type: "webmcp-result", id: data.id, error: `Unknown tool ${data.tool}` }, event.origin as any);
-        return;
-      }
-      try {
-        const result = await executeToolWithActivity(tool, data.args || {});
-        event.source?.postMessage({ type: "webmcp-result", id: data.id, result }, event.origin as any);
-      } catch (e: any) {
-        event.source?.postMessage({ type: "webmcp-result", id: data.id, error: e.message }, event.origin as any);
-      }
-    });
-  }
+  // Test/degraded-runtime fallback only. Native agents must use the
+  // document.modelContext registration below; this same-origin object is not a
+  // cross-origin mutation bridge.
+  (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(t, args, executionSignal(context))]));
   if (!mc || typeof mc.registerTool !== "function") {
     useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, error: "The browser did not expose document.modelContext." });
-    console.warn("[WebMCP] modelContext not available — run in Chrome ≥146 with #enable-webmcp-testing, or use demo shim. Tools still callable via window.__schematicTools and postMessage");
+    console.warn("[WebMCP] modelContext not available — run in the supported in-app browser, or use the test/degraded-runtime fallback");
     return;
   }
   let registeredCount = 0;
   let registrationErrors = 0;
   for (const t of tools) {
+    if (generation !== registrationGeneration) return;
     const ctrl = new AbortController();
     controllers.push(ctrl);
     try {
@@ -1357,11 +1411,7 @@ export async function registerWebMCPTools() {
           description: t.description + " — Scoped to your verified account and its local project room. Agent may place hardware on your behalf within your room only.",
           inputSchema: t.inputSchema,
           annotations: t.annotations,
-          execute: (args: Record<string, unknown>) => {
-            // Log for debugging agent access
-            console.log(`[WebMCP] agent calling ${t.name}`, args, "room:", (window as any).__schematicRoom?.() || "global");
-            return executeToolWithActivity(t, args);
-          },
+          execute: (args: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(t, args, executionSignal(context)),
         },
         { signal: ctrl.signal },
       );
@@ -1385,6 +1435,7 @@ export async function registerWebMCPTools() {
 }
 
 export function unregisterWebMCPTools() {
+  registrationGeneration += 1;
   for (const c of controllers) c.abort();
   controllers = [];
 }
@@ -1394,8 +1445,8 @@ export function getRegisteredToolNames() {
 }
 
 /** Invoke the exact same callback registered with document.modelContext. */
-export async function invokeWebMCPTool(name: string, args: Record<string, any> = {}) {
+export async function invokeWebMCPTool(name: string, args: Record<string, any> = {}, signal?: AbortSignal) {
   const tool = tools.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`Unknown WebMCP tool: ${name}`);
-  return executeToolWithActivity(tool, args);
+  return executeToolWithActivity(tool, args, signal);
 }

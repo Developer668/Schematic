@@ -5,7 +5,7 @@ const publication: AgentPublication = {
   authenticated: true,
   agentId: "chatgpt-webmcp-agent",
   provider: "Digi-Key",
-  publishedAt: "2026-08-28T12:00:00.000Z",
+  publishedAt: new Date().toISOString(),
 };
 
 function listing(overrides: Partial<ShoppingResult> = {}): ShoppingResult {
@@ -103,5 +103,27 @@ describe("WebMCP-only shopping publication", () => {
     expect(result.accepted).toBe(false);
     expect(result.rejected).toBe(2);
     expect(useShoppingStore.getState().results).toHaveLength(0);
+  });
+
+  it("rejects cleartext retailer URLs and stale or future publications", () => {
+    const now = Date.now();
+    const staleAt = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const stale = listing({
+      updatedAt: staleAt,
+      offers: [{ ...listing().offers[0], fetchedAt: staleAt }],
+      provenance: { ...listing().provenance, publishedAt: staleAt },
+    });
+    expect(useShoppingStore.getState().publishAgentResults([stale], { ...publication, publishedAt: staleAt }).accepted).toBe(false);
+
+    const futureAt = new Date(now + 60 * 60 * 1000).toISOString();
+    const future = listing({
+      updatedAt: futureAt,
+      offers: [{ ...listing().offers[0], fetchedAt: futureAt }],
+      provenance: { ...listing().provenance, publishedAt: futureAt },
+    });
+    expect(useShoppingStore.getState().publishAgentResults([future], { ...publication, publishedAt: futureAt }).accepted).toBe(false);
+
+    const cleartext = listing({ offers: [{ ...listing().offers[0], url: "http://retailer.example/part" }] });
+    expect(useShoppingStore.getState().publishAgentResults([cleartext], publication).accepted).toBe(false);
   });
 });

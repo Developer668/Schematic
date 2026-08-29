@@ -121,7 +121,7 @@ describe("browser hardware runtime", () => {
         boardFqbn: "esp32:esp32:esp32",
         files: [{
           name: "main.ino",
-          content: "#include <Wire.h>\nconstexpr int LED_PIN = 19;\nvoid setup() { Wire.begin(); }\nvoid loop() { Wire.beginTransmission(0x68); Wire.write(0x00); Wire.endTransmission(); Wire.requestFrom(0x68, 1); int seconds = Wire.read(); digitalWrite(LED_PIN, seconds % 2 == 0 ? HIGH : LOW); delay(1000); }",
+          content: "#include <Wire.h>\nconstexpr int LED_PIN = 19;\nvoid setup() { Wire.begin(); }\nvoid loop() { Wire.beginTransmission(0x68); Wire.write(0x00); byte rc = Wire.endTransmission(); Wire.requestFrom(0x68, 1); int seconds = Wire.read(); digitalWrite(LED_PIN, seconds % 2 == 0 ? HIGH : LOW); delay(1000); }",
         }],
       }],
     };
@@ -186,5 +186,56 @@ describe("browser hardware runtime", () => {
     expect(result.serialOutput).toBe("ready\nready\n");
     expect(result.protocolEvents.some((event) => event.kind === "uart" && event.direction === "rx" && event.data[0] === 65)).toBe(true);
     expect(result.protocolEvents.some((event) => event.kind === "uart" && event.direction === "tx" && event.data[0] === 65)).toBe(true);
+  });
+
+  it("preserves URL-like strings while stripping comments", () => {
+    const urlProject: HardwareGraph = {
+      ...project,
+      firmwareTargets: [{ ...project.firmwareTargets[0], files: [{ name: "main.ino", content: 'void setup() { Serial.println("https://example.test/a//b"); } // this is a comment\nvoid loop() {}' }] }],
+    };
+    const result = runFirmwareRuntime(urlProject, {}, 1);
+    expect(result.status).toBe("completed");
+    expect(result.serialOutput).toBe("https://example.test/a//b\n");
+  });
+
+  it("evaluates the small safe math surface", () => {
+    const mathProject: HardwareGraph = {
+      ...project,
+      firmwareTargets: [{ ...project.firmwareTargets[0], files: [{ name: "main.ino", content: "constexpr int LED_PIN = 19; void setup() { digitalWrite(LED_PIN, max(0, min(1, round(abs(-0.6))))); } void loop() {}" }] }],
+    };
+    const result = runFirmwareRuntime(mathProject, {}, 1);
+    expect(result.status).toBe("completed");
+    expect(result.unsupportedApis).toEqual([]);
+    expect(result.outputs["led-1:IN"]).toBe(true);
+  });
+
+  it("fails closed and skips unsupported loop and switch bodies", () => {
+    const controlProject: HardwareGraph = {
+      ...project,
+      firmwareTargets: [{ ...project.firmwareTargets[0], files: [{ name: "main.ino", content: "constexpr int LED_PIN = 19; void setup() { for (int i = 0; i < 2; i++) { digitalWrite(LED_PIN, HIGH); } while (false) { digitalWrite(LED_PIN, HIGH); } switch (0) { case 0: digitalWrite(LED_PIN, HIGH); break; } } void loop() {}" }] }],
+    };
+    const result = runFirmwareRuntime(controlProject, {}, 1);
+    expect(result.status).toBe("unsupported-api");
+    expect(result.unsupportedApis).toEqual(expect.arrayContaining(["C++:for", "C++:while", "C++:switch"]));
+    expect(result.outputs["led-1:IN"]).toBeUndefined();
+    expect(result.events).toEqual([]);
+  });
+
+  it("does not let an earlier unsupported statement make an unknown branch look known", () => {
+    const sequenceProject: HardwareGraph = {
+      ...project,
+      firmwareTargets: [{ ...project.firmwareTargets[0], files: [{ name: "main.ino", content: "constexpr int LED_PIN = 19; void setup() { unsupported(); if (unknownCondition()) { digitalWrite(LED_PIN, LOW); } else { digitalWrite(LED_PIN, HIGH); } } void loop() {}" }] }],
+    };
+    const result = runFirmwareRuntime(sequenceProject, {}, 1);
+    expect(result.status).toBe("unsupported-api");
+    expect(result.unsupportedApis).toEqual(expect.arrayContaining(["C++:unsupported", "C++:unknownCondition"]));
+    expect(result.outputs["led-1:IN"]).toBeUndefined();
+    expect(result.events).toEqual([]);
+  });
+
+  it("does not count isolated ports as resolved nets", () => {
+    const result = runFirmwareRuntime({ ...project, connections: [] }, {}, 1);
+    expect(result.resolvedNets).toBe(0);
+    expect(result.connectionCheck?.resolvedNets).toBe(0);
   });
 });

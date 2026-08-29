@@ -6,7 +6,7 @@ import {
   type StoredWorkspace,
   type WorkspaceSnapshot,
 } from "@schematic/project-storage";
-import { getCurrentUserId } from "../auth/session.ts";
+import { getCurrentUserId, initAuth } from "../auth/session.ts";
 import { normalizeProject, useProjectStore, type HardwareGraph } from "./useProjectStore.ts";
 
 const ROOM_ID = "workspace";
@@ -26,6 +26,8 @@ interface PersistenceContext {
 
 let activeContext: PersistenceContext | null = null;
 let hydrationGeneration = 0;
+let persistenceLifecycleGeneration = 0;
+let persistenceReady: Promise<void> = Promise.resolve();
 
 function contextKey(userId: string | null) {
   return `${userId ?? "anonymous"}:${ROOM_ID}`;
@@ -83,7 +85,8 @@ function makeContext(userId: string | null): PersistenceContext {
   };
 }
 
-async function hydrateForCurrentRoom(): Promise<void> {
+async function hydrateForCurrentRoom(isCurrent: () => boolean = () => true): Promise<void> {
+  if (!isCurrent()) return;
   const generation = ++hydrationGeneration;
   const userId = getCurrentUserId();
   const key = contextKey(userId);
@@ -94,7 +97,7 @@ async function hydrateForCurrentRoom(): Promise<void> {
   activeContext = context;
 
   const loaded = await context.repository.loadWorkspace();
-  if (generation !== hydrationGeneration || activeContext !== context) return;
+  if (!isCurrent() || generation !== hydrationGeneration || activeContext !== context) return;
 
   let workspace: Workspace | undefined;
   if (loaded.ok && loaded.value) {
@@ -108,7 +111,7 @@ async function hydrateForCurrentRoom(): Promise<void> {
       removeLegacy: false,
       updatedBy: userId ?? undefined,
     });
-    if (generation !== hydrationGeneration || activeContext !== context) return;
+    if (!isCurrent() || generation !== hydrationGeneration || activeContext !== context) return;
     if (migrated.workspace) {
       workspace = migrated.workspace;
       context.revision = migrated.workspace.metadata.revision;
@@ -124,6 +127,9 @@ async function hydrateForCurrentRoom(): Promise<void> {
 export function startProjectPersistence(): () => void {
   if (typeof window === "undefined") return () => undefined;
 
+  const lifecycleGeneration = ++persistenceLifecycleGeneration;
+  let disposed = false;
+  const isCurrent = () => !disposed && persistenceLifecycleGeneration === lifecycleGeneration;
   const unsubscribe = useProjectStore.subscribe(() => {
     const context = activeContext;
     if (!context || context.applying || !context.hydrated) {
@@ -132,17 +138,38 @@ export function startProjectPersistence(): () => void {
     }
     scheduleSave(context);
   });
-  const onSessionChange = () => { void hydrateForCurrentRoom(); };
-  window.addEventListener("schematic-session", onSessionChange);
-  void hydrateForCurrentRoom();
+  const onSessionChange = () => {
+    if (!isCurrent()) return;
+    persistenceReady = hydrateForCurrentRoom(isCurrent);
+    void persistenceReady;
+  };
+  // Auth must settle before the repository namespace is selected. Otherwise a
+  // slow Site session lookup can hydrate the anonymous room and overwrite the
+  // authenticated room when the WebMCP registry starts writing immediately.
+  persistenceReady = initAuth().then(() => isCurrent() ? hydrateForCurrentRoom(isCurrent) : undefined);
+  void persistenceReady.then(() => {
+    if (isCurrent()) window.addEventListener("schematic-session", onSessionChange);
+  });
 
   return () => {
+    disposed = true;
     unsubscribe();
     window.removeEventListener("schematic-session", onSessionChange);
+    // A stale StrictMode cleanup must not cancel the context belonging to a
+    // newer mount. Its generation guard still invalidates this lifecycle's
+    // hydration when the pending auth promise settles.
+    if (persistenceLifecycleGeneration !== lifecycleGeneration) return;
+    persistenceLifecycleGeneration += 1;
     activeContext?.saver.cancel();
     activeContext = null;
     hydrationGeneration += 1;
+    persistenceReady = Promise.resolve();
   };
+}
+
+/** Wait until the auth-scoped workspace has completed its first hydration. */
+export function waitForProjectPersistence(): Promise<void> {
+  return persistenceReady;
 }
 
 /** Flush the current debounced write when an explicit Save action needs certainty. */

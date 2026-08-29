@@ -68,6 +68,11 @@ type ExpressionContext = {
   dsu: DisjointSet;
   protocol: ProtocolRuntime;
   cursor: number;
+  /** Calls and syntax the small interpreter deliberately refuses to guess. */
+  unsupportedApis: Set<string>;
+  failedClosed: boolean;
+  /** Counts unsupported evaluations, including repeated calls to one API. */
+  failureCount: number;
 };
 type ExecutionContext = ExpressionContext & {
   outputs: Record<string, RuntimeValue>;
@@ -96,12 +101,67 @@ class DisjointSet {
   union(a: string, b: string) { this.parent.set(this.find(a), this.find(b)); }
   members(root: string) { return [...this.parent.keys()].filter((key) => this.find(key) === root); }
   size() { return new Set([...this.parent.keys()].map((key) => this.find(key))).size; }
+  /** Number of nets that actually join two or more endpoints. */
+  connectedSize() {
+    const counts = new Map<string, number>();
+    for (const key of this.parent.keys()) {
+      const root = this.find(key);
+      counts.set(root, (counts.get(root) ?? 0) + 1);
+    }
+    return [...counts.values()].filter((count) => count > 1).length;
+  }
 }
 
 function endpointKey(endpoint: Endpoint) { return `${endpoint.componentId}:${endpoint.portId}`; }
 
 function stripComments(source: string) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  let output = "";
+  let quote = "";
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (lineComment) {
+      if (character === "\n") {
+        lineComment = false;
+        output += character;
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+      } else if (character === "\n") {
+        // Preserve line boundaries so source locations and statement parsing
+        // remain stable after removing a block comment.
+        output += character;
+      }
+      continue;
+    }
+    if (quote) {
+      output += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      output += character;
+    } else if (character === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+    } else if (character === "/" && next === "*") {
+      blockComment = true;
+      index += 1;
+    } else {
+      output += character;
+    }
+  }
+  return output;
 }
 
 function balancedSource(source: string) {
@@ -214,9 +274,51 @@ function splitTopLevel(source: string, operator: string) {
 
 function asNumber(value: RuntimeValue) { return typeof value === "number" ? value : value ? 1 : 0; }
 
+function markUnsupported(context: ExpressionContext, name: string) {
+  context.unsupportedApis.add(name);
+  context.failedClosed = true;
+  context.failureCount += 1;
+}
+
+/** Split a call's arguments without evaluating nested calls or quoted commas. */
+function splitArguments(source: string) {
+  const args: string[] = [];
+  let start = 0;
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") { quote = character; continue; }
+    if (character === "(") depth += 1;
+    else if (character === ")") depth -= 1;
+    else if (character === "," && depth === 0) {
+      args.push(source.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  if (quote || depth !== 0) return null;
+  const last = source.slice(start).trim();
+  if (last || args.length > 0) args.push(last);
+  return args;
+}
+
 function evaluateExpression(expression: string, context: ExpressionContext, depth = 0): RuntimeValue {
-  if (depth > 12) return false;
+  if (depth > 12) {
+    markUnsupported(context, "C++:expression-depth");
+    return false;
+  }
   let raw = expression.trim().replace(/;$/, "");
+  if (!raw) {
+    markUnsupported(context, "C++:empty-expression");
+    return false;
+  }
   while (raw.startsWith("(") && raw.endsWith(")") && matchingDelimiter(raw, 0, "(", ")") === raw.length - 1) raw = raw.slice(1, -1).trim();
 
   const or = splitTopLevel(raw, "||");
@@ -244,6 +346,24 @@ function evaluateExpression(expression: string, context: ExpressionContext, dept
     }
   }
 
+  const mathCall = raw.match(/^(min|max|abs|round)\s*\((.*)\)$/i);
+  if (mathCall) {
+    const args = splitArguments(mathCall[2]);
+    const name = mathCall[1].toLowerCase();
+    const expected = name === "abs" || name === "round" ? 1 : 2;
+    if (!args || args.length !== expected || args.some((argument) => !argument)) {
+      markUnsupported(context, `C++:${name}`);
+      return false;
+    }
+    const failuresBefore = context.failureCount;
+    const values = args.map((argument) => asNumber(evaluateExpression(argument, context, depth + 1)));
+    if (context.failureCount !== failuresBefore) return false;
+    if (name === "min") return Math.min(values[0], values[1]);
+    if (name === "max") return Math.max(values[0], values[1]);
+    if (name === "abs") return Math.abs(values[0]);
+    return Math.round(values[0]);
+  }
+
   const arithmetic = raw.match(/^(.+?)\s*([+\-*/%])\s*(.+)$/);
   if (arithmetic && !/^[-+]?\d+(?:\.\d+)?$/.test(raw)) {
     const left = asNumber(evaluateExpression(arithmetic[1], context, depth + 1));
@@ -258,15 +378,32 @@ function evaluateExpression(expression: string, context: ExpressionContext, dept
   const digitalRead = raw.match(/^digitalRead\s*\(\s*([^)]*)\s*\)$/i);
   if (digitalRead) {
     const endpoint = resolveBoardPin(context.project, context.boardId, digitalRead[1], context.constants);
-    const input = endpoint ? readInputValue(context.inputs, context.project, context.dsu, endpoint) : { value: false as RuntimeValue, semantic: false, inputKey: "" };
+    if (!endpoint) {
+      markUnsupported(context, "digitalRead");
+      return false;
+    }
+    const input = readInputValue(context.inputs, context.project, context.dsu, endpoint);
     return input.semantic && /pressed|button|click|trigger/i.test(input.inputKey) ? !input.value : Boolean(input.value);
   }
   const analogRead = raw.match(/^analogRead\s*\(\s*([^)]*)\s*\)$/i);
   if (analogRead) {
     const endpoint = resolveBoardPin(context.project, context.boardId, analogRead[1], context.constants);
-    if (!endpoint) return 0;
+    if (!endpoint) {
+      markUnsupported(context, "analogRead");
+      return 0;
+    }
     if (Object.prototype.hasOwnProperty.call(context.inputs, endpointKey(endpoint))) return asNumber(context.inputs[endpointKey(endpoint)]);
     return context.protocol.analogRead(context.boardId, endpoint.portId, context.inputs);
+  }
+  const wireEndTransmission = raw.match(/^Wire\.endTransmission\s*\(\s*\)$/i);
+  if (wireEndTransmission) return context.protocol.i2cEndTransmission(context.boardId);
+  const wireRequestFrom = raw.match(/^Wire\.requestFrom\s*\(\s*([^,]+),\s*([^,]+)(?:,[^)]*)?\s*\)$/i);
+  if (wireRequestFrom) {
+    const failuresBefore = context.failureCount;
+    const address = asNumber(evaluateExpression(wireRequestFrom[1], context, depth + 1));
+    const length = asNumber(evaluateExpression(wireRequestFrom[2], context, depth + 1));
+    if (context.failureCount !== failuresBefore) return 0;
+    return context.protocol.i2cRequestFrom(context.boardId, address, length);
   }
   const wireAvailable = raw.match(/^Wire\.available\s*\(\s*\)$/i);
   if (wireAvailable) return context.protocol.i2cAvailable(context.boardId);
@@ -282,6 +419,7 @@ function evaluateExpression(expression: string, context: ExpressionContext, dept
   if (millis) return context.cursor;
   const micros = raw.match(/^micros\s*\(\s*\)$/i);
   if (micros) return context.cursor * 1000;
+
   const mapCall = raw.match(/^map\s*\(\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^)]+)\)$/i);
   if (mapCall) {
     const value = asNumber(evaluateExpression(mapCall[1], context));
@@ -309,6 +447,8 @@ function evaluateExpression(expression: string, context: ExpressionContext, dept
   if (/^-?(?:\d+(?:\.\d+)?|0x[\da-f]+)$/i.test(raw)) return /^0x/i.test(raw) ? Number.parseInt(raw, 16) : Number(raw);
   if (context.variables.has(raw)) return context.variables.get(raw)!;
   if (context.constants.has(raw)) return context.constants.get(raw)!;
+  const call = raw.match(/^([A-Za-z_]\w*)\s*\(/);
+  markUnsupported(context, call ? `C++:${call[1]}` : "C++:expression");
   return false;
 }
 
@@ -357,9 +497,45 @@ function executeBlock(source: string, context: ExecutionContext) {
       while (/\s/.test(source[after] ?? "")) after += 1;
       let no: { body: string; next: number } | null = null;
       if (/^else\b/i.test(source.slice(after))) no = blockOrStatement(source, after + 4);
-      const chosen = evaluateExpression(condition, context) ? yes : no;
+      const failuresBefore = context.failureCount;
+      const conditionValue = evaluateExpression(condition, context);
+      // Unknown expressions must not silently select `else`, because that can
+      // produce believable writes even though the branch condition was never
+      // evaluated.
+      const chosen = context.failureCount !== failuresBefore ? null : conditionValue ? yes : no;
       if (chosen) executeBlock(chosen.body, context);
       index = no ? no.next : after;
+      continue;
+    }
+
+    // The browser runtime intentionally has no loop/switch evaluator. Treat
+    // these constructs as unsupported and skip their complete body; executing
+    // only an accidentally parsed statement would turn an incomplete run into
+    // a misleading success.
+    const unsupportedControl = remainder.match(/^(for|while|switch)\s*\(/i);
+    if (unsupportedControl) {
+      const controlStart = index + remainder.indexOf("(");
+      const controlEnd = matchingDelimiter(source, controlStart, "(", ")");
+      markUnsupported(context, `C++:${unsupportedControl[1].toLowerCase()}`);
+      if (controlEnd === -1) break;
+      const body = blockOrStatement(source, controlEnd + 1);
+      index = body.next;
+      continue;
+    }
+    if (/^do\b/i.test(remainder)) {
+      markUnsupported(context, "C++:do");
+      const body = blockOrStatement(source, index + 2);
+      let after = body.next;
+      while (/\s/.test(source[after] ?? "")) after += 1;
+      const whileMatch = source.slice(after).match(/^while\s*\(/i);
+      if (whileMatch) {
+        const conditionStart = after + whileMatch[0].indexOf("(");
+        const conditionEnd = matchingDelimiter(source, conditionStart, "(", ")");
+        index = conditionEnd === -1 ? source.length : conditionEnd + 1;
+        while (/\s|;/.test(source[index] ?? "")) index += 1;
+      } else {
+        index = after;
+      }
       continue;
     }
     const statement = nextStatement(source, index);
@@ -375,7 +551,10 @@ function executeStatement(statement: string, context: ExecutionContext) {
 
   const delay = text.match(/^delay\s*\(\s*([^)]*)\s*\)$/i);
   if (delay) {
-    context.cursor += Math.max(0, asNumber(evaluateExpression(delay[1], context)));
+    const failuresBefore = context.failureCount;
+    const delayMs = asNumber(evaluateExpression(delay[1], context));
+    if (context.failureCount !== failuresBefore) return;
+    context.cursor += Math.max(0, delayMs);
     context.protocol.advanceTo(context.cursor);
     return;
   }
@@ -387,12 +566,18 @@ function executeStatement(statement: string, context: ExecutionContext) {
   if (wireBegin) return;
   const wireBeginTransmission = text.match(/^Wire\.beginTransmission\s*\(\s*([^)]*)\s*\)$/i);
   if (wireBeginTransmission) {
-    context.protocol.i2cBeginTransmission(context.boardId, asNumber(evaluateExpression(wireBeginTransmission[1], context)));
+    const failuresBefore = context.failureCount;
+    const address = asNumber(evaluateExpression(wireBeginTransmission[1], context));
+    if (context.failureCount !== failuresBefore) return;
+    context.protocol.i2cBeginTransmission(context.boardId, address);
     return;
   }
   const wireWrite = text.match(/^Wire\.write\s*\(\s*([^,)]*)(?:,[^)]*)?\s*\)$/i);
   if (wireWrite) {
-    context.protocol.i2cWrite(context.boardId, asNumber(evaluateExpression(wireWrite[1], context)));
+    const failuresBefore = context.failureCount;
+    const value = asNumber(evaluateExpression(wireWrite[1], context));
+    if (context.failureCount !== failuresBefore) return;
+    context.protocol.i2cWrite(context.boardId, value);
     return;
   }
   const wireEndTransmission = text.match(/^Wire\.endTransmission\s*\(.*\)$/i);
@@ -402,7 +587,11 @@ function executeStatement(statement: string, context: ExecutionContext) {
   }
   const wireRequestFrom = text.match(/^Wire\.requestFrom\s*\(\s*([^,]+),\s*([^,]+)(?:,[^)]*)?\s*\)$/i);
   if (wireRequestFrom) {
-    context.protocol.i2cRequestFrom(context.boardId, asNumber(evaluateExpression(wireRequestFrom[1], context)), asNumber(evaluateExpression(wireRequestFrom[2], context)));
+    const failuresBefore = context.failureCount;
+    const address = asNumber(evaluateExpression(wireRequestFrom[1], context));
+    const length = asNumber(evaluateExpression(wireRequestFrom[2], context));
+    if (context.failureCount !== failuresBefore) return;
+    context.protocol.i2cRequestFrom(context.boardId, address, length);
     return;
   }
 
@@ -415,7 +604,10 @@ function executeStatement(statement: string, context: ExecutionContext) {
   }
   const spiTransfer = text.match(/^SPI\.transfer\s*\(\s*([^)]*)\s*\)$/i);
   if (spiTransfer) {
-    context.protocol.spiTransfer(context.boardId, asNumber(evaluateExpression(spiTransfer[1], context)));
+    const failuresBefore = context.failureCount;
+    const value = asNumber(evaluateExpression(spiTransfer[1], context));
+    if (context.failureCount !== failuresBefore) return;
+    context.protocol.spiTransfer(context.boardId, value);
     return;
   }
   const spiEndTransaction = text.match(/^SPI\.endTransaction\s*\(.*\)$/i);
@@ -429,7 +621,9 @@ function executeStatement(statement: string, context: ExecutionContext) {
   const serial = text.match(/^Serial\.(?:print|println)\s*\((.*)\)$/i);
   if (serial) {
     const raw = serial[1].trim();
+    const failuresBefore = context.failureCount;
     const value = /^".*"$/.test(raw) ? raw.slice(1, -1) : String(evaluateExpression(raw, context));
+    if (context.failureCount !== failuresBefore) return;
     const output = value + (/println/i.test(text) ? "\n" : "");
     context.serial.push(output);
     context.protocol.serialWrite(context.boardId, [...new TextEncoder().encode(output)]);
@@ -447,7 +641,14 @@ function executeStatement(statement: string, context: ExecutionContext) {
   const tone = text.match(/^tone\s*\(\s*([^,]+),\s*([^,]+),\s*([^)]+)\)$/i);
   if (tone) {
     const endpoint = resolveBoardPin(context.project, context.boardId, tone[1], context.constants);
-    if (!endpoint) return;
+    if (!endpoint) {
+      markUnsupported(context, "tone");
+      return;
+    }
+    const failuresBefore = context.failureCount;
+    const frequencyHz = asNumber(evaluateExpression(tone[2], context));
+    const durationMs = asNumber(evaluateExpression(tone[3], context));
+    if (context.failureCount !== failuresBefore) return;
     const root = context.dsu.find(endpointKey(endpoint));
     const start = Math.min(context.cursor, context.duration);
     for (const member of context.dsu.members(root)) {
@@ -455,8 +656,8 @@ function executeStatement(statement: string, context: ExecutionContext) {
       context.events.push({ timeMs: start, endpoint: member, value: true, reason: `${context.programId} firmware tone` });
     }
     context.writes += 1;
-    context.protocol.pwmWrite(context.boardId, endpoint.portId, 255, asNumber(evaluateExpression(tone[2], context)));
-    context.cursor += Math.max(0, asNumber(evaluateExpression(tone[3], context)));
+    context.protocol.pwmWrite(context.boardId, endpoint.portId, 255, frequencyHz);
+    context.cursor += Math.max(0, durationMs);
     for (const member of context.dsu.members(root)) {
       context.outputs[member] = false;
       context.events.push({ timeMs: Math.min(context.cursor, context.duration), endpoint: member, value: false, reason: `${context.programId} firmware tone complete` });
@@ -468,8 +669,13 @@ function executeStatement(statement: string, context: ExecutionContext) {
   const writeArguments = write ? splitTopLevel(write[2], ",") : null;
   if (write && writeArguments) {
     const endpoint = resolveBoardPin(context.project, context.boardId, writeArguments[0], context.constants);
-    if (!endpoint) return;
+    if (!endpoint) {
+      markUnsupported(context, write[1].toLowerCase());
+      return;
+    }
+    const failuresBefore = context.failureCount;
     const rawValue = evaluateExpression(writeArguments[1], context);
+    if (context.failureCount !== failuresBefore) return;
     const value = write[1].toLowerCase() === "analogwrite" ? asNumber(rawValue) : Boolean(rawValue);
     const root = context.dsu.find(endpointKey(endpoint));
     context.netValues.set(root, value);
@@ -482,10 +688,19 @@ function executeStatement(statement: string, context: ExecutionContext) {
   }
 
   const assignment = text.match(/^(?:(?:const\s+)?(?:bool|boolean|byte|short|int|long|float|double|uint8_t|uint16_t)\s+)?([A-Za-z_]\w*)\s*=\s*(.+)$/);
-  if (assignment) context.variables.set(assignment[1], evaluateExpression(assignment[2], context));
+  if (assignment) {
+    const failuresBefore = context.failureCount;
+    const value = evaluateExpression(assignment[2], context);
+    if (context.failureCount !== failuresBefore) return;
+    context.variables.set(assignment[1], value);
+    return;
+  }
 
-  const unsupported = text.match(/^(Wire|SPI|Serial|digitalRead|digitalWrite|analogRead|analogWrite|pinMode|delay|tone|millis|micros|map|constrain)\.?(?:[A-Za-z_]\w*)?\s*\(/i);
-  if (unsupported) context.unsupportedApis.add(unsupported[0].replace(/\s*\($/, "").trim());
+  // Unknown statements are not no-ops: mark them explicitly so callers can
+  // report an incomplete execution rather than claiming that the program ran.
+  const unsupportedCall = text.match(/^((?:[A-Za-z_]\w*\.)?[A-Za-z_]\w*)\s*\(/);
+  const unsupportedName = unsupportedCall?.[1];
+  markUnsupported(context, unsupportedName?.includes(".") ? unsupportedName : unsupportedName ? `C++:${unsupportedName}` : "C++:statement");
 }
 
 function sourceForTarget(target: HardwareGraph["firmwareTargets"][number]) {
@@ -522,7 +737,7 @@ function collectUnsupportedApis(source: string, output: Set<string>) {
     if (!["Wire", "SPI", "Serial"].includes(match[1])) output.add(`C++:${match[1]}.${match[2]}`);
   }
   const supported = new Set([
-    "setup", "loop", "if", "else", "for", "while", "switch", "digitalRead", "digitalWrite", "analogRead", "analogWrite",
+    "setup", "loop", "if", "else", "digitalRead", "digitalWrite", "analogRead", "analogWrite",
     "pinMode", "delay", "tone", "millis", "micros", "map", "constrain", "min", "max", "abs", "round", "SPISettings",
   ]);
   for (const match of source.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)) {
@@ -612,6 +827,8 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
       programId: target.componentId,
       protocol,
       unsupportedApis: new Set<string>(),
+      failedClosed: false,
+      failureCount: 0,
     };
     executeBlock(functionBody(source, "setup"), context);
     const loop = functionBody(source, "loop");
@@ -623,6 +840,7 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
       iteration += 1;
       if (context.cursor === before) break;
     }
+    for (const unsupportedApi of context.unsupportedApis) runtimeUnsupported.add(unsupportedApi);
     programs.push({ componentId: target.componentId, writes: context.writes, executions: context.executions, sourceFiles: target.files.map((file) => file.name) });
   }
 
@@ -652,7 +870,7 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
     outputs,
     events,
     programs,
-    resolvedNets: dsu.size(),
+    resolvedNets: dsu.connectedSize(),
     serialOutput: serial.join(""),
     targetIssues,
     protocolEvents: protocol.events,
@@ -671,7 +889,7 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
     connectionCheck: {
       status: "completed",
       connectionsChecked: project.connections.length,
-      resolvedNets: dsu.size(),
+      resolvedNets: dsu.connectedSize(),
       note: "The browser resolved connected nets and ran available protocol checks independently of firmware execution.",
     },
     codeExecution,

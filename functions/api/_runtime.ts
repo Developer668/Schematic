@@ -119,8 +119,10 @@ export function normalizeProject(value: unknown): HardwareGraph | null {
       domain: String(connection.domain ?? "gpio"),
     };
   }).filter((connection) => connection.id && connection.source.componentId && connection.target.componentId && connection.source.portId && connection.target.portId) : [];
-  const firmwareTargets = Array.isArray(source.firmwareTargets ?? source.firmware_targets) ? (source.firmwareTargets ?? source.firmware_targets as unknown[]).filter((item) => asRecord(item)).map((item) => {
-    const target = item as Record<string, unknown>;
+  const rawFirmwareTargets = source.firmwareTargets ?? source.firmware_targets;
+  const firmwareTargets = Array.isArray(rawFirmwareTargets) ? rawFirmwareTargets
+    .filter((item): item is Record<string, unknown> => Boolean(asRecord(item)))
+    .map((target) => {
     const files = Array.isArray(target.files) ? target.files.filter((file) => asRecord(file)).map((file) => {
       const sourceFile = file as Record<string, unknown>;
       return { name: String(sourceFile.name ?? "sketch.ino"), content: String(sourceFile.content ?? "") };
@@ -192,6 +194,10 @@ export async function runSimulation(request: Request, env: AuthEnv) {
   const safeInputValues = safeInputs(body?.inputs);
   const durationMs = boundedDurationMs(Number(body?.duration_ns ?? 1_000_000) / 1_000_000);
   const id = typeof body?.session_id === "string" && body.session_id.trim() ? body.session_id.trim().slice(0, 160) : sessionId();
+  const existing = sessions.get(id);
+  if (existing && existing.owner !== identity.subject) {
+    return jsonResponse(request, { error: "session_id is owned by another room" }, 403);
+  }
   const result = runProject(project, safeInputValues, durationMs, id);
   sessions.set(id, { owner: identity.subject, result, updatedAt: Date.now() });
   while (sessions.size > MAX_SESSIONS) {
@@ -270,6 +276,8 @@ export async function simulationWebSocket(request: Request, env: AuthEnv) {
           if (!project) return send({ type: "error", code: "INVALID_PROJECT", message: "A valid project graph is required." });
           const supplied = safeInputs(data.inputs);
           const resultId = typeof data.session_id === "string" && data.session_id.trim() ? data.session_id.trim().slice(0, 160) : sessionId();
+          const existing = sessions.get(resultId);
+          if (existing && existing.owner !== identity.subject) return send({ type: "error", code: "SESSION_FORBIDDEN", message: "simulation session is owned by another room" });
           const result = runProject(project, { ...pendingInputs, ...supplied }, boundedDurationMs(Number(data.duration_ns ?? 1_000_000) / 1_000_000), resultId);
           activeSessionId = resultId;
           sessions.set(resultId, { owner: identity.subject, result, updatedAt: Date.now() });
@@ -285,7 +293,8 @@ export async function simulationWebSocket(request: Request, env: AuthEnv) {
           const record = activeSessionId ? sessions.get(activeSessionId) : undefined;
           if (!record || record.owner !== identity.subject) return send({ type: "error", code: "SESSION_FORBIDDEN", message: "simulation session is not initialized" });
           const portId = String(data.portId ?? "");
-          return send({ type: "pin_value", session_id: activeSessionId, portId, value: { digital: record.result.outputs?.[portId] } });
+          const outputs = asRecord(record.result.outputs);
+          return send({ type: "pin_value", session_id: activeSessionId, portId, value: { digital: outputs?.[portId] } });
         }
         send({ type: "error", code: "UNKNOWN_OPERATION", message: `unknown op ${String(data.op)}` });
       } catch (error) {

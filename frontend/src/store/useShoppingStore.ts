@@ -83,15 +83,29 @@ const ANONYMOUS_STORAGE_KEY = "schematic-shopping";
 const shoppingChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("schematic-shopping-sync") : null;
 type PersistedShopping = Pick<ShoppingState, "query" | "results" | "cart" | "budget" | "lastSearchAt">;
 
+// Retailer prices and availability are untrusted agent-reported data. Keep a
+// narrow acceptance window so a replayed or clock-skewed publication cannot
+// masquerade as a current offer in the workspace.
+const MAX_OFFER_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_TIMESTAMP_FUTURE_SKEW_MS = 5 * 60 * 1000;
+
 function validTimestamp(value: unknown) {
-  return typeof value === "string" && Number.isFinite(Date.parse(value));
+  if (typeof value !== "string" || !value.trim()) return false;
+  const parsed = Date.parse(value);
+  const now = Date.now();
+  return Number.isFinite(parsed)
+    && parsed <= now + MAX_TIMESTAMP_FUTURE_SKEW_MS
+    && parsed >= now - MAX_OFFER_AGE_MS;
 }
 
 function validUrl(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return false;
   try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
+    const url = new URL(value.trim());
+    // Do not allow cleartext links or embedded credentials from an
+    // untrusted agent publication. The retailer domain remains agent-owned
+    // and is shown as a link only after this transport-level check.
+    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password;
   } catch { return false; }
 }
 
@@ -184,12 +198,12 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     });
     const rejected = results.length - normalized.length;
     if (normalized.length === 0) {
-      const message = "Listing publication rejected: every listing needs a canonical catalogId, exactMatch=true, part number, valid retailer URL, timestamp, currency, and provider provenance.";
+      const message = "Listing publication rejected: every listing needs a canonical catalogId, exactMatch=true, part number, an HTTPS retailer URL, a recent timestamp, currency, and provider provenance.";
       set({ results: [], cart: [], lastSearchAt: null, publicationError: message });
       persist(get());
       return { accepted: false, rejected, message };
     }
-    set({ results: normalized, cart: [], lastSearchAt: Date.now(), publicationError: rejected ? `${rejected} malformed listing${rejected === 1 ? " was" : "s were"} rejected; showing only authenticated exact listings.` : null });
+    set({ results: normalized, cart: [], lastSearchAt: Date.now(), publicationError: rejected ? `${rejected} malformed listing${rejected === 1 ? " was" : "s were"} rejected; showing only authenticated agent-sourced exact listings.` : null });
     persist(get());
     return { accepted: true, rejected };
   },

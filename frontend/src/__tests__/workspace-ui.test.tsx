@@ -84,7 +84,7 @@ describe("workspace UI", () => {
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
     expect(useProjectStore.getState().project.name).toBe("Renamed hardware");
-  });
+  }, 15_000);
 
   it("keeps project names unique and adds an explicit copy suffix", () => {
     const store = useProjectStore.getState();

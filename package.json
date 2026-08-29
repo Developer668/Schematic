@@ -6,18 +6,21 @@
   "license": "AGPL-3.0-only",
   "packageManager": "pnpm@9.12.0",
   "engines": {
-    "node": ">=18",
+    "node": ">=22.13.0",
     "pnpm": ">=9"
   },
-  "workspaces": [
-    "frontend",
-    "packages/*"
-  ],
   "scripts": {
     "dev": "pnpm --filter frontend dev",
-    "build": "pnpm -r build",
-    "lint": "pnpm -r lint",
-    "test": "pnpm -r test",
+    "install:clean": "pnpm install --frozen-lockfile && npm --prefix chatgpt-site ci",
+    "build:workspace": "pnpm -r build",
+    "lint:workspace": "pnpm -r lint",
+    "test:workspace": "pnpm -r test",
+    "typecheck:workspace": "pnpm -r typecheck",
+    "build": "pnpm run build:workspace && npm --prefix chatgpt-site run build",
+    "lint": "pnpm run lint:workspace && npm --prefix chatgpt-site run lint",
+    "test": "pnpm run test:workspace && npm --prefix chatgpt-site run test",
+    "typecheck": "pnpm run typecheck:workspace && npm --prefix chatgpt-site run typecheck",
+    "verify": "pnpm run typecheck:workspace && pnpm run lint:workspace && pnpm run test:workspace && pnpm run build:workspace && npm --prefix chatgpt-site run verify",
     "dev:backend": "SCHEMATIC_DEPLOYMENT_ENV=local SCHEMATIC_AUTH_MODE=development python -m uvicorn app.main:app --reload --port 8001 --app-dir backend",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
   },

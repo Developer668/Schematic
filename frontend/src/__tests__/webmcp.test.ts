@@ -10,13 +10,13 @@ import { useShoppingStore } from "../store/useShoppingStore.ts";
 import { getCatalogComponent } from "../data/catalog.ts";
 import { resolveBoardPin } from "../data/hardware.ts";
 import { hasPortableButtonLedContract } from "../simulation/portableHarness.ts";
-import { getRegisteredToolNames, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools, WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
+import { fetchJson, getRegisteredToolNames, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools, WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
 
 const AGENT_PUBLICATION = {
   authenticated: true as const,
   agentId: "webmcp:local:local-development",
   provider: "Digi-Key",
-  publishedAt: "2026-08-28T12:00:00.000Z",
+  publishedAt: new Date().toISOString(),
 };
 
 function validAgentListing(catalogId: string, overrides: Record<string, unknown> = {}) {
@@ -168,6 +168,8 @@ describe("WebMCP tools", () => {
     (document as any).modelContext = { registerTool };
     await registerWebMCPTools();
 
+    expect(WEBMCP_TOOL_COUNT).toBe(42);
+    expect(registerTool).toHaveBeenCalledTimes(42);
     expect(registerTool).toHaveBeenCalledTimes(getRegisteredToolNames().length);
     const calls = registerTool.mock.calls as any[];
     expect(calls.map(([definition]) => definition.name)).toEqual(getRegisteredToolNames());
@@ -176,6 +178,39 @@ describe("WebMCP tools", () => {
       expect(definition.inputSchema.type).toBe("object");
       expect(options.signal).toBeInstanceOf(AbortSignal);
     }
+    const definitions = new Map(calls.map(([definition]) => [definition.name, definition]));
+    const shoppingNames = getRegisteredToolNames().filter((name) => name.startsWith("shopping."));
+    expect(shoppingNames).toHaveLength(10);
+    for (const name of shoppingNames) expect(definitions.get(name).annotations?.untrustedContentHint).toBe(true);
+    expect(definitions.get("shopping.get_state").annotations?.readOnlyHint).toBe(true);
+    expect(definitions.get("shopping.quote").annotations?.readOnlyHint).toBe(true);
+  });
+
+  it("does not expose an inbound postMessage mutation bridge", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/webmcp/tools.ts"), "utf8");
+    expect(source).not.toMatch(/(?:window|globalThis)\.(?:addEventListener|onmessage)\s*\(\s*["']message["']/);
+    expect(source).not.toMatch(/window\.postMessage\s*\(/);
+  });
+
+  it("passes AbortSignal to fetch and rejects when the request is aborted", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/api/auth/session")) {
+        return Promise.resolve(new Response(JSON.stringify({ authenticated: false }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = fetchJson("/api/simulation/run", { method: "POST", body: "{}", signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/simulation/run"))).toBe(true));
+    const targetCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/simulation/run"));
+    expect(targetCall?.[1]?.signal).toBe(controller.signal);
+
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("executes all registered WebMCP tools through real state transitions", async () => {
@@ -436,6 +471,7 @@ describe("WebMCP tools", () => {
     expect(useSimulationStore.getState().lastRun?.runtime).toBe("remote");
     expect(useSimulationStore.getState().lastRun?.programs).toHaveLength(1);
     expect(useSimulationStore.getState().remoteSessionId).toBe("remote-session-1");
+    expect(result.data).toEqual(useSimulationStore.getState().lastRun);
   });
 
   it("does not treat a compiler HTTP 200 success:false payload as a successful compile", async () => {

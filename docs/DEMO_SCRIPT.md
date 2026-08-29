@@ -1,56 +1,112 @@
-# Demo Script — Under 3 Minutes
+# Judge demo — under 3 minutes
 
-> Judging equally on WebMCP leverage / execution / impact / creativity. Don't showcase AR glasses as main demo — build simple→surprising.
+This script uses the supported ChatGPT Site path only. Open the authenticated
+[live Site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site)
+inside the ChatGPT in-app browser. Ask ChatGPT to use the Site's **native
+WebMCP** surface; do not use visual clicking as the agent interface. If the
+in-app browser does not expose native `modelContext`, say that the host
+capability is unavailable and do not present a compatibility shim as native
+discovery.
 
-## Setup (0:00)
+## 0:00–0:20 — Discover the contract
 
-Open Schematic in Chrome 146+ with `chrome://flags/#enable-webmcp-testing` enabled.
-Show header: Schematic AGPL-3.0, 10 components in library, 18 WebMCP tools, Run button.
+Prompt: “Inspect the Schematic Site's native WebMCP tools and report the tool
+count. Read the current project graph.”
 
-## Demo 1 — Temperature Warning (0:00–0:45, 15s build)
+The agent calls `project.get_graph` and reports **42 tools**. Point out that
+the tool activity panel and the visible graph are driven by the same store
+actions.
 
-Voice: “Build me an ESP32 temperature warning with OLED and buzzer.”
+## 0:20–0:55 — Build a real graph
 
-Agent (WebMCP visible in DevTools `await document.modelContext.getTools()` → `component.search`):
-- Visibly: ESP32-S3, BMP280, SSD1306, buzzer appear, wires auto-route (power━━, i2c═).
-- `validation.check` → warning: missing pull-ups → agent adds 2× resistor → green.
-- `firmware.write` (Arduino sketch shown in Monaco) → `firmware.compile` → log.
-- `simulation.run` → `simulation.set_input(bmp280, temperature, 32)` → `read_serial` → “Temp 32C — Buzzer ON”.
+Prompt: “Find an ESP32 DevKit, a pushbutton, and an LED. Add one of each to
+this project, inspect their ports, and connect the button to GPIO18 and the LED
+to GPIO19.”
 
-**Key line:** “No screenshots — structured `hardware.add_component` / `connect_ports` / `run_simulation`.”
+Expected tool sequence:
 
-## Demo 2 — TI Import (0:45–1:30, 30s)
+1. `component.search` for `ESP32`, `pushbutton`, and `LED`.
+2. `component.add` for `esp32-devkit-v1`, `pushbutton`, and `led` (omit
+   coordinates for collision-aware placement, or provide finite pairs).
+3. `component.list_ports` for the three instance IDs.
+4. `connection.connect` for board `GPIO18 → button A` and board `GPIO19 → LED
+IN`.
+5. `validation.check` to show the typed validation result; continue only when
+   there are no blocking errors.
 
-Voice: “Replace sensor with this TI DRV8871 I just imported.”
+Read the returned instance IDs and endpoints aloud; the point is that the
+agent is manipulating a structured hardware graph, not guessing canvas
+coordinates.
 
-Steps:
-- Click Import → choose `drv8871.lib` → Analyze → table shows ✓ SPICE ✕ validated → Add to catalog.
-- Agent: `component.inspect(drv8871)` → VIN 6.5-30V, `component.remove(bmp280)` → `component.add(drv8871)` → `connection.connect`.
-- `validation.check` → error: voltage mismatch (DRV needs higher VIN) + motor load → agent `component.add` level shifter logic, rewire.
-- Re-run `validation.check` → ✓, then `simulation.run` (ngspice H-bridge shows current).
+## 0:55–1:30 — Write the exact portable firmware
 
-## Demo 3 — Smart Desk Assistant (1:30–2:30, 60s)
+Prompt: “Write this exact button-to-LED sketch for the ESP32 board, then check
+the firmware.”
 
-Voice: “Build a smart desk: Pi + display + PIR + ESP32 sensor + LEDs.”
+Use one `main.ino` file with this source:
 
-Agent builds multi-board (Pi 5 + ESP32-S3):
-- Pi (QEMU stub → “Linux service”) ↔ ESP32 via UART bridge (`Pi TX → ESP32 GPIO4`).
-- Canvas shows two boards + peripherals.
-- `firmware.write` for both boards (Py + Arduino) → `simulation.run` → show `simulation.get_state` pins.
-- `set_sensor_input(pir, motion, true)` → Pi serial: “Presence detected — MQTT sent.”
+```cpp
+constexpr int BUTTON_PIN = 18;
+constexpr int LED_PIN = 19;
 
-Note: Pi runs simulated Linux service; emphasis is inter-board communication via typed bridges (UART → generic Bridge).
+void setup() {
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(LED_PIN, OUTPUT);
+}
 
-## Wow Moment — “Fix my hardware” (2:30–2:55, 25s)
+void loop() {
+  bool pressed = digitalRead(BUTTON_PIN) == LOW;
+  digitalWrite(LED_PIN, pressed);
+  delay(10);
+}
+```
 
-Manually break it: change OLED to 5V-only variant, delete pull-up resistors, swap SDA/SCL.
+Call `firmware.write`, then `firmware.check`. Explain that this exact grammar
+is intentionally recognized by the portable C/WASM harness; it is not a
+general C/C++ compiler.
 
-Voice: “Fix my hardware.”
+## 1:30–2:00 — Prove pressed and released behavior
 
-Agent chain: `validate_design` → 3 errors listed → `explain_error(VOLTAGE_MISMATCH)` → `disconnect_ports` → `connect_ports` (cross-correct) → `add_component(resistor)` ×2 → `add_component(level-shifter)` → `validate` → green → `run_simulation` → fixed.
+1. Call `simulation.set_input` with the button instance ID, key `pressed`, and
+   value `true`.
+2. Call `simulation.run` with `durationMs: 50`.
+3. Show the result's `executionEngine: "c-wasm"`, `contract: "button-led"`,
+   `abiVersion: 2`, 64-character `artifactSha256`, resolved board pins, and
+   LED output `true`.
+4. Set `pressed` to `false` and run again. Show the same ABI/hash metadata and
+   LED output `false`.
 
-## Close (2:55–3:00)
+The important claim is exact C/WASM execution with deterministic virtual I/O,
+not a screenshot or a simulated compiler log.
 
-Tagline: “An agent-native workbench — humans visually design, any WebMCP agent can understand the graph, wire, program, simulate, and repair — without vision clicking. Built on Velxio + Renode + ngspice + Wasmtime, AGPL-3.0, architecture ready for QEMU/Verilator/Gazebo/RF.”
+## 2:00–2:25 — Show an honest unsupported result
 
-Footer: live URL, repo, license, Engine Support page (✓ vs ○, no faking).
+Prompt: “Try this unsupported sketch and report the boundary; do not invent a
+binary.” Replace the board source temporarily with a sketch that calls an
+unsupported API, for example:
+
+```cpp
+void setup() { Wire.foo(); }
+void loop() {}
+```
+
+Call `firmware.write` and `simulation.run`. Show the structured
+`unsupported-api`/unsupported-API result and its `unsupportedApis` entry. Say:
+“The Site reports the unsupported contract explicitly. It does not pretend to
+compile or run an arbitrary sketch.”
+
+## 2:25–2:55 — Restore and persist
+
+Restore the exact button→LED source with `firmware.write`, then call
+`project.save` and `project.get_graph`. Reload the Site or switch away and back;
+call `project.list`/`project.get_graph` to show the project name, three
+components, two connections, and firmware target remain in the browser-local
+verified-user room.
+
+## 2:55–3:00 — Close with precise scope
+
+“Schematic gives a ChatGPT agent a structured hardware graph and 42 native
+WebMCP operations. This release proves the exact button→LED C/WASM contract,
+uses a bounded TypeScript interpreter for other supported behavior, persists
+the project locally, and reports unsupported work explicitly. The Site API is
+same-origin and Site compilation is preflight-only.”

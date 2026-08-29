@@ -8,14 +8,14 @@ type ShoppingSnapshot = ShoppingState;
 type ShoppingQuote = ReturnType<ShoppingSnapshot["getQuote"]>;
 
 function money(value: number | null, currency = "USD") {
-  if (value === null || !Number.isFinite(value)) return "Live quote";
+  if (value === null || !Number.isFinite(value)) return "Price unavailable";
   return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 2 }).format(value);
 }
 
 function dateLabel(value: number | string | null | undefined) {
   if (!value) return "Awaiting first agent search";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Recently sourced";
+  if (Number.isNaN(date.getTime())) return "Timestamp unavailable";
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 }
 
@@ -45,7 +45,7 @@ function OfferRow({ offer, selected, selectable, cheapest, onSelect }: { offer: 
           <span className="truncate text-[11px] font-medium">{offer.retailer}</span>
           {cheapest && <span className="shrink-0 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:text-emerald-300">Best price</span>}
         </div>
-        <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{offer.title}{offer.availability ? ` · ${offer.availability}` : " · live retailer offer"}</div>
+        <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{offer.title}{offer.availability ? ` · reported ${offer.availability}` : " · agent-sourced offer"}</div>
       </div>
       <span className={`shrink-0 font-mono text-[11px] tabular-nums ${offer.price === null ? "text-muted-foreground" : "text-foreground"}`}>{money(offer.price, offer.currency)}</span>
       <a href={offer.url} target="_blank" rel="noreferrer" className="grid h-7 w-7 shrink-0 place-items-center rounded border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={`Open ${offer.retailer} listing`}>
@@ -118,11 +118,11 @@ function CartSummary({ shopping, quote, onReset, detailed = false }: { shopping:
       </div>
       {detailed && (
         <div className="mt-4">
-          {quote.lines.length === 0 ? <p className="border-y border-dashed border-border px-2 py-6 text-center text-[10px] text-muted-foreground">Add verified listings to start the build cart.</p> : (
+          {quote.lines.length === 0 ? <p className="border-y border-dashed border-border px-2 py-6 text-center text-[10px] text-muted-foreground">Add validated listings to start the build cart.</p> : (
             <div className="divide-y divide-border border-y border-border">
               {quote.lines.map((line) => (
                 <div key={line.resultId} className="flex items-start gap-2 py-3">
-                  <div className="min-w-0 flex-1"><div className="truncate text-[11px] font-medium">{line.title}</div><div className="mt-1 font-mono text-[10px] text-muted-foreground">qty {line.quantity} · {line.unitPrice === null ? "live quote" : `${money(line.unitPrice, line.offer?.currency)} each`}</div></div>
+                  <div className="min-w-0 flex-1"><div className="truncate text-[11px] font-medium">{line.title}</div><div className="mt-1 font-mono text-[10px] text-muted-foreground">qty {line.quantity} · {line.unitPrice === null ? "price unavailable" : `${money(line.unitPrice, line.offer?.currency)} each`}</div></div>
                   <button type="button" onClick={() => shopping.removeFromCart(line.resultId)} className="grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500" aria-label={`Remove ${line.title} from cart`} title="Remove from cart"><Trash2 size={11} /></button>
                 </div>
               ))}
@@ -131,7 +131,7 @@ function CartSummary({ shopping, quote, onReset, detailed = false }: { shopping:
         </div>
       )}
       <div className="mt-4 flex items-end justify-between gap-3"><span className="text-[11px] text-muted-foreground">Total build cost</span><span className={`font-mono text-lg font-semibold tabular-nums ${quote.overBudget ? "text-red-500" : ""}`}>{quote.missingPrices.length ? "—" : money(quote.total)}</span></div>
-      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground"><span>{quote.missingPrices.length ? `${quote.missingPrices.length} missing live price${quote.missingPrices.length === 1 ? "" : "s"}` : "Lowest available offer per line"}</span><span className={quote.overBudget ? "font-semibold text-red-500" : ""}>{quote.budget === null ? "No budget" : `${quote.overBudget ? "Over" : "Under"} ${money(quote.budget)}`}</span></div>
+      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground"><span>{quote.missingPrices.length ? `${quote.missingPrices.length} missing price${quote.missingPrices.length === 1 ? "" : "s"}` : "Lowest priced offer per line"}</span><span className={quote.overBudget ? "font-semibold text-red-500" : ""}>{quote.budget === null ? "No budget" : `${quote.overBudget ? "Over" : "Under"} ${money(quote.budget)}`}</span></div>
       <label className="mt-3 flex items-center gap-2 border-b border-border py-1.5"><span className="text-[10px] font-medium text-muted-foreground">Budget ceiling</span><span className="font-mono text-[10px] text-muted-foreground">$</span><input type="number" min="0" step="0.01" value={shopping.budget ?? ""} onChange={(event) => shopping.setBudget(event.target.value === "" ? null : Number(event.target.value))} placeholder="Set budget" aria-label="Shopping budget" className="h-7 min-w-0 flex-1 bg-transparent text-right font-mono text-[11px] outline-none placeholder:text-muted-foreground/60" /></label>
       <div className="mt-3 flex items-center gap-1.5"><button type="button" onClick={() => shopping.undoCart()} disabled={shopping.undoStack.length === 0} className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded border border-border text-[10px] transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40" title="Undo cart change"><Undo2 size={12} /> Undo</button><button type="button" onClick={onReset} className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded border border-border text-[10px] transition-colors hover:bg-muted" title="Reset to all project components"><RotateCcw size={11} /> Reset required</button></div>
       <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">Prices are agent-sourced and may change at checkout. Open each retailer link to confirm stock, shipping, and final quantity.</p>
@@ -149,7 +149,7 @@ function AgentEmptyState({ query }: { query: string }) {
       </div>
       <div className="mt-5 grid gap-2 sm:grid-cols-3">
         <div className="border-t border-border pt-2.5"><span className="font-mono text-[10px] text-muted-foreground">01</span><p className="mt-1 text-[10px] font-semibold">Resolve identity</p><p className="mt-1 text-[10px] leading-snug text-muted-foreground">Match the request to a real catalog part number.</p></div>
-        <div className="border-t border-border pt-2.5"><span className="font-mono text-[10px] text-muted-foreground">02</span><p className="mt-1 text-[10px] font-semibold">Source offers</p><p className="mt-1 text-[10px] leading-snug text-muted-foreground">Attach up to three current retailer URLs and prices.</p></div>
+        <div className="border-t border-border pt-2.5"><span className="font-mono text-[10px] text-muted-foreground">02</span><p className="mt-1 text-[10px] font-semibold">Source offers</p><p className="mt-1 text-[10px] leading-snug text-muted-foreground">Attach up to three recently reported retailer URLs and prices.</p></div>
         <div className="border-t border-border pt-2.5"><span className="font-mono text-[10px] text-muted-foreground">03</span><p className="mt-1 text-[10px] font-semibold">Publish to this desk</p><p className="mt-1 text-[10px] leading-snug text-muted-foreground">Call <code className="font-mono text-foreground">shopping.search</code> with provenance.</p></div>
       </div>
       <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-[10px]"><span className="kicker">Agent request</span><code className="min-w-0 truncate font-mono text-foreground">{query || "Enter a part or board above"}</code></div>
@@ -194,7 +194,7 @@ export default function ShoppingWorkspace({ fullPage = false }: { fullPage?: boo
           <div className="min-w-0">
             <div className="kicker">Agent procurement</div>
             <div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold tracking-tight">Parts desk</h2><span className="inline-flex items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> WebMCP only</span></div>
-            <p className="mt-1 max-w-[70ch] text-[10px] leading-relaxed text-muted-foreground">The agent searches the exact design identities, compares live offers, and publishes verified listings here. There is no local catalog or price fallback.</p>
+            <p className="mt-1 max-w-[70ch] text-[10px] leading-relaxed text-muted-foreground">The agent searches the exact design identities, compares agent-sourced offers, and publishes validated listings here. There is no local catalog or price fallback.</p>
           </div>
           <div className="hidden shrink-0 text-right sm:block"><div className="font-mono text-[10px] font-semibold tabular-nums">{shopping.results.length ? `${shopping.results.length} exact part${shopping.results.length === 1 ? "" : "s"}` : "No published listings"}</div><div className="mt-1 text-[10px] text-muted-foreground">{shopping.results.length ? `${offerCount} offers · ${providers}` : "Connected agent required"}</div></div>
         </div>
@@ -202,7 +202,7 @@ export default function ShoppingWorkspace({ fullPage = false }: { fullPage?: boo
           <div className="mb-1.5 flex items-center justify-between gap-2"><label htmlFor="shopping-agent-request" className="kicker">Agent request</label><span className="text-[10px] text-muted-foreground">Enter stages the query; the agent publishes results</span></div>
           <div className="relative min-w-0"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input id="shopping-agent-request" value={query} onChange={(event) => shopping.setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); stageQuery(); } }} placeholder="Exact part, board, or manufacturer" aria-label="Search exact parts" className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-16 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-foreground/30 focus:ring-2 focus:ring-ring/10" /><kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">Enter</kbd></div>
         </div>
-        <div className="mt-2 flex items-start gap-2 rounded-md border border-border/70 bg-card/70 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" /><span><strong className="font-semibold text-foreground">Verified listings only.</strong> A connected, authenticated WebMCP agent must provide the catalog identity, exact part number, provider, timestamp, URL, currency, and offer price before anything appears or enters the cart.</span></div>
+        <div className="mt-2 flex items-start gap-2 rounded-md border border-border/70 bg-card/70 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" /><span><strong className="font-semibold text-foreground">Validated listings only.</strong> A connected, authenticated WebMCP agent must provide the catalog identity, exact part number, provider, recent timestamp, HTTPS URL, currency, and offer price before anything appears or enters the cart. Confirm stock and final pricing with the retailer.</span></div>
         {(message || shopping.publicationError) && <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-relaxed text-amber-700 dark:text-amber-300" role="status"><CircleAlert size={13} className="mt-0.5 shrink-0" /><span>{shopping.publicationError ?? message}</span></div>}
       </div>
 
@@ -210,7 +210,7 @@ export default function ShoppingWorkspace({ fullPage = false }: { fullPage?: boo
         <section className="shopping-results-scroll min-h-0 overflow-y-auto px-3 py-3 sm:px-4" aria-label="Agent sourced parts">
           {shopping.results.length === 0 ? <AgentEmptyState query={query} /> : (
             <div className="space-y-3">
-              <div className="flex items-end justify-between gap-3 border-b border-border pb-2"><div><div className="kicker">Verified results</div><p className="mt-1 text-[10px] text-muted-foreground">{shopping.results.length} exact catalog match{shopping.results.length === 1 ? "" : "es"} · {offerCount} sourced offer{offerCount === 1 ? "" : "s"}</p></div><div className="text-right text-[10px] text-muted-foreground"><div>{providers}</div><div className="mt-1 font-mono">{dateLabel(shopping.lastSearchAt)}</div></div></div>
+              <div className="flex items-end justify-between gap-3 border-b border-border pb-2"><div><div className="kicker">Validated results</div><p className="mt-1 text-[10px] text-muted-foreground">{shopping.results.length} exact catalog match{shopping.results.length === 1 ? "" : "es"} · {offerCount} sourced offer{offerCount === 1 ? "" : "s"}</p></div><div className="text-right text-[10px] text-muted-foreground"><div>{providers}</div><div className="mt-1 font-mono">{dateLabel(shopping.lastSearchAt)}</div></div></div>
               {shopping.results.map((result) => {
                 const cartLine = cartResults.get(result.id);
                 return <ResultCard key={result.id} result={result} cartLine={cartLine} onAdd={() => shopping.addToCart(result.id)} onRemove={() => shopping.removeFromCart(result.id)} onQuantity={(quantity) => shopping.setQuantity(result.id, quantity)} onOffer={(offerId) => shopping.setOffer(result.id, offerId)} onAlternative={(catalogId) => { const changed = shopping.chooseAlternative(result.id, catalogId); setMessage(changed ? "Cart alternative selected." : "Search the alternative listing before switching the cart line."); }} />;
