@@ -508,6 +508,17 @@ html.light .react-flow__pane {
 .shopping-step-line { height: 1px; flex: 1; margin: 0 2px; background: hsl(var(--border)); }
 .shopping-request-step.is-active .shopping-step-line { background: hsl(var(--accent) / .35); }
 .shopping-trust-note { background: hsl(var(--card) / .75); }
+.shopping-discovery-panel { margin-bottom: 10px; border: 1px solid hsl(38 92% 50% / .22); border-radius: 10px; padding: 11px; background: linear-gradient(135deg, hsl(38 92% 50% / .08), hsl(var(--card) / .82)); }
+.shopping-discovery-icon { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border: 1px solid hsl(38 92% 50% / .28); border-radius: 7px; color: hsl(32 90% 38%); background: hsl(38 92% 50% / .12); }
+.dark .shopping-discovery-icon { color: hsl(40 96% 72%); }
+.shopping-discovery-attempts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.shopping-discovery-attempt { display: inline-flex; align-items: center; gap: 5px; border: 1px solid hsl(var(--border)); border-radius: 999px; padding: 4px 6px; color: hsl(var(--muted-foreground)); background: hsl(var(--card) / .65); font: 9px/1 ui-monospace, monospace; }
+.shopping-discovery-dot { width: 5px; height: 5px; border-radius: 50%; background: hsl(var(--muted-foreground)); }
+.shopping-discovery-dot.is-good { background: hsl(152 70% 38%); }
+.shopping-discovery-dot.is-warn { background: hsl(38 92% 50%); }
+.shopping-candidate-list { display: grid; gap: 1px; margin-top: 9px; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 7px; background: hsl(var(--border)); }
+.shopping-candidate-row { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 8px; background: hsl(var(--card) / .88); }
+.shopping-candidate-row:hover { background: hsl(var(--muted) / .5); }
 .shopping-empty-state { border: 1px dashed hsl(var(--border)); border-radius: 12px; padding: 15px; background: linear-gradient(135deg, hsl(var(--muted) / .2), hsl(var(--card) / .72)); box-shadow: 0 8px 24px hsl(240 20% 4% / .035); }
 .shopping-empty-icon { display: grid; width: 36px; height: 36px; flex: none; place-items: center; border: 1px solid hsl(var(--accent) / .2); border-radius: 9px; color: hsl(var(--accent)); background: hsl(var(--accent) / .09); }
 .shopping-empty-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 15px; padding-top: 12px; border-top: 1px solid hsl(var(--border)); }

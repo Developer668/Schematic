@@ -32,12 +32,12 @@ describe("parts workspace agent scaffold", () => {
     host = undefined;
   });
 
-  it("shows an agent-filled scaffold and keeps local search disabled", () => {
+  it("shows the public search handoff scaffold and keeps cart sourcing agent-gated", () => {
     const container = renderWorkspace();
     expect(container.textContent).toContain("Waiting for the WebMCP agent");
     expect(container.textContent).toContain("Agent publication required");
     expect(container.textContent).toContain("shopping.search");
-    expect(Array.from(container.querySelectorAll("button")).some((button) => /search/i.test(button.textContent ?? ""))).toBe(false);
+    expect(Array.from(container.querySelectorAll("button")).some((button) => /search/i.test(button.textContent ?? ""))).toBe(true);
 
     const input = container.querySelector<HTMLInputElement>("input[aria-label='Search exact parts']");
     expect(input).toBeTruthy();

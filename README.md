@@ -17,7 +17,7 @@
 
 The supported submission is the authenticated ChatGPT Site:
 
-[Open Schematic in ChatGPT](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site)
+[Open Schematic in ChatGPT](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
 
 The Site wraps the shared React frontend and Zustand stores. Its 42 semantic
 WebMCP tools operate on the same graph actions as the human UI. Project data is
@@ -48,13 +48,14 @@ browsers, but it is not proof of native WebMCP discovery.
 - Same-origin Site API routes that reuse `functions/api/_runtime.ts` for
   catalog, validation, behavioral HTTP simulation, sessions, and compile
   preflight.
-- Provider-assisted parts sourcing: `shopping.search` can ask the same-origin
-  server for a bounded, cached fallback chain (Mouser, Digi-Key, Newark/
-  element14, Adafruit, or deployment-configured adapters). Candidates never
-  become cart listings automatically; an authenticated WebMCP agent still
-  verifies exact catalog identity, part number, URL, timestamp, currency,
-  offer, and provenance before publication. If providers are unavailable, the
-  tool returns a stable JSON handoff for another browsing agent.
+- Keyless parts discovery: `shopping.search` can query a bounded, cached
+  JLCSearch/LCSC snapshot or an exact Adafruit public product endpoint without
+  provider accounts or API keys. Candidates never become cart listings
+  automatically; an authenticated WebMCP agent still verifies exact catalog
+  identity, part number, URL, timestamp, currency, offer, and provenance before
+  publication. If public sources are unavailable or rate-limited, the tool
+  returns the stable `schematic.parts.lookup.v1` JSON handoff for another
+  browsing agent. Paid provider adapters remain dormant for a later release.
 
 The Site does not claim arbitrary C/C++ compilation, MCU-library execution,
 full analog/RF simulation, or a native simulator. `firmware.compile` on the

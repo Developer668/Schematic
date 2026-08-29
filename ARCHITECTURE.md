@@ -4,7 +4,7 @@ Schematic's primary release is the authenticated ChatGPT Site:
 
 `ChatGPT in-app browser → chatgpt-site wrapper → shared React frontend/store → 42 WebMCP tools → browser runtime and same-origin Site API`
 
-The canonical live Site is [schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site). Production acceptance is performed in the ChatGPT in-app browser that will judge the submission.
+The canonical live Site is [schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site). Production acceptance is performed in the ChatGPT in-app browser that will judge the submission.
 
 ## Canonical request and execution path
 
@@ -96,7 +96,7 @@ same-origin: it imports the tested runtime functions from
 | Same-origin Site API                              | Production wired                      | `chatgpt-site/app/api/.../route.ts` imports `functions/api/_runtime.ts`; health, catalog, validation, behavioral HTTP simulation, and compile preflight are available.                                       |
 | Firmware compilation on the Site                  | Preflight only                        | `firmware.compile` checks source/target and reports that a binary compiler is unavailable. It must not be presented as an arbitrary binary compiler.                                                         |
 | Project persistence                               | Production wired                      | Browser-local IndexedDB repository, localStorage migration, verified-user room keying, and same-origin tab synchronization.                                                                                  |
-| Parts sourcing                                    | Provider-assisted, agent-published   | `shopping.search` may query a bounded, cached server-side provider chain and returns candidates or a JSON handoff. Only an authenticated WebMCP publication with canonical catalog IDs, exact part numbers, URLs, timestamps, currency, and provenance creates cart listings. |
+| Parts sourcing                                    | Keyless discovery, agent-published   | `shopping.search` queries bounded no-key JLCSearch/LCSC or exact-product Adafruit discovery and returns untrusted candidates or a JSON handoff. Only an authenticated WebMCP publication with canonical catalog IDs, exact part numbers, URLs, timestamps, currency, and provenance creates cart listings. Paid provider adapters remain dormant. |
 | Native external engines                           | Not production wired                  | Site engine status reports native simulator/compiler gaps explicitly; no native process is launched by the Site.                                                                                             |
 | Raw WebSocket transport                           | Not available on the Site             | Use the browser runtime or the same-origin HTTP simulation routes.                                                                                                                                           |
 

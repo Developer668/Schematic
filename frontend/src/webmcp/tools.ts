@@ -9,7 +9,7 @@ import { useSelectionStore } from "../store/useSelectionStore.ts";
 import { useWorkspaceStore, type BottomPanel } from "../store/useWorkspaceStore.ts";
 import { useValidationStore, validateFirmwareFiles, validateProject } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
-import { createShoppingHandoff, useShoppingStore, type AgentPublication, type PartOffer, type ShoppingResult } from "../store/useShoppingStore.ts";
+import { createShoppingHandoff, useShoppingStore, type AgentPublication, type PartOffer, type ShoppingDiscovery, type ShoppingResult } from "../store/useShoppingStore.ts";
 import { waitForProjectPersistence } from "../store/projectPersistence.ts";
 import { runFirmwareRuntime } from "../simulation/runtime.ts";
 import { hasPortableButtonLedContract, PortableHarnessUnavailableError, runPortableButtonLedHarness } from "../simulation/portableHarness.ts";
@@ -456,6 +456,67 @@ function bindShoppingPublication(results: ShoppingResult[], publication: AgentPu
       publishedAt: publication.publishedAt,
     },
   }));
+}
+
+function normalizeShoppingDiscovery(raw: unknown): ShoppingDiscovery | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+  const rawCandidates = Array.isArray(value.candidates) ? value.candidates : [];
+  const candidates = rawCandidates.slice(0, 24).flatMap((entry): ShoppingDiscovery["candidates"] => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Record<string, unknown>;
+    const source = item.source === "jlcsearch" || item.source === "adafruit" ? item.source : null;
+    const id = String(item.id ?? "").trim();
+    const sourcePartId = String(item.sourcePartId ?? "").trim();
+    const title = String(item.title ?? "").trim();
+    const partNumber = String(item.partNumber ?? "").trim();
+    const verificationUrl = String(item.verificationUrl ?? "").trim();
+    if (!source || !id || !sourcePartId || !title || !partNumber || item.verificationRequired !== true) return [];
+    try {
+      const url = new URL(verificationUrl);
+      if (url.protocol !== "https:") return [];
+    } catch { return []; }
+    const price = item.price === null ? null : Number(item.price);
+    const stock = item.stock === null ? null : Number(item.stock);
+    if ((price !== null && (!Number.isFinite(price) || price < 0)) || (stock !== null && (!Number.isFinite(stock) || stock < 0))) return [];
+    const currency = item.currency === null ? null : String(item.currency ?? "").trim().toUpperCase();
+    if (currency !== null && !/^[A-Z]{3}$/.test(currency)) return [];
+    return [{
+      id,
+      source,
+      sourcePartId,
+      title: title.slice(0, 240),
+      ...(item.manufacturer ? { manufacturer: String(item.manufacturer).trim().slice(0, 120) } : {}),
+      partNumber: partNumber.slice(0, 120),
+      ...(item.package ? { package: String(item.package).trim().slice(0, 100) } : {}),
+      ...(item.description ? { description: String(item.description).trim().slice(0, 300) } : {}),
+      stock,
+      ...(item.availability ? { availability: String(item.availability).trim().slice(0, 80) } : {}),
+      price,
+      currency,
+      verificationUrl,
+      verificationRequired: true as const,
+    }];
+  });
+  const rawAttempts = Array.isArray(value.attempts) ? value.attempts : [];
+  const attempts = rawAttempts.slice(0, 8).flatMap((entry): ShoppingDiscovery["attempts"] => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Record<string, unknown>;
+    const source = ["jlcsearch", "adafruit", "request"].includes(String(item.source)) ? String(item.source) as ShoppingDiscovery["attempts"][number]["source"] : null;
+    const status = ["success", "empty", "error", "timeout", "rate_limited", "circuit_open", "skipped"].includes(String(item.status)) ? String(item.status) as ShoppingDiscovery["attempts"][number]["status"] : null;
+    if (!source || !status) return [];
+    return [{ source, status, durationMs: Math.max(0, Number(item.durationMs) || 0), resultCount: Math.max(0, Math.min(24, Number(item.resultCount) || 0)), ...(item.cache === "fresh" || item.cache === "stale" ? { cache: item.cache } : {}), ...(item.retryAfterSeconds ? { retryAfterSeconds: Math.max(1, Number(item.retryAfterSeconds)) } : {}), ...(item.message ? { message: String(item.message).slice(0, 180) } : {}) }];
+  });
+  return {
+    candidates,
+    sourceOrder: Array.isArray(value.sourceOrder) ? value.sourceOrder.map(String).slice(0, 8) : ["jlcsearch", "adafruit", "web-search"],
+    attempts,
+    cacheHit: value.cacheHit === true,
+    staleCache: value.staleCache === true,
+    rateLimited: value.rateLimited === true,
+    ...(value.retryAfterSeconds ? { retryAfterSeconds: Math.max(1, Number(value.retryAfterSeconds)) } : {}),
+    message: String(value.message ?? "Public candidates are ready for agent verification.").slice(0, 240),
+  };
 }
 
 const tools: ToolDef[] = [
@@ -1148,7 +1209,7 @@ const tools: ToolDef[] = [
   },
   {
     name: "shopping.search",
-    description: "Search the configured parts-provider fallback chain when listings are omitted, then publish exact listings into the Parts desk after verifying them. A provider lookup never invents catalog identities or retailer links; return the handoff JSON to another agent when publication is unavailable.",
+    description: "Discover electronics parts through bounded no-key public sources when listings are omitted, then publish exact listings into the Parts desk after verifying them. Public candidates never become offers automatically; return the schematic.parts.lookup.v1 handoff to a browsing agent when publication is unavailable.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1191,7 +1252,7 @@ const tools: ToolDef[] = [
         },
         publication: { type: "object", description: "Sourcing provenance supplied by the agent. Authentication and agent identity come from the verified WebMCP session, not from these fields. publishedAt must be recent.", properties: { provider: { type: "string", minLength: 1 }, publishedAt: { type: "string", format: "date-time" } }, required: ["provider", "publishedAt"] },
       },
-      description: "Omit listings/publication to run the provider lookup and receive a handoff request. Include both to publish verified results.",
+      description: "Omit listings/publication to run bounded public discovery and receive a handoff request. Include both to publish verified results.",
     },
     annotations: { untrustedContentHint: true },
     execute: async ({ query = "", quantity = 1, listings, publication, __trustedAuth }, { signal } = {}) => {
@@ -1203,6 +1264,7 @@ const tools: ToolDef[] = [
       const handoff = createShoppingHandoff(searchQuery, requestedQuantity, requiredCatalogIds);
       const trustedAuth = __trustedAuth as TrustedToolContext | undefined;
       if (!Array.isArray(listings) || listings.length === 0) {
+        shopping.setRequestStatus("searching");
         shopping.setResults([]);
         shopping.setHandoff(handoff);
         let providerFallback: Record<string, unknown> = { attempted: false, reason: "trusted_webmcp_session_required" };
@@ -1214,12 +1276,15 @@ const tools: ToolDef[] = [
             ...(lookup.data && typeof lookup.data === "object" ? lookup.data : {}),
             ...(lookup.error ? { error: lookup.error } : {}),
           };
+          const discovery = normalizeShoppingDiscovery(lookup.data);
+          shopping.setDiscovery(discovery);
         }
         const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff, providerFallback };
-        const hasCandidates = Array.isArray(providerFallback.results) && providerFallback.results.length > 0;
+        const hasCandidates = (Array.isArray(providerFallback.candidates) && providerFallback.candidates.length > 0)
+          || (Array.isArray(providerFallback.results) && providerFallback.results.length > 0);
         const message = hasCandidates
-          ? "Provider candidates are ready. Verify canonical catalog IDs, exact part numbers, timestamps, and HTTPS offers, then call shopping.search again with listings and publication."
-          : "Parts shopping requires a connected, authenticated WebMCP agent to publish listings. The provider fallback was checked and the handoff JSON is ready for another agent.";
+          ? "Public candidates are ready. Verify canonical catalog IDs, exact part numbers, timestamps, and HTTPS retailer offers, then call shopping.search again with listings and publication."
+          : "Parts shopping requires a connected, authenticated WebMCP agent to publish listings. Public discovery was checked and the handoff JSON is ready for another browsing agent.";
         return toolFailure("AGENT_PUBLICATION_REQUIRED", message, data);
       }
       if (!trustedAuth?.authenticated || !trustedAuth.subject) {

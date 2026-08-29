@@ -43,6 +43,49 @@ export interface ShoppingResult {
   provenance: AgentProvenance;
 }
 
+/**
+ * A public-feed candidate is useful context for the browsing agent, but it is
+ * deliberately not a ShoppingResult. It has no canonical Schematic identity
+ * or verified retailer offer and therefore can never be added to the cart.
+ */
+export interface ShoppingDiscoveryCandidate {
+  id: string;
+  source: "jlcsearch" | "adafruit";
+  sourcePartId: string;
+  title: string;
+  manufacturer?: string;
+  partNumber: string;
+  package?: string;
+  description?: string;
+  stock: number | null;
+  availability?: string;
+  price: number | null;
+  currency: string | null;
+  verificationUrl: string;
+  verificationRequired: true;
+}
+
+export interface ShoppingDiscoveryAttempt {
+  source: "jlcsearch" | "adafruit" | "request";
+  status: "success" | "empty" | "error" | "timeout" | "rate_limited" | "circuit_open" | "skipped";
+  durationMs: number;
+  resultCount: number;
+  cache?: "fresh" | "stale";
+  retryAfterSeconds?: number;
+  message?: string;
+}
+
+export interface ShoppingDiscovery {
+  candidates: ShoppingDiscoveryCandidate[];
+  sourceOrder: string[];
+  attempts: ShoppingDiscoveryAttempt[];
+  cacheHit: boolean;
+  staleCache: boolean;
+  rateLimited: boolean;
+  retryAfterSeconds?: number;
+  message: string;
+}
+
 export interface AgentPublication {
   authenticated: true;
   agentId: string;
@@ -50,7 +93,7 @@ export interface AgentPublication {
   publishedAt: string;
 }
 
-export type ShoppingRequestStatus = "idle" | "staged" | "searching" | "ready" | "partial" | "failed";
+export type ShoppingRequestStatus = "idle" | "staged" | "searching" | "agent-required" | "ready" | "partial" | "rate-limited" | "failed";
 
 /**
  * Stable handoff contract for an agent that can browse suppliers but cannot
@@ -96,10 +139,12 @@ export interface ShoppingState {
   publicationError: string | null;
   requestStatus: ShoppingRequestStatus;
   handoff: ShoppingHandoff | null;
+  discovery: ShoppingDiscovery | null;
   undoStack: CartLine[][];
   setQuery: (query: string) => void;
   setRequestStatus: (requestStatus: ShoppingRequestStatus) => void;
   setHandoff: (handoff: ShoppingHandoff | null) => void;
+  setDiscovery: (discovery: ShoppingDiscovery | null) => void;
   setResults: (results: ShoppingResult[]) => void;
   publishAgentResults: (results: unknown, publication: AgentPublication) => { accepted: boolean; rejected: number; message?: string };
   addToCart: (resultId: string, quantity?: number) => void;
@@ -189,7 +234,7 @@ export function createShoppingHandoff(query: string, quantity = 1, requiredCatal
     query: query.trim(),
     quantity: safeQuantity(quantity),
     requiredCatalogIds: [...new Set(requiredCatalogIds.map(String).map((id) => id.trim()).filter(Boolean))],
-    providerFallbackOrder: ["mouser", "digikey", "element14", "adafruit"],
+    providerFallbackOrder: ["jlcsearch", "adafruit", "web-search"],
     returnTool: "shopping.search",
     returnFormat: "json",
     constraints: {
@@ -246,12 +291,16 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
   publicationError: null,
   requestStatus: "idle",
   handoff: null,
+  discovery: null,
   undoStack: [],
   setQuery(query) { set({ query }); persist(get()); },
   setRequestStatus(requestStatus) { set({ requestStatus }); },
   setHandoff(handoff) { set({ handoff, requestStatus: handoff ? "staged" : "idle" }); },
+  setDiscovery(discovery) {
+    set({ discovery, requestStatus: discovery?.rateLimited && discovery.candidates.length === 0 ? "rate-limited" : discovery ? "agent-required" : "idle" });
+  },
   setResults() {
-    set({ results: [], cart: [], lastSearchAt: null, requestStatus: "failed", publicationError: "Parts shopping needs a connected, authenticated WebMCP agent before listings can be shown. The lookup request is ready to hand off." });
+    set({ results: [], cart: [], lastSearchAt: null, requestStatus: "failed", discovery: null, publicationError: "Parts shopping needs a connected, authenticated WebMCP agent before listings can be shown. The lookup request is ready to hand off." });
     persist(get());
   },
   publishAgentResults(rawResults, publication) {
@@ -273,7 +322,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
       persist(get());
       return { accepted: false, rejected, message };
     }
-    set({ results: normalized, cart: [], lastSearchAt: Date.now(), requestStatus: rejected ? "partial" : "ready", handoff: null, publicationError: rejected ? `${rejected} malformed listing${rejected === 1 ? " was" : "s were"} rejected; showing only authenticated agent-sourced exact listings.` : null });
+    set({ results: normalized, cart: [], lastSearchAt: Date.now(), requestStatus: rejected ? "partial" : "ready", handoff: null, discovery: null, publicationError: rejected ? `${rejected} malformed listing${rejected === 1 ? " was" : "s were"} rejected; showing only authenticated agent-sourced exact listings.` : null });
     persist(get());
     return { accepted: true, rejected };
   },
@@ -349,7 +398,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     });
   },
   clearResults() {
-    set({ results: [], lastSearchAt: null, requestStatus: "idle", handoff: null });
+    set({ results: [], cart: [], lastSearchAt: null, requestStatus: "idle", handoff: null, discovery: null, publicationError: null, undoStack: [] });
     persist(get());
   },
   getQuote() {
@@ -374,7 +423,7 @@ shoppingChannel?.addEventListener("message", (event) => {
 
 export function reloadShoppingForCurrentUser() {
   const next = readState();
-  useShoppingStore.setState({ ...next, requestStatus: "idle", handoff: null, publicationError: null, undoStack: [] });
+  useShoppingStore.setState({ ...next, requestStatus: "idle", handoff: null, discovery: null, publicationError: null, undoStack: [] });
   shoppingChannel?.postMessage({ type: "shopping:update", state: { ...next, _room: roomId() } });
 }
 
@@ -384,7 +433,7 @@ if (typeof window !== "undefined") {
     if (event.key !== storageKey() || !event.newValue) return;
     try {
       const next = JSON.parse(event.newValue) as PersistedShopping;
-      if (next && typeof next === "object") useShoppingStore.setState({ ...next, requestStatus: "idle", handoff: null, publicationError: null, undoStack: [] });
+      if (next && typeof next === "object") useShoppingStore.setState({ ...next, requestStatus: "idle", handoff: null, discovery: null, publicationError: null, undoStack: [] });
     } catch {}
   });
 }

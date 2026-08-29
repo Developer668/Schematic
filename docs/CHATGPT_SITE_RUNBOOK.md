@@ -3,7 +3,7 @@
 This runbook is for the production ChatGPT Site project and the canonical live
 URL:
 
-<https://schematic-hardware-workbench.decipherer71951502.chatgpt.site>
+<https://schematic-hardware-workspace.decipherer71.chatgpt.site>
 
 The release unit is the `chatgpt-site` package plus the shared `frontend`,
 `packages/*`, `functions/api/_runtime.ts`, and checked-in C/WASM artifact. The
@@ -63,7 +63,7 @@ or reports an arbitrary firmware compile as successful.
    Site release notes.
 2. Push that exact revision to the Site project's source repository, package
    the Site build, and save a new version in project
-   `appgprj_6a9216cfb16881919e467839d41b29b8`.
+   `appgprj_6a913ce4a58881918a47ea49fa0ca505`.
 3. Deploy the saved version without changing the canonical URL. Record the
    source commit and Site version; never record source credentials, secrets, or
    session tokens.
@@ -110,7 +110,7 @@ an acceptance failure until it is recorded and resolved.
 | Unsupported source                               | A sketch outside the exact contract returns an explicit unsupported result/API list; no fake binary or silent success.                                                              |
 | Compile boundary                                 | Site `firmware.compile` returns source/target preflight or unavailable; it does not claim arbitrary binary compilation.                                                             |
 | Save/reload                                      | `project.save` followed by reload or project switch preserves the graph, connections, and firmware in the verified-user browser-local room.                                         |
-| Parts boundary                                   | `shopping.search` may return bounded provider candidates or a JSON handoff; results/cart remain empty until an authenticated WebMCP agent publishes exact catalog/provenance-backed listings. |
+| Parts boundary                                   | `shopping.search` returns bounded no-key public candidates or a JSON handoff; results/cart remain empty until an authenticated WebMCP agent publishes exact catalog/provenance-backed listings. |
 | Engine boundary                                  | Behavioral runtime is reported only where its model contract applies; native compiler/simulator paths are unavailable or unsupported on the Site.                                   |
 | Transport boundary                               | Raw WebSocket is unavailable on the Site; browser runtime or same-origin HTTP simulation remains usable.                                                                            |
 

@@ -45,7 +45,7 @@ function apiDocs(request: Request) {
       componentSearch: "GET /api/components/search?q=esp32",
       component: "GET /api/components/:catalogId",
       componentPorts: "GET /api/components/ports/:catalogId",
-      parts: "GET /api/parts/search (server-side provider fallback candidates; final listings are published through WebMCP)",
+      parts: "GET /api/parts/search (bounded no-key public discovery; final listings are verified and published through WebMCP)",
       compile: "POST /api/compile",
       importAnalyze: "POST /api/components/import/analyze",
       simulationRun: "POST /api/simulation/run",

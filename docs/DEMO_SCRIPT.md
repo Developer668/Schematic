@@ -1,7 +1,7 @@
 # Judge demo — under 3 minutes
 
 This script uses the supported ChatGPT Site path only. Open the authenticated
-[live Site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site)
+[live Site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
 inside the ChatGPT in-app browser. Ask ChatGPT to use the Site's **native
 WebMCP** surface; do not use visual clicking as the agent interface. If the
 in-app browser does not expose native `modelContext`, say that the host

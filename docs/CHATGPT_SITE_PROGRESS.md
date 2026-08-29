@@ -6,8 +6,8 @@ not belong here.
 
 ## Canonical release
 
-- Live Site: [schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site)
-- Site project: `appgprj_6a9216cfb16881919e467839d41b29b8`
+- Live Site: [schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
+- Site project: `appgprj_6a913ce4a58881918a47ea49fa0ca505`
 - Primary host: authenticated ChatGPT in-app browser.
 - Source path: `chatgpt-site` wrapper → shared `frontend` app/store.
 - API path: same-origin `chatgpt-site/app/api/[[...path]]/route.ts` importing
@@ -43,8 +43,8 @@ not belong here.
       unsupported; no fake binary or silent success is accepted.
 - [ ] Call `project.save`, reload or switch projects, and confirm the graph,
       wiring, and firmware remain in the verified-user browser-local room.
-- [ ] Confirm parts results remain empty until an authenticated WebMCP agent
-      publishes exact, provenance-backed listings.
+- [ ] Confirm public parts candidates remain non-cart data until an authenticated
+      WebMCP agent publishes exact, provenance-backed listings.
 - [ ] Confirm engine status is honest: behavioral runtime available where its
       model contract applies; native compiler/simulator paths unavailable or
       unsupported on the Site; raw WebSocket transport unavailable.

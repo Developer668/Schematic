@@ -1,4 +1,5 @@
 import { jsonResponse, optionsResponse, requireApiIdentity } from "../_runtime";
+import { publicSourcesEnabled, searchPublicParts, type PublicPartCandidate, type PublicSourceAttempt } from "./public";
 
 type ProviderConfig = {
   id: string;
@@ -47,18 +48,21 @@ type ProviderAttempt = {
 };
 
 type PartsSearchBody = {
-  code: "OK" | "PARTS_PROVIDER_DEGRADED" | "PARTS_PROVIDER_NOT_CONFIGURED";
+  code: "OK" | "PUBLIC_CANDIDATES" | "PUBLIC_SOURCE_DEGRADED" | "PUBLIC_SOURCE_RATE_LIMITED" | "PARTS_PROVIDER_DEGRADED" | "PARTS_PROVIDER_NOT_CONFIGURED";
   query: string;
   quantity: number;
-  source: "provider-fallback-chain" | "agent-handoff";
+  source: "public-source-discovery" | "provider-fallback-chain" | "agent-handoff";
   liveOffers: false;
   results: ProviderCandidate[];
+  candidates?: PublicPartCandidate[];
   providerOrder: string[];
-  attempts: ProviderAttempt[];
+  attempts: Array<ProviderAttempt | PublicSourceAttempt>;
   providerFallback: {
     attempted: boolean;
     providersTried: string[];
     cacheHit?: boolean;
+    staleCache?: boolean;
+    rateLimited?: boolean;
   };
   handoff: Record<string, unknown>;
   publication: {
@@ -72,6 +76,7 @@ type PartsSearchBody = {
 type PartsEnv = Record<string, unknown>;
 type Context = { request: Request; env: PartsEnv };
 
+const DEFAULT_PUBLIC_SOURCE_ORDER = ["jlcsearch", "adafruit", "web-search"];
 const DEFAULT_PROVIDER_ORDER = ["mouser", "digikey", "element14", "adafruit"];
 const MAX_QUERY_LENGTH = 240;
 const MAX_RESULTS = 24;
@@ -309,14 +314,56 @@ function cacheKey(query: string, quantity: number, providers: ProviderConfig[]) 
 
 export async function partsSearch(request: Request, envInput: PartsEnv) {
   const env = envInput ?? {};
-  if (!(await requireApiIdentity({ request, env: env as Parameters<typeof requireApiIdentity>[0]["env"] }))) return jsonResponse(request, { error: "Sign in to use this Schematic workspace" }, 401);
+  const identity = await requireApiIdentity({ request, env: env as Parameters<typeof requireApiIdentity>[0]["env"] });
+  if (!identity) return jsonResponse(request, { error: "Sign in to use this Schematic workspace" }, 401);
   const searchParams = new URL(request.url).searchParams;
   const query = (searchParams.get("query") ?? "").trim().slice(0, MAX_QUERY_LENGTH);
   const quantityValue = Number(searchParams.get("quantity") ?? 1);
   const quantity = Math.max(1, Math.min(999, Number.isFinite(quantityValue) ? Math.round(quantityValue) : 1));
   if (!query) return jsonResponse(request, { code: "INVALID_QUERY", message: "query is required", query, quantity }, 400);
 
-  const providers = providerConfigs(env);
+  // Public no-key discovery is the default. Paid/keyed adapters remain an
+  // explicit server-only escape hatch for a later release and are never
+  // reached just because an old environment variable is present.
+  if (publicSourcesEnabled(env)) {
+    const publicResult = await searchPublicParts(query, identity.subject);
+    const publicOrder = publicResult.sourceOrder.length ? publicResult.sourceOrder : DEFAULT_PUBLIC_SOURCE_ORDER;
+    const baseHandoff = handoff(query, quantity, publicOrder);
+    const hasCandidates = publicResult.candidates.length > 0;
+    const body: PartsSearchBody = {
+      code: hasCandidates ? "PUBLIC_CANDIDATES" : publicResult.rateLimited ? "PUBLIC_SOURCE_RATE_LIMITED" : "PUBLIC_SOURCE_DEGRADED",
+      query,
+      quantity,
+      source: hasCandidates ? "public-source-discovery" : "agent-handoff",
+      liveOffers: false,
+      results: [],
+      ...(hasCandidates ? { candidates: publicResult.candidates } : {}),
+      providerOrder: publicOrder,
+      attempts: publicResult.attempts,
+      providerFallback: {
+        attempted: true,
+        providersTried: publicResult.attempts.filter((attempt) => attempt.source !== "request").map((attempt) => attempt.source),
+        cacheHit: publicResult.cacheHit,
+        staleCache: publicResult.staleCache,
+        rateLimited: publicResult.rateLimited,
+      },
+      handoff: {
+        ...baseHandoff,
+        discoveryMode: "public-no-key",
+        ...(hasCandidates ? { publicCandidates: publicResult.candidates, nextAction: "Verify each candidate against a canonical Schematic catalog component and live HTTPS retailer page before publishing." } : { nextAction: "Use the browsing-agent fallback to search public retailer pages, then publish strict listings through shopping.search." }),
+        publicSourceAttempts: publicResult.attempts,
+      },
+      publication: { required: true, returnTool: "shopping.search", reason: "Public results are discovery candidates only; an authenticated WebMCP agent must verify exact catalog identity, current retailer URL, timestamp, currency, and offer before publication." },
+      message: publicResult.message,
+    };
+    const headers: Record<string, string> = publicResult.retryAfterSeconds
+      ? { "Retry-After": String(publicResult.retryAfterSeconds) }
+      : { "Cache-Control": "private, max-age=30" };
+    return jsonResponse(request, body, 200, headers);
+  }
+
+  const paidProvidersEnabled = ["1", "true", "yes", "on"].includes(envString(env, "PARTS_PAID_PROVIDERS_ENABLED").toLowerCase());
+  const providers = paidProvidersEnabled ? providerConfigs(env) : [];
   const providerOrder = providers.map((provider) => provider.id);
   const baseHandoff = handoff(query, quantity, providerOrder.length ? providerOrder : DEFAULT_PROVIDER_ORDER);
   if (!providers.length) {

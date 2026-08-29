@@ -35,6 +35,8 @@ describe("server-side parts provider fallback", () => {
     vi.stubGlobal("fetch", fetchMock);
     const env = {
       ...authEnv,
+      PARTS_PUBLIC_SOURCES_ENABLED: "false",
+      PARTS_PAID_PROVIDERS_ENABLED: "true",
       PARTS_PROVIDER_ORDER: "first,second",
       PARTS_PROVIDER_ENDPOINTS: JSON.stringify([
         { id: "first", label: "First adapter", endpoint: "https://first-adapter.example/search" },
@@ -56,7 +58,7 @@ describe("server-side parts provider fallback", () => {
   it("returns a stable handoff when no provider is configured", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const response = await partsSearch(await requestFor("missing-provider"), authEnv);
+    const response = await partsSearch(await requestFor("missing-provider"), { ...authEnv, PARTS_PUBLIC_SOURCES_ENABLED: "false" });
     const body = await response.json() as any;
     expect(response.status).toBe(503);
     expect(body.code).toBe("PARTS_PROVIDER_NOT_CONFIGURED");
