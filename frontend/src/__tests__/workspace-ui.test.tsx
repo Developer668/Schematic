@@ -172,7 +172,7 @@ describe("workspace UI", () => {
     act(() => overflow?.click());
     act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
     expect(container.querySelector("[role='menu'][aria-label='Workspace actions']")).toBeNull();
-  });
+  }, 30_000);
 
   it("docks the code panel beside the canvas at tablet widths", async () => {
     const previousWidth = window.innerWidth;

@@ -91,8 +91,8 @@ operation may change browser-local state. All tools use an object input schema.
 
 |   # | Name                          | Input schema                                                                                                     | Mode | Operation                                                                                                             |
 | --: | ----------------------------- | ---------------------------------------------------------------------------------------------------------------- | :--: | --------------------------------------------------------------------------------------------------------------------- |
-|  32 | `shopping.search`             | `{query?: string, quantity?: number, listings?: Listing[], publication?: {provider: string, publishedAt: string}}` | M,U  | With listings omitted, query bounded no-key public discovery and return candidates plus a handoff; with both fields supplied, publish exact authenticated listings. The exact `Listing` schema is below. |
-|  33 | `shopping.get_state`          | `{}`                                                                                                             | RO,U | Return published results, cart lines, budget, and quote.                                                              |
+|  32 | `shopping.search`             | `{query?: string, quantity?: integer, listings?: Listing[], publication?: {provider: string, publishedAt: string}}` | M,U  | First call with query/quantity returns untrusted public discovery and/or `AGENT_PUBLICATION_REQUIRED` with a strict handoff; second call with both listings and publication publishes only trusted, canonical listings. |
+|  33 | `shopping.get_state`          | `{}`                                                                                                             | RO,U | Return published results, cart lines, budget, quote, pending request/handoff, and untrusted discovery candidates.       |
 |  34 | `shopping.cart_add`           | `{resultId: string, quantity?: number}`                                                                          | M,U  | Add an exact published result to the cart.                                                                            |
 |  35 | `shopping.cart_remove`        | `{resultId: string}`                                                                                             | M,U  | Remove a cart line.                                                                                                   |
 |  36 | `shopping.cart_set_quantity`  | `{resultId: string, quantity: number}`                                                                           | M,U  | Set a cart-line quantity; zero removes it.                                                                            |
@@ -128,7 +128,7 @@ When publishing, provide both `listings` and `publication`. Each listing must ha
       title: string,
       price: number >= 0 | null,
       currency: /^[A-Z]{3}$/,
-      url: URI,
+      url: `https://...` URI without credentials,
       fetchedAt: date-time,
       provider: string
     }
@@ -139,8 +139,34 @@ publication: { provider: string, publishedAt: string }
 ```
 
 The canonical catalog ID and `exactMatch: true` are checked before a result can
-enter the cart. The trusted session supplies the agent identity; callers must
-not try to self-assert `__trustedAuth`.
+enter the cart. `updatedAt`, `fetchedAt`, and `publication.publishedAt` must be
+recent (within 24 hours, with five minutes of future-clock skew). The trusted
+session supplies the agent identity; callers must not try to self-assert
+`__trustedAuth` or an agent identity in the publication.
+
+### Two-call shopping boundary
+
+1. Call `shopping.search` with `query` and `quantity`, omitting `listings` and
+   `publication`. The tool may return bounded public candidates under
+   `data.discovery`/`data.providerFallback`; these are untrusted discovery only.
+   It always returns a `schematic.parts.lookup.v1` `handoff` when publication is
+   still required. `shopping.get_state` exposes the same `pendingRequest`,
+   `handoff`, and `discovery` state, while `results` and `cart` remain empty.
+2. A trusted browsing agent verifies each candidate against the canonical
+   catalog and a current HTTPS retailer page, then calls `shopping.search` a
+   second time with both `listings` and `publication`. The page binds the agent
+   identity from the verified WebMCP session and only then exposes accepted
+   listings to the cart.
+
+Publication failures use stable structured `data.code`/`error.code` values:
+`AUTH_REQUIRED`, `PUBLICATION_METADATA_REQUIRED`, `MALFORMED_PUBLICATION`,
+`MALFORMED_LISTING`, `STALE_PUBLICATION`, `NON_HTTPS_OFFER`,
+`NON_CANONICAL_CATALOG_ID`, `NON_EXACT_MATCH`,
+`PUBLICATION_PROVIDER_MISMATCH`, and the fail-closed fallback
+`PUBLICATION_REJECTED`. Invalid search arguments use
+`INVALID_SEARCH_REQUEST`. Provider, retailer, title, and URL strings remain
+untrusted content; they are never interpreted as instructions. The shopping
+surface has no purchase, checkout, or silent retailer-navigation operation.
 
 ## Annotations and return contract
 
@@ -185,9 +211,11 @@ instructions.
 - `component.add` rejects partial/non-finite coordinates; connection tools
   reject unknown endpoints, self-connections, duplicates, and incompatible
   domains. Server API payloads are bounded as well.
-- Parts are an agent-only trust boundary. Empty, unauthenticated, non-exact,
-  or provenance-incomplete publications leave the result set empty. The UI
-  never fabricates retailer listings.
+- Parts are an agent-only trust boundary. Public candidates, empty,
+  unauthenticated, non-exact, stale, insecure, noncanonical, or
+  provenance-incomplete publications leave the verified result set empty. The
+  UI never fabricates retailer listings, purchases parts, checks out, or
+  silently navigates to a retailer.
 - Browser firmware execution is bounded. The Site reports compile preflight
   or unsupported behavior; it never labels an arbitrary source as a compiled
   binary.
@@ -215,9 +243,12 @@ execution.
 The shared WebMCP tests cover the registry count and names, fallback bridges,
 all tool families, validation/error results, strict coordinate handling,
 agent-only shopping rejection, and the exact C/WASM button→LED path. The
-runtime tests cover the bounded interpreter and explicit unsupported APIs. The
-portable harness package verifies its native contract, generated artifact,
-ABI, exports, and SHA-256 metadata.
+focused `webmcp-shopping-boundary.test.ts` regression covers the 42-tool count,
+two-call round trip, no candidate auto-publication, trusted-auth rejection,
+canonical/strict/HTTPS/timestamp failures, and the instance-port connection
+path. The runtime tests cover the bounded interpreter and explicit unsupported
+APIs. The portable harness package verifies its native contract, generated
+artifact, ABI, exports, and SHA-256 metadata.
 
 Run the relevant checks from the repository root:
 

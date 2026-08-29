@@ -48,14 +48,16 @@ browsers, but it is not proof of native WebMCP discovery.
 - Same-origin Site API routes that reuse `functions/api/_runtime.ts` for
   catalog, validation, behavioral HTTP simulation, sessions, and compile
   preflight.
-- Keyless parts discovery: `shopping.search` can query a bounded, cached
-  JLCSearch/LCSC snapshot or an exact Adafruit public product endpoint without
-  provider accounts or API keys. Candidates never become cart listings
-  automatically; an authenticated WebMCP agent still verifies exact catalog
-  identity, part number, URL, timestamp, currency, offer, and provenance before
-  publication. If public sources are unavailable or rate-limited, the tool
-  returns the stable `schematic.parts.lookup.v1` JSON handoff for another
-  browsing agent. Paid provider adapters remain dormant for a later release.
+- Two-call keyless parts flow: the first `shopping.search` call carries only a
+  query/quantity and may return bounded, cached JLCSearch/LCSC or Adafruit
+  discovery plus a strict `schematic.parts.lookup.v1` JSON handoff. Public
+  candidates never become cart listings automatically. A trusted WebMCP agent
+  must make the second call with listings and publication after verifying the
+  canonical catalog ID, exact part number, current HTTPS retailer URL,
+  timestamp, currency, offer, and provenance. Invalid, stale, insecure, or
+  self-asserted publications are rejected with structured codes; there is no
+  purchase, checkout, or silent retailer navigation. Paid provider adapters
+  remain dormant for a later release.
 
 The Site does not claim arbitrary C/C++ compilation, MCU-library execution,
 full analog/RF simulation, or a native simulator. `firmware.compile` on the

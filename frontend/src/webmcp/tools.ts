@@ -519,6 +519,168 @@ function normalizeShoppingDiscovery(raw: unknown): ShoppingDiscovery | null {
   };
 }
 
+type ShoppingPublicationIssue = {
+  code: "MALFORMED_PUBLICATION" | "STALE_PUBLICATION" | "MALFORMED_LISTING" | "NON_CANONICAL_CATALOG_ID" | "NON_EXACT_MATCH" | "NON_HTTPS_OFFER" | "PUBLICATION_PROVIDER_MISMATCH";
+  message: string;
+  listingIndex?: number;
+  offerIndex?: number;
+};
+
+const SHOPPING_MAX_LISTINGS = 24;
+const SHOPPING_MAX_OFFERS = 3;
+const SHOPPING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SHOPPING_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
+
+function hasShoppingControlCharacters(value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function shoppingText(value: unknown, maxLength = 240): value is string {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && value.length <= maxLength
+    && !hasShoppingControlCharacters(value);
+}
+
+function shoppingTimestampStatus(value: unknown, now: number): "valid" | "malformed" | "stale" {
+  if (typeof value !== "string" || !value.trim()) return "malformed";
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return "malformed";
+  if (parsed < now - SHOPPING_MAX_AGE_MS || parsed > now + SHOPPING_MAX_FUTURE_SKEW_MS) return "stale";
+  return "valid";
+}
+
+function shoppingHttpsUrl(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function shoppingPublicationIssues(listings: unknown, publication: unknown): ShoppingPublicationIssue[] {
+  const now = Date.now();
+  const issues: ShoppingPublicationIssue[] = [];
+  const publicationObject = publication && typeof publication === "object" && !Array.isArray(publication)
+    ? publication as Record<string, unknown>
+    : null;
+  const provider = publicationObject?.provider;
+  const publishedAt = publicationObject?.publishedAt;
+
+  if (!publicationObject || !shoppingText(provider, 120) || !shoppingText(publishedAt, 80)) {
+    issues.push({ code: "MALFORMED_PUBLICATION", message: "Publication must contain non-empty provider and publishedAt strings." });
+    return issues;
+  }
+  const publicationTimestamp = shoppingTimestampStatus(publishedAt, now);
+  if (publicationTimestamp === "malformed") {
+    issues.push({ code: "MALFORMED_PUBLICATION", message: "publication.publishedAt must be a valid date-time string." });
+  } else if (publicationTimestamp === "stale") {
+    issues.push({ code: "STALE_PUBLICATION", message: "Publication timestamps must be within the last 24 hours and no more than five minutes in the future." });
+  }
+
+  if (!Array.isArray(listings) || listings.length < 1 || listings.length > SHOPPING_MAX_LISTINGS) {
+    issues.push({ code: "MALFORMED_LISTING", message: `listings must contain 1–${SHOPPING_MAX_LISTINGS} listing objects.` });
+    return issues;
+  }
+
+  const listingIds = new Set<string>();
+  listings.forEach((rawListing, listingIndex) => {
+    const listing = rawListing && typeof rawListing === "object" && !Array.isArray(rawListing)
+      ? rawListing as Record<string, unknown>
+      : null;
+    if (!listing
+      || !shoppingText(listing.id, 160)
+      || !shoppingText(listing.catalogId, 120)
+      || !shoppingText(listing.title)
+      || !shoppingText(listing.partNumber, 160)
+      || !Number.isInteger(listing.requestedQuantity)
+      || Number(listing.requestedQuantity) < 1
+      || Number(listing.requestedQuantity) > 999
+      || !Array.isArray(listing.offers)
+      || listing.offers.length < 1
+      || listing.offers.length > SHOPPING_MAX_OFFERS) {
+      issues.push({ code: "MALFORMED_LISTING", message: `Listing ${listingIndex + 1} is missing a strictly typed required field or has an invalid offer count.`, listingIndex });
+      return;
+    }
+    const listingId = listing.id as string;
+    const catalogId = listing.catalogId as string;
+    const offers = listing.offers as unknown[];
+    if (listingIds.has(listingId)) {
+      issues.push({ code: "MALFORMED_LISTING", message: `Listing ${listingIndex + 1} reuses another listing id.`, listingIndex });
+      return;
+    }
+    listingIds.add(listingId);
+    if (catalogId !== catalogId.trim() || !getCatalogComponent(catalogId)) {
+      issues.push({ code: "NON_CANONICAL_CATALOG_ID", message: `Listing ${listingIndex + 1} must use an existing canonical Schematic catalogId.`, listingIndex });
+    }
+    if (listing.exactMatch !== true) {
+      issues.push({ code: "NON_EXACT_MATCH", message: `Listing ${listingIndex + 1} must assert exactMatch=true only after exact catalog verification.`, listingIndex });
+    }
+    const updatedAtStatus = shoppingTimestampStatus(listing.updatedAt, now);
+    if (updatedAtStatus === "malformed") {
+      issues.push({ code: "MALFORMED_LISTING", message: `Listing ${listingIndex + 1} updatedAt must be a valid date-time string.`, listingIndex });
+    } else if (updatedAtStatus === "stale") {
+      issues.push({ code: "STALE_PUBLICATION", message: `Listing ${listingIndex + 1} has a stale updatedAt timestamp.`, listingIndex });
+    }
+
+    const retailers = new Set<string>();
+    offers.forEach((rawOffer, offerIndex) => {
+      const offer = rawOffer && typeof rawOffer === "object" && !Array.isArray(rawOffer)
+        ? rawOffer as Record<string, unknown>
+        : null;
+      if (!offer
+        || !shoppingText(offer.id, 160)
+        || !shoppingText(offer.retailer, 160)
+        || !shoppingText(offer.title)
+        || !(offer.price === null || (typeof offer.price === "number" && Number.isFinite(offer.price) && offer.price >= 0))
+        || typeof offer.currency !== "string"
+        || !/^[A-Z]{3}$/.test(offer.currency)
+        || typeof offer.url !== "string"
+        || !shoppingText(offer.fetchedAt, 80)
+        || !shoppingText(offer.provider, 120)) {
+        issues.push({ code: "MALFORMED_LISTING", message: `Offer ${offerIndex + 1} in listing ${listingIndex + 1} is not strict JSON listing data.`, listingIndex, offerIndex });
+        return;
+      }
+      const retailerName = offer.retailer as string;
+      const offerProvider = offer.provider as string;
+      if (!shoppingHttpsUrl(offer.url)) {
+        issues.push({ code: "NON_HTTPS_OFFER", message: `Offer ${offerIndex + 1} in listing ${listingIndex + 1} must use an HTTPS retailer URL without embedded credentials.`, listingIndex, offerIndex });
+      }
+      const retailer = retailerName.toLowerCase();
+      if (retailers.has(retailer)) {
+        issues.push({ code: "MALFORMED_LISTING", message: `Listing ${listingIndex + 1} contains duplicate retailer offers.`, listingIndex, offerIndex });
+      }
+      retailers.add(retailer);
+      if (offerProvider !== provider) {
+        issues.push({ code: "PUBLICATION_PROVIDER_MISMATCH", message: `Offer ${offerIndex + 1} in listing ${listingIndex + 1} must use the publication provider string exactly.`, listingIndex, offerIndex });
+      }
+      const fetchedAtStatus = shoppingTimestampStatus(offer.fetchedAt, now);
+      if (fetchedAtStatus === "malformed") {
+        issues.push({ code: "MALFORMED_LISTING", message: `Offer ${offerIndex + 1} in listing ${listingIndex + 1} fetchedAt must be a valid date-time string.`, listingIndex, offerIndex });
+      } else if (fetchedAtStatus === "stale") {
+        issues.push({ code: "STALE_PUBLICATION", message: `Offer ${offerIndex + 1} in listing ${listingIndex + 1} has a stale fetchedAt timestamp.`, listingIndex, offerIndex });
+      }
+    });
+  });
+  return issues;
+}
+
+function shoppingError(code: string, message: string, data: Record<string, unknown>) {
+  const result = toolFailure(code, message, data);
+  return {
+    ...result,
+    // Keep the handoff/error payload machine-readable for a browsing agent;
+    // provider and retailer strings remain data under untrustedContentHint.
+    content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }],
+  };
+}
+
 const tools: ToolDef[] = [
   {
     name: "project.get_graph",
@@ -1256,18 +1418,29 @@ const tools: ToolDef[] = [
     },
     annotations: { untrustedContentHint: true },
     execute: async ({ query = "", quantity = 1, listings, publication, __trustedAuth }, { signal } = {}) => {
-      const requestedQuantity = Math.max(1, Math.min(999, Math.round(Number(quantity) || 1)));
-      const searchQuery = String(query ?? "");
+      if (typeof query !== "string" || (quantity !== undefined && (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1 || quantity > 999))) {
+        return shoppingError("INVALID_SEARCH_REQUEST", "shopping.search requires a string query and an integer quantity between 1 and 999.", {
+          query: typeof query === "string" ? query : null,
+          quantity: typeof quantity === "number" ? quantity : null,
+          results: [],
+          liveOffers: false,
+          requiresWebMCPAgent: true,
+        });
+      }
+      const requestedQuantity = quantity;
+      const searchQuery = query.trim();
       const shopping = useShoppingStore.getState();
       shopping.setQuery(searchQuery);
       const requiredCatalogIds = useProjectStore.getState().project.components.map((component) => component.definitionId);
       const handoff = createShoppingHandoff(searchQuery, requestedQuantity, requiredCatalogIds);
       const trustedAuth = __trustedAuth as TrustedToolContext | undefined;
-      if (!Array.isArray(listings) || listings.length === 0) {
+      const discoveryRequest = typeof listings === "undefined" && typeof publication === "undefined";
+      if (discoveryRequest) {
         shopping.setRequestStatus("searching");
         shopping.setResults([]);
         shopping.setHandoff(handoff);
         let providerFallback: Record<string, unknown> = { attempted: false, reason: "trusted_webmcp_session_required" };
+        let discovery: ShoppingDiscovery | null = null;
         if (trustedAuth?.authenticated && trustedAuth.subject) {
           const lookup = await fetchJson(`/api/parts/search?query=${encodeURIComponent(searchQuery)}&quantity=${requestedQuantity}`, { signal });
           providerFallback = {
@@ -1276,21 +1449,29 @@ const tools: ToolDef[] = [
             ...(lookup.data && typeof lookup.data === "object" ? lookup.data : {}),
             ...(lookup.error ? { error: lookup.error } : {}),
           };
-          const discovery = normalizeShoppingDiscovery(lookup.data);
-          shopping.setDiscovery(discovery);
+          discovery = normalizeShoppingDiscovery(lookup.data);
+          if (discovery) shopping.setDiscovery(discovery);
+          else shopping.setRequestStatus("agent-required");
         }
-        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff, providerFallback };
+        // A stale persistence/broadcast event may arrive while the upstream
+        // lookup is awaiting a response. Re-assert the active request after
+        // discovery so get_state and the UI cannot show candidates without
+        // their matching handoff.
+        shopping.setQuery(searchQuery);
+        shopping.setHandoff(handoff);
+        if (discovery) shopping.setDiscovery(discovery);
+        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff, discovery: shopping.discovery ?? discovery, providerFallback };
         const hasCandidates = (Array.isArray(providerFallback.candidates) && providerFallback.candidates.length > 0)
           || (Array.isArray(providerFallback.results) && providerFallback.results.length > 0);
         const message = hasCandidates
           ? "Public candidates are ready. Verify canonical catalog IDs, exact part numbers, timestamps, and HTTPS retailer offers, then call shopping.search again with listings and publication."
           : "Parts shopping requires a connected, authenticated WebMCP agent to publish listings. Public discovery was checked and the handoff JSON is ready for another browsing agent.";
-        return toolFailure("AGENT_PUBLICATION_REQUIRED", message, data);
+        return shoppingError("AGENT_PUBLICATION_REQUIRED", message, data);
       }
       if (!trustedAuth?.authenticated || !trustedAuth.subject) {
         shopping.setResults([]);
         shopping.setHandoff(handoff);
-        return toolFailure("AUTH_REQUIRED", "Listing publication was rejected because no trusted WebMCP session was present. The handoff JSON can be resumed after authentication.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff });
+        return shoppingError("AUTH_REQUIRED", "Listing publication was rejected because no trusted WebMCP session was present. Caller-supplied authentication fields are ignored; resume the handoff from a trusted WebMCP session.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff, discovery: shopping.discovery });
       }
       const requestedPublication = publication && typeof publication === "object" ? publication as Record<string, unknown> : {};
       const provider = String(requestedPublication.provider ?? "").trim();
@@ -1298,7 +1479,23 @@ const tools: ToolDef[] = [
       if (!provider || !publishedAt) {
         shopping.setResults([]);
         shopping.setHandoff(handoff);
-        return toolFailure("PUBLICATION_METADATA_REQUIRED", "Each WebMCP publication must include the parts provider and the time the agent sourced the listings.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff });
+        return shoppingError("PUBLICATION_METADATA_REQUIRED", "Each WebMCP publication must include the parts provider and the time the agent sourced the listings.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff, discovery: shopping.discovery });
+      }
+      const publicationIssues = shoppingPublicationIssues(listings, publication);
+      if (publicationIssues.length > 0) {
+        const firstIssue = publicationIssues[0];
+        shopping.setResults([]);
+        shopping.setHandoff(handoff);
+        return shoppingError(firstIssue.code, firstIssue.message, {
+          query: searchQuery,
+          source: "webmcp-agent-required",
+          liveOffers: false,
+          results: [],
+          requiresWebMCPAgent: true,
+          handoff,
+          discovery: shopping.discovery,
+          rejected: publicationIssues,
+        });
       }
       const trustedPublication: AgentPublication = {
         authenticated: true,
@@ -1322,9 +1519,10 @@ const tools: ToolDef[] = [
         results,
         requiresWebMCPAgent: true,
         handoff: publicationResult.accepted ? null : handoff,
+        discovery: publicationResult.accepted ? null : shopping.discovery,
       };
       if (!publicationResult.accepted) {
-        return { content: [{ type: "text", text: publicationResult.message ?? "The WebMCP agent publication was rejected." }], data, isError: true };
+        return shoppingError("PUBLICATION_REJECTED", publicationResult.message ?? "The WebMCP agent publication was rejected.", { ...data, rejected: [{ code: "PUBLICATION_REJECTED", message: publicationResult.message ?? "The WebMCP agent publication was rejected." }] });
       }
       return {
         content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
@@ -1340,7 +1538,16 @@ const tools: ToolDef[] = [
     execute: async () => {
       const shopping = useShoppingStore.getState();
       const quote = shopping.getQuote();
-      const state = { query: shopping.query, results: shopping.results, cart: shopping.cart, budget: shopping.budget, lastSearchAt: shopping.lastSearchAt, requestStatus: shopping.requestStatus, handoff: shopping.handoff, quote };
+      const pendingRequest = shopping.handoff
+        ? {
+            requestId: shopping.handoff.requestId,
+            query: shopping.handoff.query,
+            quantity: shopping.handoff.quantity,
+            requiredCatalogIds: shopping.handoff.requiredCatalogIds,
+            requestedAt: shopping.handoff.requestedAt,
+          }
+        : null;
+      const state = { query: shopping.query, results: shopping.results, cart: shopping.cart, budget: shopping.budget, lastSearchAt: shopping.lastSearchAt, requestStatus: shopping.requestStatus, pendingRequest, handoff: shopping.handoff, discovery: shopping.discovery, quote };
       return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }], data: state };
     },
   },
@@ -1466,11 +1673,13 @@ async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> 
     // builds must have a platform-verified identity before any agent action.
     const hosted = typeof window !== "undefined" && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
     const session = await getAuthSession(false, signal);
-    if (hosted && !session) {
-      const denied = {
-        content: [{ type: "text", text: "Sign in to use Schematic WebMCP tools; project state is scoped to your verified account." }],
-        isError: true,
-      };
+    // shopping.search owns a phase-aware gate: query-only calls can return a
+    // bounded machine-readable handoff while unauthenticated, while its
+    // publication branch returns AUTH_REQUIRED without a trusted session.
+    // No other hosted tool bypasses the gate.
+    const shoppingSearch = tool.name === "shopping.search";
+    if (hosted && !session && !shoppingSearch) {
+      const denied = toolFailure("AUTH_REQUIRED", "Sign in to use Schematic WebMCP tools; project state is scoped to your verified account.");
       useWebMCPStore.getState().finishTool(activityId, denied, true);
       return denied;
     }

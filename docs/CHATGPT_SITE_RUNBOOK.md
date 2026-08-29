@@ -110,7 +110,7 @@ an acceptance failure until it is recorded and resolved.
 | Unsupported source                               | A sketch outside the exact contract returns an explicit unsupported result/API list; no fake binary or silent success.                                                              |
 | Compile boundary                                 | Site `firmware.compile` returns source/target preflight or unavailable; it does not claim arbitrary binary compilation.                                                             |
 | Save/reload                                      | `project.save` followed by reload or project switch preserves the graph, connections, and firmware in the verified-user browser-local room.                                         |
-| Parts boundary                                   | `shopping.search` returns bounded no-key public candidates or a JSON handoff; results/cart remain empty until an authenticated WebMCP agent publishes exact catalog/provenance-backed listings. |
+| Parts boundary                                   | First `shopping.search` returns bounded no-key candidates and/or a strict `schematic.parts.lookup.v1` handoff; `shopping.get_state` exposes pending handoff/discovery while results/cart stay empty. A second call publishes only after trusted WebMCP auth and canonical, recent, HTTPS listing validation; there is no purchase or checkout action. |
 | Engine boundary                                  | Behavioral runtime is reported only where its model contract applies; native compiler/simulator paths are unavailable or unsupported on the Site.                                   |
 | Transport boundary                               | Raw WebSocket is unavailable on the Site; browser runtime or same-origin HTTP simulation remains usable.                                                                            |
 
@@ -129,7 +129,10 @@ an acceptance failure until it is recorded and resolved.
 - **Project appears missing:** confirm the same verified user and browser
   storage context. Browser-local persistence is not a cross-device backup.
 - **Parts appear without agent provenance:** treat as a release blocker; the
-  UI must not synthesize listings or retailer links.
+  UI must not synthesize listings or retailer links. Public discovery candidates
+  are never verified listings, and publication failures should surface their
+  structured code (`AUTH_REQUIRED`, `STALE_PUBLICATION`,
+  `NON_HTTPS_OFFER`, or `NON_CANONICAL_CATALOG_ID`).
 
 See [CHATGPT_SITE_PROGRESS.md](CHATGPT_SITE_PROGRESS.md) for the concise current
 checklist, [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the timed judge flow, and

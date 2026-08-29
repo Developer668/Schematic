@@ -161,7 +161,7 @@ export interface ShoppingState {
 
 const ANONYMOUS_STORAGE_KEY = "schematic-shopping";
 const shoppingChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("schematic-shopping-sync") : null;
-type PersistedShopping = Pick<ShoppingState, "query" | "results" | "cart" | "budget" | "lastSearchAt">;
+type PersistedShopping = Pick<ShoppingState, "query" | "results" | "cart" | "budget" | "lastSearchAt" | "handoff" | "discovery">;
 
 // Retailer prices and availability are untrusted agent-reported data. Keep a
 // narrow acceptance window so a replayed or clock-skewed publication cannot
@@ -257,7 +257,7 @@ function roomId() {
 }
 
 function readState(): PersistedShopping {
-  const fallback: PersistedShopping = { query: "", results: [], cart: [], budget: null, lastSearchAt: null };
+  const fallback: PersistedShopping = { query: "", results: [], cart: [], budget: null, lastSearchAt: null, handoff: null, discovery: null };
   try {
     const raw = typeof localStorage !== "undefined" ? JSON.parse(localStorage.getItem(storageKey()) ?? "null") : null;
     const results = raw && typeof raw === "object" && Array.isArray(raw.results) ? raw.results.filter(validListing) : [];
@@ -268,7 +268,7 @@ function readState(): PersistedShopping {
   } catch { return fallback; }
 }
 
-function snapshot(state: ShoppingState): PersistedShopping { return { query: state.query, results: state.results, cart: state.cart, budget: state.budget, lastSearchAt: state.lastSearchAt }; }
+function snapshot(state: ShoppingState): PersistedShopping { return { query: state.query, results: state.results, cart: state.cart, budget: state.budget, lastSearchAt: state.lastSearchAt, handoff: state.handoff, discovery: state.discovery }; }
 function persist(state: ShoppingState, broadcast = true) {
   const next = snapshot(state);
   try { if (typeof localStorage !== "undefined") localStorage.setItem(storageKey(), JSON.stringify(next)); } catch {}
@@ -295,9 +295,10 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
   undoStack: [],
   setQuery(query) { set({ query }); persist(get()); },
   setRequestStatus(requestStatus) { set({ requestStatus }); },
-  setHandoff(handoff) { set({ handoff, requestStatus: handoff ? "staged" : "idle" }); },
+  setHandoff(handoff) { set({ handoff, requestStatus: handoff ? "staged" : "idle" }); persist(get()); },
   setDiscovery(discovery) {
     set({ discovery, requestStatus: discovery?.rateLimited && discovery.candidates.length === 0 ? "rate-limited" : discovery ? "agent-required" : "idle" });
+    persist(get());
   },
   setResults() {
     set({ results: [], cart: [], lastSearchAt: null, requestStatus: "failed", discovery: null, publicationError: "Parts shopping needs a connected, authenticated WebMCP agent before listings can be shown. The lookup request is ready to hand off." });

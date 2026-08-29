@@ -1,102 +1,456 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, BadgeCheck, Check, CircleAlert, Clock3, ExternalLink, PackageCheck, RotateCcw, Search, ShieldCheck, ShoppingCart, Sparkles, Trash2, Undo2, Wifi, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  ArrowUpRight,
+  BadgeCheck,
+  Ban,
+  Check,
+  CircleAlert,
+  Clock3,
+  LoaderCircle,
+  PackageCheck,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  ShieldCheck,
+  ShoppingCart,
+  Sparkles,
+  Trash2,
+  Undo2,
+  Wifi,
+} from "lucide-react";
 import { getCatalogComponent } from "../../data/catalog.ts";
 import { useProjectStore } from "../../store/useProjectStore.ts";
-import { createShoppingHandoff, useShoppingStore, type PartOffer, type ShoppingDiscovery, type ShoppingRequestStatus, type ShoppingResult, type ShoppingState } from "../../store/useShoppingStore.ts";
+import {
+  createShoppingHandoff,
+  useShoppingStore,
+  type PartOffer,
+  type ShoppingRequestStatus,
+  type ShoppingResult,
+  type ShoppingState,
+} from "../../store/useShoppingStore.ts";
 import { createPartsSearchCoordinator } from "../../shopping/partsSearchClient.ts";
 
 type ShoppingSnapshot = ShoppingState;
 type ShoppingQuote = ReturnType<ShoppingSnapshot["getQuote"]>;
+type PartsUiPhase =
+  | "idle"
+  | "searching"
+  | "candidates"
+  | "verification"
+  | "rate-limited"
+  | "partial"
+  | "verified"
+  | "failed"
+  | "cancelled";
+
+type DiscoveryOffer = {
+  id: string;
+  retailer: string;
+  title: string;
+  price: number | null;
+  currency: string;
+  url?: string;
+  availability?: string;
+};
+
+type DiscoveryCandidate = {
+  id: string;
+  catalogId: string;
+  title: string;
+  manufacturer?: string;
+  partNumber: string;
+  exactMatch: boolean;
+  matchNote?: string;
+  provider?: string;
+  offers: DiscoveryOffer[];
+};
+
+type LookupRequest = { query: string; quantity: number };
+
+const phaseMeta: Record<
+  PartsUiPhase,
+  { label: string; title: string; copy: string; tone: string }
+> = {
+  idle: {
+    label: "Ready to source",
+    title: "Waiting for the WebMCP agent",
+    copy: "Stage an exact part request, then let an authenticated agent verify the catalog identity and retailer offers.",
+    tone: "idle",
+  },
+  searching: {
+    label: "Searching public sources",
+    title: "Searching public sources",
+    copy: "The provider lookup is running. Cancel before anything is published to the verified cart.",
+    tone: "active",
+  },
+  candidates: {
+    label: "Public candidates",
+    title: "Public discovery candidates",
+    copy: "These provider records are untrusted. They cannot enter the cart until an authenticated WebMCP agent verifies them.",
+    tone: "active",
+  },
+  verification: {
+    label: "Agent verification required",
+    title: "Agent verification required",
+    copy: "The lookup handoff is ready. Call shopping.search with authenticated publication metadata to publish exact listings.",
+    tone: "active",
+  },
+  "rate-limited": {
+    label: "Rate limited",
+    title: "Provider rate limited",
+    copy: "The provider asked us to slow down. Wait briefly, then retry; no listing was added to the cart.",
+    tone: "error",
+  },
+  partial: {
+    label: "Partially verified",
+    title: "Partially verified",
+    copy: "Some publication records were rejected. Only authenticated exact listings remain available for cart actions.",
+    tone: "ready",
+  },
+  verified: {
+    label: "Verified listings",
+    title: "Verified listings",
+    copy: "Authenticated agent publication completed. Choose an offer, confirm quantity, and add a listing to the cart.",
+    tone: "ready",
+  },
+  failed: {
+    label: "Lookup failed",
+    title: "Lookup failed",
+    copy: "No verified listing was published. Review the guidance and retry the explicit lookup.",
+    tone: "error",
+  },
+  cancelled: {
+    label: "Cancelled",
+    title: "Lookup cancelled",
+    copy: "The lookup was cancelled. Nothing from this request entered the cart.",
+    tone: "idle",
+  },
+};
 
 function money(value: number | null, currency = "USD") {
   if (value === null || !Number.isFinite(value)) return "Price unavailable";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 2 }).format(value);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function dateLabel(value: number | string | null | undefined) {
   if (!value) return "Awaiting first agent search";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Timestamp unavailable";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
-function requestStatusLabel(status: ShoppingRequestStatus | undefined, resultCount: number) {
-  if (resultCount > 0 || status === "ready" || status === "partial") return status === "partial" ? "Review partial match" : "Offers ready";
-  if (status === "searching") return "Checking suppliers";
-  if (status === "agent-required") return "Agent verification needed";
-  if (status === "rate-limited") return "Retry public lookup later";
-  if (status === "staged") return "Request staged";
-  if (status === "failed") return "Needs sourcing agent";
-  return "Ready to source";
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
-function SourcingProgress({ status, resultCount, projectPartCount }: { status?: ShoppingRequestStatus; resultCount: number; projectPartCount: number }) {
-  const active = resultCount > 0 || status === "ready" || status === "partial" ? 3 : status === "agent-required" ? 2 : status === "searching" ? 2 : status === "staged" || status === "rate-limited" ? 1 : 0;
+function stringValue(value: unknown) {
+  return typeof value === "string" || typeof value === "number"
+    ? String(value).trim()
+    : "";
+}
+
+function firstString(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = stringValue(record[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function safeRetailerUrl(value: unknown) {
+  const candidate = stringValue(value);
+  if (!candidate) return undefined;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" &&
+      Boolean(url.hostname) &&
+      !url.username &&
+      !url.password
+      ? url.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeDiscoveryPrice(value: unknown) {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function normalizeDiscoveryCandidates(value: unknown): DiscoveryCandidate[] {
+  const envelope = asRecord(value);
+  const rawResults = envelope
+    ? Array.isArray(envelope.candidates)
+      ? envelope.candidates
+      : Array.isArray(envelope.results)
+        ? envelope.results
+        : []
+    : [];
+  return rawResults.flatMap((entry, index): DiscoveryCandidate[] => {
+    const item = asRecord(entry);
+    if (!item) return [];
+    const title =
+      firstString(item, ["title", "name"]) || "Unlabelled provider candidate";
+    const catalogId = firstString(item, [
+      "catalogId",
+      "componentId",
+      "schematicCatalogId",
+    ]);
+    const partNumber = firstString(item, [
+      "partNumber",
+      "mpn",
+      "manufacturerPartNumber",
+    ]);
+    const rawOffers = Array.isArray(item.offers)
+      ? item.offers
+      : item.verificationUrl
+        ? [
+            {
+              ...item,
+              url: item.verificationUrl,
+              retailer:
+                firstString(item, ["source", "provider"]) || "Public source",
+            },
+          ]
+        : item.url
+          ? [item]
+          : [];
+    const offers = rawOffers.flatMap(
+      (rawOffer, offerIndex): DiscoveryOffer[] => {
+        const offer = asRecord(rawOffer);
+        if (!offer) return [];
+        const retailer =
+          firstString(offer, ["retailer", "source"]) || "Unidentified retailer";
+        const offerTitle = firstString(offer, ["title", "name"]) || title;
+        const currency = firstString(offer, [
+          "currency",
+          "currencyCode",
+        ]).toUpperCase();
+        const price = /^[A-Z]{3}$/.test(currency)
+          ? safeDiscoveryPrice(offer.price ?? offer.unitPrice)
+          : null;
+        const url = safeRetailerUrl(
+          offer.url ?? offer.productUrl ?? offer.link,
+        );
+        return [
+          {
+            id:
+              firstString(offer, ["id"]) ||
+              `candidate-${index}-offer-${offerIndex}`,
+            retailer,
+            title: offerTitle,
+            price,
+            currency: /^[A-Z]{3}$/.test(currency) ? currency : "USD",
+            ...(url ? { url } : {}),
+            ...(firstString(offer, ["availability"])
+              ? { availability: firstString(offer, ["availability"]) }
+              : {}),
+          },
+        ];
+      },
+    );
+    if (!title && !partNumber && !catalogId) return [];
+    return [
+      {
+        id: firstString(item, ["id"]) || `candidate-${index}`,
+        catalogId,
+        title,
+        ...(firstString(item, ["manufacturer"])
+          ? { manufacturer: firstString(item, ["manufacturer"]) }
+          : {}),
+        partNumber,
+        exactMatch: item.exactMatch === true,
+        ...(firstString(item, ["matchNote"])
+          ? { matchNote: firstString(item, ["matchNote"]) }
+          : {}),
+        ...(firstString(item, ["provider", "source"])
+          ? { provider: firstString(item, ["provider", "source"]) }
+          : {}),
+        offers,
+      },
+    ];
+  });
+}
+
+function quantityValue(value: string) {
+  if (!/^\d+$/.test(value.trim())) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 999
+    ? parsed
+    : null;
+}
+
+function progressLevel(phase: PartsUiPhase) {
+  if (phase === "verified" || phase === "partial") return 3;
+  if (phase === "candidates" || phase === "verification") return 2;
+  if (
+    phase === "searching" ||
+    phase === "rate-limited" ||
+    phase === "failed" ||
+    phase === "cancelled"
+  )
+    return 1;
+  return 0;
+}
+
+function SourcingProgress({
+  phase,
+  resultCount,
+  candidateCount,
+  projectPartCount,
+}: {
+  phase: PartsUiPhase;
+  resultCount: number;
+  candidateCount: number;
+  projectPartCount: number;
+}) {
+  const active = progressLevel(phase);
   const steps = ["Request", "Compare", "Verify"];
+  const title =
+    phase === "verified" || phase === "partial"
+      ? `${resultCount} verified design part${resultCount === 1 ? "" : "s"} ready to compare`
+      : phase === "candidates"
+        ? `${candidateCount} public candidate${candidateCount === 1 ? "" : "s"} awaiting agent verification`
+        : phase === "searching"
+          ? "Checking configured public sources"
+          : `${projectPartCount} design part${projectPartCount === 1 ? "" : "s"} queued for supplier lookup`;
   return (
-    <div className="shopping-request-card" aria-live="polite">
-      <div className="shopping-request-icon"><Sparkles size={15} /></div>
+    <div
+      className={`shopping-request-card is-${phase}`}
+      aria-live="polite"
+      data-testid="sourcing-progress"
+    >
+      <div className="shopping-request-icon">
+        {phase === "searching" ? (
+          <LoaderCircle size={15} className="shopping-spin" />
+        ) : (
+          <Sparkles size={15} />
+        )}
+      </div>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2"><span className="kicker">Sourcing pipeline</span><span className={`shopping-state-pill is-${active === 3 ? "ready" : active > 0 ? "active" : "idle"}`}>{requestStatusLabel(status, resultCount)}</span></div>
-        <p className="shopping-request-title">{resultCount > 0 ? `${resultCount} verified design part${resultCount === 1 ? "" : "s"} ready to compare` : `${projectPartCount} design part${projectPartCount === 1 ? "" : "s"} queued for supplier lookup`}</p>
-        <p className="shopping-request-copy">Public feeds find candidate part numbers first. A connected agent verifies identity and live retailer offers before anything reaches the cart.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="kicker">Sourcing pipeline</span>
+          <span className={`shopping-state-pill is-${phaseMeta[phase].tone}`}>
+            {phaseMeta[phase].label}
+          </span>
+        </div>
+        <p className="shopping-request-title">{title}</p>
+        <p className="shopping-request-copy">
+          The sourcing agent preserves the exact graph identity and returns
+          public candidates separately from authenticated listings.
+        </p>
       </div>
       <div className="shopping-request-steps" aria-label="Sourcing progress">
-        {steps.map((step, index) => <div key={step} className={`shopping-request-step ${active >= index + 1 ? "is-active" : ""}`}><span className="shopping-step-dot">{active >= index + 1 ? <Check size={10} /> : index + 1}</span><span>{step}</span>{index < steps.length - 1 && <span className="shopping-step-line" aria-hidden="true" />}</div>)}
+        {steps.map((step, index) => (
+          <div
+            key={step}
+            className={`shopping-request-step ${active >= index + 1 ? "is-active" : ""}`}
+          >
+            <span className="shopping-step-dot">
+              {active >= index + 1 ? <Check size={10} /> : index + 1}
+            </span>
+            <span>{step}</span>
+            {index < steps.length - 1 && (
+              <span className="shopping-step-line" aria-hidden="true" />
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function discoverySourceLabel(source: string) {
-  if (source === "jlcsearch") return "JLCSearch · LCSC snapshot";
-  if (source === "adafruit") return "Adafruit public catalog";
-  return source;
-}
-
-function discoveryStatusLabel(status: ShoppingDiscovery["attempts"][number]["status"]) {
-  if (status === "success") return "checked";
-  if (status === "rate_limited") return "rate limited";
-  if (status === "circuit_open") return "paused";
-  if (status === "skipped") return "agent fallback";
-  if (status === "timeout") return "timed out";
-  if (status === "empty") return "no matches";
-  return "unavailable";
-}
-
-function PublicDiscoveryPanel({ discovery, onRetry }: { discovery: ShoppingDiscovery; onRetry?: () => void }) {
-  const visibleCandidates = discovery.candidates.slice(0, 8);
-  const attempts = discovery.attempts.filter((attempt) => attempt.source !== "request");
+function LookupStatus({
+  phase,
+  message,
+  hasDesign,
+  onCancel,
+  onRetry,
+  onStageDesign,
+}: {
+  phase: PartsUiPhase;
+  message: string;
+  hasDesign: boolean;
+  onCancel: () => void;
+  onRetry: () => void;
+  onStageDesign: () => void;
+}) {
+  if (phase === "idle") return null;
+  const meta = phaseMeta[phase];
+  const retryable =
+    phase === "candidates" ||
+    phase === "rate-limited" ||
+    phase === "failed" ||
+    phase === "cancelled";
   return (
-    <section className="shopping-discovery-panel" aria-label="Public part discovery" aria-live="polite">
-      <div className="flex items-start gap-2.5">
-        <div className="shopping-discovery-icon"><Search size={14} /></div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2"><span className="kicker">Public discovery</span><span className="shopping-state-pill is-active">Agent verification required</span></div>
-          <p className="mt-1 text-[11px] font-semibold">{visibleCandidates.length ? `${discovery.candidates.length} candidate${discovery.candidates.length === 1 ? "" : "s"} found` : discovery.rateLimited ? "Public lookup is rate limited" : "Ready for the web-search fallback"}</p>
-          <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{discovery.message} Candidates are hints only: they have no canonical Schematic identity or checkout-ready offer yet.</p>
-        </div>
+    <section
+      className={`shopping-state-panel is-${phase}`}
+      role="status"
+      aria-live="polite"
+      data-testid="lookup-status"
+    >
+      <div className="shopping-state-icon">
+        {phase === "searching" ? (
+          <LoaderCircle size={15} className="shopping-spin" />
+        ) : phase === "cancelled" ? (
+          <Ban size={15} />
+        ) : phase === "verified" || phase === "partial" ? (
+          <BadgeCheck size={15} />
+        ) : (
+          <CircleAlert size={15} />
+        )}
       </div>
-      {attempts.length > 0 && <div className="shopping-discovery-attempts">{attempts.map((attempt, index) => <span key={`${attempt.source}-${index}`} className="shopping-discovery-attempt"><span className={`shopping-discovery-dot is-${attempt.status === "success" ? "good" : attempt.status === "rate_limited" ? "warn" : "muted"}`} />{discoverySourceLabel(attempt.source)} · {discoveryStatusLabel(attempt.status)}</span>)}</div>}
-      {visibleCandidates.length > 0 && (
-        <div className="shopping-candidate-list">
-          {visibleCandidates.map((candidate) => (
-            <div key={candidate.id} className="shopping-candidate-row">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[10px] font-semibold">{candidate.title}</div>
-                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[9px] text-muted-foreground">
-                  <code className="font-mono">{candidate.partNumber}</code>
-                  {candidate.package && <><span aria-hidden="true">·</span><span>{candidate.package}</span></>}
-                  {candidate.stock !== null && <><span aria-hidden="true">·</span><span>{candidate.stock.toLocaleString()} in snapshot</span></>}
-                </div>
-              </div>
-              <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">{candidate.price === null ? "Price —" : money(candidate.price, candidate.currency ?? "USD")}</span>
-              <a href={candidate.verificationUrl} target="_blank" rel="noreferrer" className="grid h-6 w-6 shrink-0 place-items-center rounded border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={`Verify ${candidate.partNumber} source`}><ExternalLink size={10} /></a>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="mt-2 flex items-start justify-between gap-2 border-t border-border/70 pt-2 text-[9px] leading-relaxed text-muted-foreground"><div className="flex min-w-0 items-start gap-1.5"><ShieldCheck size={11} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" /><span>Ask the connected WebMCP agent to resolve these part numbers to the project catalog and publish current HTTPS retailer offers through <code className="font-mono text-foreground">shopping.search</code>.</span></div>{onRetry && <button type="button" onClick={onRetry} className="shrink-0 rounded border border-border px-2 py-1 text-[9px] font-semibold text-foreground transition-colors hover:bg-muted">Retry lookup</button>}</div>
+      <div className="min-w-0 flex-1">
+        <div className="kicker">Lookup state</div>
+        <h3>{meta.title}</h3>
+        <p>{message || meta.copy}</p>
+      </div>
+      <div className="shopping-state-actions">
+        {phase === "searching" && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="shopping-secondary-action"
+          >
+            <Ban size={12} /> Cancel lookup
+          </button>
+        )}
+        {retryable && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="shopping-primary-action"
+          >
+            <RefreshCw size={12} /> Retry lookup
+          </button>
+        )}
+        {phase === "verification" && hasDesign && (
+          <button
+            type="button"
+            onClick={onStageDesign}
+            className="shopping-secondary-action"
+          >
+            <PackageCheck size={12} /> Source current design
+          </button>
+        )}
+      </div>
     </section>
   );
 }
@@ -106,213 +460,927 @@ function cheapestOfferId(result: ShoppingResult) {
     if (offer.price === null || !Number.isFinite(offer.price)) return best;
     if (!best) return offer.id;
     const current = result.offers.find((candidate) => candidate.id === best);
-    return !current || current.price === null || offer.price < current.price ? offer.id : best;
+    return !current || current.price === null || offer.price < current.price
+      ? offer.id
+      : best;
   }, undefined);
 }
 
-function OfferRow({ offer, selected, selectable, cheapest, onSelect }: { offer: PartOffer; selected: boolean; selectable: boolean; cheapest: boolean; onSelect: () => void }) {
+function RetailerLink({ retailer, url }: { retailer: string; url?: string }) {
+  if (!url)
+    return (
+      <span className="shopping-retailer-unavailable">
+        Retailer link unavailable
+      </span>
+    );
   return (
-    <div className={`flex items-center gap-2 border-t border-border/70 px-3 py-2 transition-colors ${selected ? "bg-muted/70" : "hover:bg-muted/35"}`}>
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="shopping-retailer-link"
+      aria-label={`Open ${retailer} listing`}
+      title="Open retailer listing; confirm live stock, shipping, and final price"
+    >
+      <span>Open retailer</span>
+      <ArrowUpRight size={11} />
+    </a>
+  );
+}
+
+function OfferRow({
+  offer,
+  selected,
+  selectable,
+  cheapest,
+  onSelect,
+}: {
+  offer: PartOffer;
+  selected: boolean;
+  selectable: boolean;
+  cheapest: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <div className={`shopping-offer-row ${selected ? "is-selected" : ""}`}>
       {selectable ? (
-        <button type="button" onClick={onSelect} className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border transition-colors ${selected ? "border-primary bg-primary" : "border-border hover:border-muted-foreground"}`} aria-label={`Use ${offer.retailer} offer`} aria-pressed={selected}>
-          {selected && <span className="h-1.5 w-1.5 rounded-full bg-primary-foreground" />}
+        <button
+          type="button"
+          onClick={onSelect}
+          className={`shopping-offer-radio ${selected ? "is-selected" : ""}`}
+          aria-label={`Use ${offer.retailer} offer`}
+          aria-pressed={selected}
+        >
+          {selected && <span />}
         </button>
       ) : (
-        <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${cheapest ? "border-emerald-500/50" : "border-border"}`} aria-hidden="true">
-          {cheapest && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+        <span
+          className={`shopping-offer-radio is-readonly ${cheapest ? "is-cheapest" : ""}`}
+          aria-hidden="true"
+        >
+          {cheapest && <span />}
         </span>
       )}
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-[11px] font-medium">{offer.retailer}</span>
-          {cheapest && <span className="shrink-0 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:text-emerald-300">Best price</span>}
+          <span className="truncate text-[11px] font-medium">
+            {offer.retailer}
+          </span>
+          {cheapest && <span className="shopping-best-price">Best price</span>}
         </div>
-        <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{offer.title}{offer.availability ? ` · reported ${offer.availability}` : " · agent-sourced offer"}</div>
+        <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+          {offer.title}
+          {offer.availability
+            ? ` · reported ${offer.availability}`
+            : " · agent-sourced offer"}
+        </div>
       </div>
-      <span className={`shrink-0 font-mono text-[11px] tabular-nums ${offer.price === null ? "text-muted-foreground" : "text-foreground"}`}>{money(offer.price, offer.currency)}</span>
-      <a href={offer.url} target="_blank" rel="noreferrer" className="grid h-7 w-7 shrink-0 place-items-center rounded border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={`Open ${offer.retailer} listing`}>
-        <ArrowUpRight size={11} />
-      </a>
+      <span
+        className={`shrink-0 font-mono text-[11px] tabular-nums ${offer.price === null ? "text-muted-foreground" : "text-foreground"}`}
+      >
+        {money(offer.price, offer.currency)}
+      </span>
+      <RetailerLink retailer={offer.retailer} url={offer.url} />
     </div>
   );
 }
 
-function ResultCard({ result, cartLine, onAdd, onRemove, onQuantity, onOffer, onAlternative }: { result: ShoppingResult; cartLine?: { resultId: string; quantity: number; selectedOfferId?: string }; onAdd: () => void; onRemove: () => void; onQuantity: (quantity: number) => void; onOffer: (offerId: string) => void; onAlternative: (catalogId: string) => void }) {
-  const alternatives = result.alternatives.filter((alternative) => Boolean(getCatalogComponent(alternative.catalogId)));
+function ResultCard({
+  result,
+  cartLine,
+  onAdd,
+  onRemove,
+  onQuantity,
+  onOffer,
+  onAlternative,
+}: {
+  result: ShoppingResult;
+  cartLine?: { resultId: string; quantity: number; selectedOfferId?: string };
+  onAdd: () => void;
+  onRemove: () => void;
+  onQuantity: (quantity: number) => void;
+  onOffer: (offerId: string) => void;
+  onAlternative: (catalogId: string) => void;
+}) {
+  const alternatives = (
+    Array.isArray(result.alternatives) ? result.alternatives : []
+  ).filter((alternative) =>
+    Boolean(getCatalogComponent(alternative.catalogId)),
+  );
   const lowestOfferId = cheapestOfferId(result);
   return (
-    <article className="overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
-      <div className="flex items-start gap-3 px-3 py-3">
-        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-border bg-muted/40 text-muted-foreground">
+    <article
+      className="shopping-verified-card"
+      aria-label={`Verified listing ${result.title}`}
+      data-testid={`verified-result-${result.id}`}
+    >
+      <div className="shopping-result-head">
+        <div className="shopping-result-mark">
           <PackageCheck size={15} strokeWidth={1.7} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <h3 className="truncate text-xs font-semibold">{result.title}</h3>
-            <span className="inline-flex shrink-0 items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700 dark:text-emerald-300"><BadgeCheck size={10} /> Exact catalog match</span>
+            <span className="shopping-verified-badge">
+              <BadgeCheck size={10} /> Exact catalog match
+            </span>
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
-            <span>{result.manufacturer ?? "Catalog identity"}</span><span aria-hidden="true">·</span><code className="font-mono">{result.partNumber}</code><span aria-hidden="true">·</span><span>requested qty {result.requestedQuantity}</span>
+            <span>{result.manufacturer ?? "Catalog identity"}</span>
+            <span aria-hidden="true">·</span>
+            <code className="font-mono">{result.partNumber}</code>
+            <span aria-hidden="true">·</span>
+            <span>requested qty {result.requestedQuantity}</span>
           </div>
         </div>
         {cartLine ? (
           <div className="flex shrink-0 items-center gap-1.5">
-            <div className="flex h-8 items-center rounded border border-border bg-background" aria-label={`${result.title} quantity`}>
-              <button type="button" onClick={() => onQuantity(cartLine.quantity - 1)} className="grid h-8 w-7 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={`Decrease ${result.title} quantity`}>−</button>
-              <span className="min-w-6 text-center font-mono text-[10px] tabular-nums">{cartLine.quantity}</span>
-              <button type="button" onClick={() => onQuantity(cartLine.quantity + 1)} className="grid h-8 w-7 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={`Increase ${result.title} quantity`}>+</button>
+            <div
+              className="shopping-cart-quantity"
+              role="group"
+              aria-label={`${result.title} cart quantity`}
+            >
+              <button
+                type="button"
+                onClick={() => onQuantity(cartLine.quantity - 1)}
+                aria-label={`Decrease ${result.title} quantity`}
+              >
+                −
+              </button>
+              <span>{cartLine.quantity}</span>
+              <button
+                type="button"
+                onClick={() => onQuantity(cartLine.quantity + 1)}
+                aria-label={`Increase ${result.title} quantity`}
+              >
+                +
+              </button>
             </div>
-            <button type="button" onClick={onRemove} className="grid h-8 w-8 place-items-center rounded border border-border text-muted-foreground transition-colors hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-500" aria-label={`Remove ${result.title} from cart`} title="Remove from cart"><Trash2 size={12} /></button>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="shopping-icon-action is-remove"
+              aria-label={`Remove ${result.title} from cart`}
+              title="Remove from cart"
+            >
+              <Trash2 size={12} />
+            </button>
           </div>
         ) : (
-          <button type="button" onClick={onAdd} disabled={!result.exactMatch} className="shrink-0 rounded bg-foreground px-2.5 py-1.5 text-[10px] font-semibold text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground" title={result.exactMatch ? "Add exact catalog match" : "Review the part number before adding this listing"}>{result.exactMatch ? "Add to cart" : "Review match"}</button>
+          <button
+            type="button"
+            onClick={onAdd}
+            disabled={!result.exactMatch}
+            className="shopping-add-button"
+            title={
+              result.exactMatch
+                ? "Add exact catalog match"
+                : "Review the part number before adding this listing"
+            }
+          >
+            {result.exactMatch ? "Add to cart" : "Review match"}
+          </button>
         )}
       </div>
-      {result.matchNote && <div className="border-t border-border/70 bg-muted/20 px-3 py-2 text-[10px] leading-snug text-muted-foreground">{result.matchNote}</div>}
-      <div className="border-t border-border/70">
-        <div className="flex items-center justify-between gap-2 px-3 py-2">
-          <span className="kicker">Sourced offers</span>
-          <span className="font-mono text-[9px] tabular-nums text-muted-foreground">{Math.min(result.offers.length, 3)} of 3 shown</span>
+      {result.matchNote && (
+        <div className="shopping-result-note">{result.matchNote}</div>
+      )}
+      <div className="shopping-offers-block">
+        <div className="shopping-offers-head">
+          <span className="kicker">Verified sourced offers</span>
+          <span className="font-mono text-[9px] tabular-nums text-muted-foreground">
+            {Math.min(result.offers.length, 3)} of 3 shown
+          </span>
         </div>
-        <div>
-          {result.offers.slice(0, 3).map((offer) => <OfferRow key={offer.id} offer={offer} selected={cartLine?.selectedOfferId === offer.id || (!cartLine && offer.id === lowestOfferId)} selectable={Boolean(cartLine)} cheapest={offer.id === lowestOfferId} onSelect={() => onOffer(offer.id)} />)}
-        </div>
+        {result.offers.slice(0, 3).map((offer) => (
+          <OfferRow
+            key={offer.id}
+            offer={offer}
+            selected={
+              cartLine?.selectedOfferId === offer.id ||
+              Boolean(
+                cartLine &&
+                !cartLine.selectedOfferId &&
+                offer.id === lowestOfferId,
+              ) ||
+              (!cartLine && offer.id === lowestOfferId)
+            }
+            selectable={Boolean(cartLine)}
+            cheapest={offer.id === lowestOfferId}
+            onSelect={() => onOffer(offer.id)}
+          />
+        ))}
+        <p className="shopping-retailer-note">
+          <ArrowUpRight size={11} /> Retailer pages open only when clicked.
+          Confirm live stock, shipping, and final price before checkout.
+        </p>
       </div>
       {alternatives.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-border/70 bg-muted/10 px-3 py-2">
-          <span className="mr-1 text-[10px] font-medium text-muted-foreground">Agent alternatives</span>
-          {alternatives.map((alternative) => <button key={alternative.catalogId} type="button" onClick={() => onAlternative(alternative.catalogId)} className="max-w-full truncate rounded border border-border px-1.5 py-1 text-[10px] transition-colors hover:bg-muted" title={alternative.reason}>{alternative.title}</button>)}
+        <div className="shopping-alternatives">
+          <span className="text-[10px] font-medium text-muted-foreground">
+            Verified agent alternatives
+          </span>
+          {alternatives.map((alternative) => (
+            <button
+              key={alternative.catalogId}
+              type="button"
+              onClick={() => onAlternative(alternative.catalogId)}
+              className="shopping-alternative-button"
+              title={alternative.reason}
+            >
+              {alternative.title}
+            </button>
+          ))}
         </div>
       )}
     </article>
   );
 }
 
-function CartSummary({ shopping, quote, onReset, detailed = false }: { shopping: ShoppingSnapshot; quote: ShoppingQuote; onReset: () => void; detailed?: boolean }) {
+function DiscoveryOfferRow({ offer }: { offer: DiscoveryOffer }) {
   return (
-    <section className={`shopping-cart-summary ${detailed ? "min-h-full p-4" : "shrink-0 p-3"}`}>
+    <div className="shopping-discovery-offer">
+      <div className="min-w-0 flex-1">
+        <span className="block truncate text-[11px] font-medium">
+          {offer.retailer}
+        </span>
+        <span className="block truncate text-[10px] text-muted-foreground">
+          {offer.title}
+          {offer.availability ? ` · reported ${offer.availability}` : ""}
+        </span>
+      </div>
+      <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+        {money(offer.price, offer.currency)}
+      </span>
+      <RetailerLink retailer={offer.retailer} url={offer.url} />
+    </div>
+  );
+}
+
+function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
+  return (
+    <article
+      className="shopping-discovery-card"
+      aria-label={`Public discovery candidate ${candidate.title}`}
+      data-testid={`discovery-candidate-${candidate.id}`}
+    >
+      <div className="shopping-discovery-head">
+        <div className="shopping-discovery-mark">
+          <CircleAlert size={14} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <h3 className="truncate text-xs font-semibold">
+              {candidate.title}
+            </h3>
+            <span className="shopping-unverified-badge">
+              Unverified candidate
+            </span>
+          </div>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
+            <span>{candidate.manufacturer ?? "Public provider record"}</span>
+            <span aria-hidden="true">·</span>
+            <code className="font-mono">
+              {candidate.partNumber || "part number unavailable"}
+            </code>
+          </div>
+        </div>
+        <span className="shopping-no-cart-badge">Cart locked</span>
+      </div>
+      <div className="shopping-discovery-identity">
+        <span className="kicker">Reported catalog identity</span>
+        <code>{candidate.catalogId || "No canonical catalog ID supplied"}</code>
+      </div>
+      {candidate.matchNote && (
+        <p className="shopping-discovery-note">{candidate.matchNote}</p>
+      )}
+      <p className="shopping-discovery-warning">
+        <ShieldCheck size={12} /> Provider data is public discovery only. An
+        authenticated WebMCP agent must verify this identity and its recent
+        HTTPS offers through <code>shopping.search</code> before any cart
+        action.
+      </p>
+      {candidate.offers.length > 0 ? (
+        <div className="shopping-discovery-offers">
+          <div className="shopping-offers-head">
+            <span className="kicker">Reported offers</span>
+            <span className="font-mono text-[9px] text-muted-foreground">
+              No cart actions
+            </span>
+          </div>
+          {candidate.offers.slice(0, 3).map((offer) => (
+            <DiscoveryOfferRow key={offer.id} offer={offer} />
+          ))}
+        </div>
+      ) : (
+        <p className="shopping-discovery-empty">
+          No retailer offer was supplied. Keep this candidate out of the cart
+          until an agent publishes a verified listing.
+        </p>
+      )}
+    </article>
+  );
+}
+
+function DiscoveryZone({ candidates }: { candidates: DiscoveryCandidate[] }) {
+  return (
+    <section
+      className="shopping-discovery-zone"
+      aria-label="Public discovery candidates"
+      data-testid="public-discovery"
+    >
+      <div className="shopping-zone-head">
+        <div>
+          <div className="kicker">Public discovery / unverified</div>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {candidates.length} provider candidate
+            {candidates.length === 1 ? "" : "s"} · review only
+          </p>
+        </div>
+        <span className="shopping-zone-lock">
+          <Ban size={11} /> No cart access
+        </span>
+      </div>
+      <div className="shopping-discovery-grid">
+        {candidates.map((candidate) => (
+          <DiscoveryCard key={candidate.id} candidate={candidate} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CartSummary({
+  shopping,
+  quote,
+  onReset,
+  detailed = false,
+}: {
+  shopping: ShoppingSnapshot;
+  quote: ShoppingQuote;
+  onReset: () => void;
+  detailed?: boolean;
+}) {
+  return (
+    <section
+      className={`shopping-cart-summary ${detailed ? "min-h-full p-4" : "shrink-0 p-3"}`}
+      aria-label="Build cart"
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="kicker">Bill of materials</div>
-          <div className="mt-1 flex items-center gap-1.5 text-xs font-semibold"><ShoppingCart size={13} /> Build cart</div>
+          <div className="mt-1 flex items-center gap-1.5 text-xs font-semibold">
+            <ShoppingCart size={13} /> Build cart
+          </div>
         </div>
-        <span className="rounded bg-background px-2 py-1 font-mono text-[9px] tabular-nums text-muted-foreground">{shopping.cart.length} line{shopping.cart.length === 1 ? "" : "s"}</span>
+        <span className="rounded bg-background px-2 py-1 font-mono text-[9px] tabular-nums text-muted-foreground">
+          {shopping.cart.length} line{shopping.cart.length === 1 ? "" : "s"}
+        </span>
       </div>
       {detailed && (
         <div className="mt-4">
-          {quote.lines.length === 0 ? <p className="border-y border-dashed border-border px-2 py-6 text-center text-[10px] text-muted-foreground">Add validated listings to start the build cart.</p> : (
+          {quote.lines.length === 0 ? (
+            <p className="border-y border-dashed border-border px-2 py-6 text-center text-[10px] text-muted-foreground">
+              Add verified listings to start the build cart.
+            </p>
+          ) : (
             <div className="divide-y divide-border border-y border-border">
               {quote.lines.map((line) => (
-                <div key={line.resultId} className="flex items-start gap-2 py-3">
-                  <div className="min-w-0 flex-1"><div className="truncate text-[11px] font-medium">{line.title}</div><div className="mt-1 font-mono text-[10px] text-muted-foreground">qty {line.quantity} · {line.unitPrice === null ? "price unavailable" : `${money(line.unitPrice, line.offer?.currency)} each`}</div></div>
-                  <button type="button" onClick={() => shopping.removeFromCart(line.resultId)} className="grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500" aria-label={`Remove ${line.title} from cart`} title="Remove from cart"><Trash2 size={11} /></button>
+                <div
+                  key={line.resultId}
+                  className="flex items-start gap-2 py-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[11px] font-medium">
+                      {line.title}
+                    </div>
+                    <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                      qty {line.quantity} ·{" "}
+                      {line.unitPrice === null
+                        ? "price unavailable"
+                        : `${money(line.unitPrice, line.offer?.currency)} each`}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => shopping.removeFromCart(line.resultId)}
+                    className="shopping-icon-action"
+                    aria-label={`Remove ${line.title} from cart`}
+                    title="Remove from cart"
+                  >
+                    <Trash2 size={11} />
+                  </button>
                 </div>
               ))}
             </div>
           )}
         </div>
       )}
-      <div className="mt-4 flex items-end justify-between gap-3"><span className="text-[11px] text-muted-foreground">Total build cost</span><span className={`font-mono text-lg font-semibold tabular-nums ${quote.overBudget ? "text-red-500" : ""}`}>{quote.missingPrices.length ? "—" : money(quote.total)}</span></div>
-      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground"><span>{quote.missingPrices.length ? `${quote.missingPrices.length} missing price${quote.missingPrices.length === 1 ? "" : "s"}` : "Lowest priced offer per line"}</span><span className={quote.overBudget ? "font-semibold text-red-500" : ""}>{quote.budget === null ? "No budget" : `${quote.overBudget ? "Over" : "Under"} ${money(quote.budget)}`}</span></div>
-      <label className="mt-3 flex items-center gap-2 border-b border-border py-1.5"><span className="text-[10px] font-medium text-muted-foreground">Budget ceiling</span><span className="font-mono text-[10px] text-muted-foreground">$</span><input type="number" min="0" step="0.01" value={shopping.budget ?? ""} onChange={(event) => shopping.setBudget(event.target.value === "" ? null : Number(event.target.value))} placeholder="Set budget" aria-label="Shopping budget" className="h-7 min-w-0 flex-1 bg-transparent text-right font-mono text-[11px] outline-none placeholder:text-muted-foreground/60" /></label>
-      <div className="mt-3 flex items-center gap-1.5"><button type="button" onClick={() => shopping.undoCart()} disabled={shopping.undoStack.length === 0} className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded border border-border text-[10px] transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40" title="Undo cart change"><Undo2 size={12} /> Undo</button><button type="button" onClick={onReset} className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded border border-border text-[10px] transition-colors hover:bg-muted" title="Reset to all project components"><RotateCcw size={11} /> Reset required</button></div>
-      <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">Prices are agent-sourced and may change at checkout. Open each retailer link to confirm stock, shipping, and final quantity.</p>
+      <div className="mt-4 flex items-end justify-between gap-3">
+        <span className="text-[11px] text-muted-foreground">
+          Total build cost
+        </span>
+        <span
+          className={`font-mono text-lg font-semibold tabular-nums ${quote.overBudget ? "text-red-500" : ""}`}
+        >
+          {quote.missingPrices.length ? "—" : money(quote.total)}
+        </span>
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+        <span>
+          {quote.missingPrices.length
+            ? `${quote.missingPrices.length} missing price${quote.missingPrices.length === 1 ? "" : "s"}`
+            : "Lowest priced offer per line"}
+        </span>
+        <span className={quote.overBudget ? "font-semibold text-red-500" : ""}>
+          {quote.budget === null
+            ? "No budget"
+            : `${quote.overBudget ? "Over" : "Under"} ${money(quote.budget)}`}
+        </span>
+      </div>
+      <label className="mt-3 flex items-center gap-2 border-b border-border py-1.5">
+        <span className="text-[10px] font-medium text-muted-foreground">
+          Budget ceiling
+        </span>
+        <span className="font-mono text-[10px] text-muted-foreground">$</span>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={shopping.budget ?? ""}
+          onChange={(event) =>
+            shopping.setBudget(
+              event.target.value === "" ? null : Number(event.target.value),
+            )
+          }
+          placeholder="Set budget"
+          aria-label="Shopping budget"
+          className="h-7 min-w-0 flex-1 bg-transparent text-right font-mono text-[11px] outline-none placeholder:text-muted-foreground/60"
+        />
+      </label>
+      <div className="mt-3 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => shopping.undoCart()}
+          disabled={shopping.undoStack.length === 0}
+          className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded border border-border text-[10px] transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+          title="Undo cart change"
+        >
+          <Undo2 size={12} /> Undo
+        </button>
+        <button
+          type="button"
+          onClick={onReset}
+          className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded border border-border text-[10px] transition-colors hover:bg-muted"
+          title="Reset to all project components"
+        >
+          <RotateCcw size={11} /> Reset required
+        </button>
+      </div>
+      <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
+        Prices are agent-sourced and may change at checkout. Open each retailer
+        link yourself to confirm stock, shipping, and final quantity.
+      </p>
     </section>
   );
 }
 
-function AgentEmptyState({ query, requiredIds, status, onStageQuery, onStageDesign }: { query: string; requiredIds: string[]; status?: ShoppingRequestStatus; onStageQuery: () => void; onStageDesign: () => void }) {
-  const requiredParts = requiredIds.map((catalogId) => getCatalogComponent(catalogId)).filter(Boolean);
-  const statusTone = status === "failed" ? "error" : status === "staged" || status === "agent-required" || status === "rate-limited" ? "active" : "idle";
-  const statusText = status === "failed" ? "Action needed" : status === "agent-required" ? "Verify with agent" : status === "staged" ? "Staged" : status === "rate-limited" ? "Retry later" : "Agent only";
+function AgentEmptyState({
+  query,
+  requiredIds,
+  phase,
+  onStageQuery,
+  onStageDesign,
+  onRetry,
+}: {
+  query: string;
+  requiredIds: string[];
+  phase: PartsUiPhase;
+  onStageQuery: () => void;
+  onStageDesign: () => void;
+  onRetry: () => void;
+}) {
+  const requiredParts = requiredIds
+    .map((catalogId) => getCatalogComponent(catalogId))
+    .filter(Boolean);
+  const meta = phaseMeta[phase];
+  const canRetry =
+    phase === "failed" || phase === "rate-limited" || phase === "cancelled";
   return (
-    <div className="shopping-empty-state" aria-live="polite">
+    <div className={`shopping-empty-state is-${phase}`} aria-live="polite">
       <div className="flex items-start gap-3">
-        <div className="shopping-empty-icon"><Wifi size={16} strokeWidth={1.7} /></div>
-        <div className="min-w-0 flex-1"><div className="kicker">Ready when you are</div><h2 className="mt-1 text-sm font-semibold">Waiting for the WebMCP agent</h2><p className="mt-1 max-w-[62ch] text-[10px] leading-relaxed text-muted-foreground">Agent publication required. This desk stays empty until a connected, authenticated agent finds and publishes exact catalog matches with sourced retailer offers.</p></div>
-        <span className={`shopping-state-pill hidden shrink-0 sm:inline-flex is-${statusTone}`}>{statusText}</span>
+        <div className="shopping-empty-icon">
+          {phase === "searching" ? (
+            <LoaderCircle size={16} className="shopping-spin" />
+          ) : phase === "cancelled" ? (
+            <Ban size={16} />
+          ) : (
+            <Wifi size={16} strokeWidth={1.7} />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="kicker">
+            {phase === "idle" ? "Ready when you are" : "Parts lookup"}
+          </div>
+          <h2 className="mt-1 text-sm font-semibold">
+            {phase === "idle" ? "Waiting for the WebMCP agent" : meta.title}
+          </h2>
+          <p className="mt-1 max-w-[62ch] text-[10px] leading-relaxed text-muted-foreground">
+            {phase === "idle"
+              ? "Agent publication required. This desk stays empty until a connected, authenticated agent finds and publishes exact catalog matches with sourced retailer offers."
+              : meta.copy}
+          </p>
+        </div>
+        <span
+          className={`shopping-state-pill hidden shrink-0 sm:inline-flex is-${meta.tone}`}
+        >
+          {meta.label}
+        </span>
       </div>
-      <div className="shopping-empty-actions"><button type="button" onClick={onStageQuery} disabled={!query.trim()} className="shopping-primary-action"><Search size={12} /> Request this part</button><button type="button" onClick={onStageDesign} disabled={!requiredIds.length} className="shopping-secondary-action"><PackageCheck size={12} /> Source required design</button><span className="shopping-empty-note"><Clock3 size={12} /> Supplier results stay reviewable until added to the cart.</span></div>
+      <div className="shopping-empty-actions">
+        <button
+          type="button"
+          onClick={onStageQuery}
+          disabled={!query.trim() || phase === "searching"}
+          className="shopping-primary-action"
+        >
+          <Search size={12} /> Request this part
+        </button>
+        <button
+          type="button"
+          onClick={onStageDesign}
+          disabled={!requiredIds.length || phase === "searching"}
+          className="shopping-secondary-action"
+        >
+          <PackageCheck size={12} /> Source current design
+        </button>
+        {canRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="shopping-secondary-action"
+          >
+            <RefreshCw size={12} /> Retry lookup
+          </button>
+        )}
+        <span className="shopping-empty-note">
+          <Clock3 size={12} /> Supplier results stay reviewable until added to
+          the cart.
+        </span>
+      </div>
       <div className="shopping-empty-lower">
-        <div className="shopping-empty-flow"><div className="shopping-empty-flow-item"><span>01</span><div><p>Resolve identity</p><small>Match every request to a real catalog part number.</small></div></div><div className="shopping-empty-flow-item"><span>02</span><div><p>Compare offers</p><small>Keep the best supplier options side by side.</small></div></div><div className="shopping-empty-flow-item"><span>03</span><div><p>Build the cart</p><small>Choose quantities only after the exact match is verified.</small></div></div></div>
-        {requiredParts.length > 0 && <div className="shopping-required-parts"><div className="kicker">Parts in this design</div><div className="shopping-required-list">{requiredParts.slice(0, 8).map((part, index) => <div key={`${part?.id}-${index}`} className="shopping-required-part"><span className="shopping-required-index">{String(index + 1).padStart(2, "0")}</span><span className="truncate">{part?.title ?? part?.id}</span><code>{part?.id}</code></div>)}</div>{requiredParts.length > 8 && <span className="shopping-required-more">+ {requiredParts.length - 8} more components</span>}</div>}
+        <div className="shopping-empty-flow">
+          <div className="shopping-empty-flow-item">
+            <span>01</span>
+            <div>
+              <p>Resolve identity</p>
+              <small>Match every request to a real catalog part number.</small>
+            </div>
+          </div>
+          <div className="shopping-empty-flow-item">
+            <span>02</span>
+            <div>
+              <p>Compare offers</p>
+              <small>
+                Keep public discovery separate until an agent verifies it.
+              </small>
+            </div>
+          </div>
+          <div className="shopping-empty-flow-item">
+            <span>03</span>
+            <div>
+              <p>Build the cart</p>
+              <small>
+                Choose quantities only after the exact match is verified.
+              </small>
+            </div>
+          </div>
+        </div>
+        {requiredParts.length > 0 && (
+          <div className="shopping-required-parts">
+            <div className="kicker">Parts in this design</div>
+            <div className="shopping-required-list">
+              {requiredParts.slice(0, 8).map((part, index) => (
+                <div
+                  key={`${part?.id}-${index}`}
+                  className="shopping-required-part"
+                >
+                  <span className="shopping-required-index">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <span className="truncate">{part?.title ?? part?.id}</span>
+                  <code>{part?.id}</code>
+                </div>
+              ))}
+            </div>
+            {requiredParts.length > 8 && (
+              <span className="shopping-required-more">
+                + {requiredParts.length - 8} more components
+              </span>
+            )}
+          </div>
+        )}
       </div>
-      <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-[10px]"><span className="kicker">Agent request</span><code className="min-w-0 truncate font-mono text-foreground">{query || "Enter a part or board above"}</code><span className="sr-only">Return verified listings through shopping.search.</span></div>
+      <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-[10px]">
+        <span className="kicker">Agent request</span>
+        <code className="min-w-0 truncate font-mono text-foreground">
+          {query || "Enter a part or board above"}
+        </code>
+        <span className="sr-only">
+          Return verified listings through shopping.search.
+        </span>
+      </div>
     </div>
   );
 }
 
-export default function ShoppingWorkspace({ fullPage = false }: { fullPage?: boolean }) {
+export default function ShoppingWorkspace({
+  fullPage = false,
+}: {
+  fullPage?: boolean;
+}) {
   const project = useProjectStore((state) => state.project);
   const shopping = useShoppingStore();
+  const [phase, setPhase] = useState<PartsUiPhase>("idle");
+  const [discoveryCandidates, setDiscoveryCandidates] = useState<
+    DiscoveryCandidate[]
+  >([]);
   const [message, setMessage] = useState("");
+  const [quantityInput, setQuantityInput] = useState("1");
+  const [lastRequest, setLastRequest] = useState<LookupRequest | null>(null);
+  const requestSequence = useRef(0);
+  const activeRequest = useRef<{
+    sequence: number;
+    controller: AbortController;
+  } | null>(null);
   const query = shopping.query;
-  const cartResults = useMemo(() => new Map(shopping.cart.map((line) => [line.resultId, line])), [shopping.cart]);
+  const cartResults = useMemo(
+    () => new Map(shopping.cart.map((line) => [line.resultId, line])),
+    [shopping.cart],
+  );
   const quote = shopping.getQuote();
-  const partsSearch = useMemo(() => createPartsSearchCoordinator(), []);
-  const requiredIds = useMemo(() => project.components.map((component) => component.definitionId), [project.components]);
-  const providers = useMemo(() => [...new Set(shopping.results.map((result) => result.provenance.provider))].join(" · "), [shopping.results]);
-  const offerCount = useMemo(() => shopping.results.reduce((count, result) => count + Math.min(result.offers.length, 3), 0), [shopping.results]);
-  const requestStatus = shopping.requestStatus ?? "idle";
+  const requiredIds = useMemo(
+    () => project.components.map((component) => component.definitionId),
+    [project.components],
+  );
+  const providers = useMemo(
+    () =>
+      [
+        ...new Set(
+          shopping.results.map((result) => result.provenance.provider),
+        ),
+      ].join(" · "),
+    [shopping.results],
+  );
+  const offerCount = useMemo(
+    () =>
+      shopping.results.reduce(
+        (count, result) => count + Math.min(result.offers.length, 3),
+        0,
+      ),
+    [shopping.results],
+  );
+  const requestStatus: ShoppingRequestStatus = shopping.requestStatus ?? "idle";
 
-  useEffect(() => () => { partsSearch.cancel(); }, [partsSearch]);
+  useEffect(() => {
+    if (
+      shopping.results.length > 0 &&
+      (requestStatus === "ready" ||
+        requestStatus === "partial" ||
+        (requestStatus === "idle" && phase === "idle"))
+    ) {
+      setPhase(requestStatus === "partial" ? "partial" : "verified");
+      return;
+    }
+    if (phase === "idle" && requestStatus === "searching")
+      setPhase("searching");
+    if (phase === "idle" && requestStatus === "staged" && shopping.handoff)
+      setPhase("verification");
+    if (phase === "idle" && requestStatus === "failed") setPhase("failed");
+  }, [phase, requestStatus, shopping.handoff, shopping.results]);
+
+  const partsSearch = useMemo(() => createPartsSearchCoordinator(), []);
+
+  useEffect(
+    () => () => {
+      requestSequence.current += 1;
+      activeRequest.current?.controller.abort();
+      partsSearch.cancel();
+    },
+    [partsSearch],
+  );
+
+  const effectivePhase: PartsUiPhase =
+    shopping.results.length > 0 && requestStatus === "partial"
+      ? "partial"
+      : shopping.results.length > 0 && requestStatus === "ready"
+        ? "verified"
+        : phase === "idle" && requestStatus === "searching"
+          ? "searching"
+          : phase === "idle" && requestStatus === "staged" && shopping.handoff
+            ? "verification"
+            : phase === "idle" && requestStatus === "failed"
+              ? "failed"
+              : phase;
 
   const resetToProject = () => {
     if (!requiredIds.length) {
       shopping.resetCart();
-      setMessage("Add components to the project, then ask the agent to search the required parts.");
+      setMessage(
+        "Add components to the project, then ask the agent to source the required parts.",
+      );
       return;
     }
-    if (requiredIds.some((catalogId) => !shopping.results.some((result) => result.catalogId === catalogId))) {
-      setMessage("Connect an authenticated WebMCP agent and ask it to publish the required part listings before resetting the cart.");
+    if (
+      requiredIds.some(
+        (catalogId) =>
+          !shopping.results.some((result) => result.catalogId === catalogId),
+      )
+    ) {
+      setMessage(
+        "Connect an authenticated WebMCP agent and ask it to publish the required part listings before resetting the cart.",
+      );
       return;
     }
     shopping.resetCart(requiredIds);
     setMessage("Cart reset to one of every part required by the project.");
   };
 
-  const runPartsSearch = async (force = false) => {
+  const performLookup = async (
+    { query: requestedQuery, quantity }: LookupRequest,
+    force = false,
+  ) => {
+    const trimmed = requestedQuery.trim();
+    const sequence = requestSequence.current + 1;
+    requestSequence.current = sequence;
+    activeRequest.current?.controller.abort();
+    partsSearch.cancel();
+    const controller = new AbortController();
+    activeRequest.current = { sequence, controller };
+    const requestHandoff = createShoppingHandoff(
+      trimmed,
+      quantity,
+      requiredIds,
+    );
+    setLastRequest({ query: trimmed, quantity });
+    setDiscoveryCandidates([]);
+    setMessage("");
+    setPhase("searching");
+    shopping.clearResults();
+    shopping.setQuery(trimmed);
+    shopping.setHandoff(requestHandoff);
+    shopping.setRequestStatus("searching");
+    try {
+      const outcome = await partsSearch.submit(
+        {
+          query: trimmed,
+          quantity,
+          requiredCatalogIds: requiredIds,
+          requestId: requestHandoff.requestId,
+          requestedAt: requestHandoff.requestedAt,
+        },
+        { force, signal: controller.signal },
+      );
+      if (activeRequest.current?.sequence !== sequence) return;
+      if (outcome.status === "cancelled") {
+        setPhase("cancelled");
+        setMessage(
+          "Lookup cancelled before publication; nothing was added to the cart.",
+        );
+        return;
+      }
+      if (outcome.discovery) shopping.setDiscovery(outcome.discovery);
+      else shopping.setDiscovery(null);
+      const candidateMap = new Map<string, DiscoveryCandidate>();
+      for (const candidate of [
+        ...normalizeDiscoveryCandidates(outcome.discovery),
+        ...normalizeDiscoveryCandidates(outcome.payload),
+      ]) {
+        if (!candidateMap.has(candidate.id))
+          candidateMap.set(candidate.id, candidate);
+      }
+      const candidates = [...candidateMap.values()];
+      if (candidates.length > 0) {
+        shopping.setRequestStatus(
+          outcome.status === "rate-limited" ? "rate-limited" : "staged",
+        );
+        setDiscoveryCandidates(candidates);
+        setPhase(
+          outcome.status === "rate-limited" ? "rate-limited" : "candidates",
+        );
+        setMessage(
+          outcome.error ??
+            "Agent verification required. Public candidates are ready for exact catalog and retailer verification.",
+        );
+        return;
+      }
+      if (outcome.status === "rate-limited") {
+        shopping.setRequestStatus("rate-limited");
+        setPhase("rate-limited");
+        setMessage(
+          outcome.error ??
+            "The provider rate limit was reached. Wait a moment and retry the lookup.",
+        );
+        return;
+      }
+      if (outcome.status === "agent-required") {
+        shopping.setRequestStatus("staged");
+        setPhase("verification");
+        setMessage(
+          outcome.error ??
+            "The provider handoff is ready. Return verified listings through shopping.search.",
+        );
+        return;
+      }
+      shopping.setRequestStatus("failed");
+      setPhase("failed");
+      setMessage(
+        outcome.error ??
+          "The lookup could not be completed. Retry the explicit request.",
+      );
+    } catch (error) {
+      if (
+        controller.signal.aborted ||
+        activeRequest.current?.sequence !== sequence
+      )
+        return;
+      shopping.setRequestStatus("failed");
+      setPhase("failed");
+      setMessage(
+        error instanceof Error && error.message
+          ? `The lookup could not be completed: ${error.message}`
+          : "The lookup could not be completed. Check the connection and retry.",
+      );
+    } finally {
+      if (activeRequest.current?.sequence === sequence)
+        activeRequest.current = null;
+    }
+  };
+
+  const submitLookup = () => {
     const trimmed = query.trim();
     if (!trimmed) {
       setMessage("Enter an exact part, board, or manufacturer first.");
       return;
     }
-    const requestHandoff = createShoppingHandoff(trimmed, 1, requiredIds);
-    shopping.clearResults();
-    shopping.setHandoff(requestHandoff);
-    shopping.setRequestStatus("searching");
-    setMessage(`Searching public sources for “${trimmed}”…`);
-    const outcome = await partsSearch.submit({ query: trimmed, quantity: 1, requiredCatalogIds: requiredIds, requestId: requestHandoff.requestId, requestedAt: requestHandoff.requestedAt }, { force });
-    if (outcome.status === "cancelled") return;
-    if (outcome.discovery) {
-      shopping.setDiscovery(outcome.discovery);
-    } else {
-      shopping.setDiscovery(null);
-      shopping.setRequestStatus(outcome.status);
+    const quantity = quantityValue(quantityInput);
+    if (quantity === null) {
+      setMessage("Enter a whole-number quantity from 1 to 999.");
+      return;
     }
-    if (outcome.status === "rate-limited") {
-      setMessage(outcome.error ?? "Public lookup is rate limited. The agent handoff is still ready; retry shortly.");
-    } else if (outcome.discovery?.candidates.length) {
-      setMessage(`${outcome.discovery.candidates.length} public candidate${outcome.discovery.candidates.length === 1 ? "" : "s"} found. Ask the WebMCP agent to verify and publish current offers.`);
-    } else if (outcome.status === "agent-required") {
-      setMessage(outcome.error ?? "Public lookup is ready for WebMCP agent verification.");
-    } else {
-      setMessage(outcome.error ?? "Public lookup failed. The WebMCP handoff is ready for another browsing agent.");
-    }
+    void performLookup({ query: trimmed, quantity });
   };
 
-  const stageQuery = () => { void runPartsSearch(); };
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    submitLookup();
+  };
 
   const stageDesign = () => {
     if (!requiredIds.length) {
-      setMessage("Add a component to the design before sourcing a bill of materials.");
+      setMessage(
+        "Add a component to the design before sourcing the current design.",
+      );
       return;
     }
+    const quantity = quantityValue(quantityInput) ?? 1;
     const designQuery = `${project.name} required parts`;
-    shopping.setQuery(designQuery);
-    shopping.setHandoff(createShoppingHandoff(designQuery, 1, requiredIds));
-    setMessage(`Design lookup staged for ${requiredIds.length} required part${requiredIds.length === 1 ? "" : "s"}.`);
+    setQuantityInput(String(quantity));
+    void performLookup({ query: designQuery, quantity });
   };
+
+  const retryLookup = () => {
+    const request =
+      lastRequest ??
+      (quantityValue(quantityInput) === null || !query.trim()
+        ? null
+        : { query: query.trim(), quantity: quantityValue(quantityInput) ?? 1 });
+    if (!request) {
+      submitLookup();
+      return;
+    }
+    setQuantityInput(String(request.quantity));
+    void performLookup(request, true);
+  };
+
+  const cancelLookup = () => {
+    requestSequence.current += 1;
+    activeRequest.current?.controller.abort();
+    partsSearch.cancel();
+    activeRequest.current = null;
+    shopping.setHandoff(null);
+    setDiscoveryCandidates([]);
+    setPhase("cancelled");
+    setMessage(
+      "Lookup cancelled before publication; nothing was added to the cart.",
+    );
+  };
+
+  const displayMessage =
+    effectivePhase === "partial"
+      ? (shopping.publicationError ?? message)
+      : message ||
+        (effectivePhase === "failed" ? (shopping.publicationError ?? "") : "");
 
   return (
     <div className="shopping-workspace flex h-full min-h-0 flex-col bg-card text-xs">
@@ -320,35 +1388,256 @@ export default function ShoppingWorkspace({ fullPage = false }: { fullPage?: boo
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="kicker">Sourcing workspace</div>
-            <div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold tracking-tight">Build-ready parts</h2><span className="shopping-agent-chip"><span className="shopping-agent-dot" /> Agent assisted</span></div>
-            <p className="mt-1 max-w-[70ch] text-[10px] leading-relaxed text-muted-foreground">Compare verified supplier offers for the exact components already in your hardware graph, then move the choices into one build cart.</p>
-          </div>
-          <div className="shopping-header-stats hidden shrink-0 sm:flex"><div><span className="shopping-stat-value">{project.components.length}</span><span className="shopping-stat-label">in design</span></div><div><span className="shopping-stat-value">{shopping.results.length}</span><span className="shopping-stat-label">verified</span></div><div><span className="shopping-stat-value">{shopping.cart.length}</span><span className="shopping-stat-label">cart lines</span></div></div>
-        </div>
-        <div className="mt-3">
-          <div className="mb-1.5 flex items-center justify-between gap-2"><label htmlFor="shopping-agent-request" className="kicker">Find a part</label><span className="text-[10px] text-muted-foreground">Search public sources · Enter to hand off verification</span></div>
-          <div className="shopping-search-row"><div className="relative min-w-0 flex-1"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input id="shopping-agent-request" value={query} onChange={(event) => shopping.setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); stageQuery(); } }} placeholder="Exact part, board, or manufacturer" aria-label="Search exact parts" className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-16 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-foreground/30 focus:ring-2 focus:ring-ring/10" /><kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">Enter</kbd></div>{requestStatus === "searching" ? <button type="button" onClick={() => { partsSearch.cancel(); shopping.setRequestStatus("idle"); setMessage("Public lookup cancelled. The handoff remains available for the WebMCP agent."); }} className="shopping-request-button"><X size={12} /> Cancel search</button> : <button type="button" onClick={stageQuery} disabled={!query.trim()} className="shopping-request-button"><Search size={12} /> Search parts</button>}</div>
-        </div>
-        <SourcingProgress status={requestStatus} resultCount={shopping.results.length} projectPartCount={project.components.length} />
-        <div className="shopping-trust-note mt-2 flex items-start gap-2 rounded-md border border-border/70 bg-card/70 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" /><span><strong className="font-semibold text-foreground">Verified before checkout.</strong> A listing needs the exact catalog identity, part number, provider, recent timestamp, secure retailer URL, currency, and offer price before it can enter the cart. Confirm stock, shipping, and final pricing with the retailer.</span></div>
-        {(message || shopping.publicationError) && <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-relaxed text-amber-700 dark:text-amber-300" role="status"><CircleAlert size={13} className="mt-0.5 shrink-0" /><span>{shopping.publicationError ?? message}</span></div>}
-      </div>
-
-      <div className={`${fullPage ? "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-1" : "flex min-h-0 flex-1 flex-col"}`}>
-        <section className="shopping-results-scroll min-h-0 overflow-y-auto px-3 py-3 sm:px-4" aria-label="Agent sourced parts">
-          {shopping.results.length === 0 ? <>{shopping.discovery && <PublicDiscoveryPanel discovery={shopping.discovery} onRetry={() => { void runPartsSearch(true); }} />}<AgentEmptyState query={query} requiredIds={requiredIds} status={requestStatus} onStageQuery={stageQuery} onStageDesign={stageDesign} /></> : (
-            <div className="space-y-3">
-              <div className="flex items-end justify-between gap-3 border-b border-border pb-2"><div><div className="kicker">Validated results</div><p className="mt-1 text-[10px] text-muted-foreground">{shopping.results.length} exact catalog match{shopping.results.length === 1 ? "" : "es"} · {offerCount} sourced offer{offerCount === 1 ? "" : "s"}</p></div><div className="text-right text-[10px] text-muted-foreground"><div>{providers}</div><div className="mt-1 font-mono">{dateLabel(shopping.lastSearchAt)}</div></div></div>
-              {shopping.results.map((result) => {
-                const cartLine = cartResults.get(result.id);
-                return <ResultCard key={result.id} result={result} cartLine={cartLine} onAdd={() => shopping.addToCart(result.id)} onRemove={() => shopping.removeFromCart(result.id)} onQuantity={(quantity) => shopping.setQuantity(result.id, quantity)} onOffer={(offerId) => shopping.setOffer(result.id, offerId)} onAlternative={(catalogId) => { const changed = shopping.chooseAlternative(result.id, catalogId); setMessage(changed ? "Cart alternative selected." : "Search the alternative listing before switching the cart line."); }} />;
-              })}
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold tracking-tight">
+                Build-ready parts
+              </h2>
+              <span className="shopping-agent-chip">
+                <span className="shopping-agent-dot" /> WebMCP handoff
+              </span>
             </div>
+            <p className="mt-1 max-w-[70ch] text-[10px] leading-relaxed text-muted-foreground">
+              Discover public supplier candidates, verify exact catalog
+              identities with an agent, then move confirmed offers into one
+              build cart.
+            </p>
+          </div>
+          <div className="shopping-header-stats hidden shrink-0 sm:flex">
+            <div>
+              <span className="shopping-stat-value">
+                {project.components.length}
+              </span>
+              <span className="shopping-stat-label">in design</span>
+            </div>
+            <div>
+              <span className="shopping-stat-value">
+                {shopping.results.length}
+              </span>
+              <span className="shopping-stat-label">verified</span>
+            </div>
+            <div>
+              <span className="shopping-stat-value">
+                {discoveryCandidates.length}
+              </span>
+              <span className="shopping-stat-label">public</span>
+            </div>
+            <div>
+              <span className="shopping-stat-value">
+                {shopping.cart.length}
+              </span>
+              <span className="shopping-stat-label">cart lines</span>
+            </div>
+          </div>
+        </div>
+        <form
+          className="mt-3"
+          onSubmit={handleSubmit}
+          aria-label="Parts sourcing request"
+        >
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <label htmlFor="shopping-agent-request" className="kicker">
+              Find a part
+            </label>
+            <span className="text-[10px] text-muted-foreground">
+              Explicit request only · Enter to submit
+            </span>
+          </div>
+          <div className="shopping-search-row">
+            <div className="shopping-query-field relative min-w-0 flex-1">
+              <Search
+                size={13}
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                id="shopping-agent-request"
+                value={query}
+                onChange={(event) => shopping.setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    submitLookup();
+                  }
+                }}
+                placeholder="Exact part, board, or manufacturer"
+                aria-label="Search exact parts"
+                className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-16 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-foreground/30 focus:ring-2 focus:ring-ring/10"
+              />
+              <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+                Enter
+              </kbd>
+            </div>
+            <label className="shopping-quantity-field">
+              <span>Qty</span>
+              <input
+                id="shopping-request-quantity"
+                type="number"
+                min="1"
+                max="999"
+                step="1"
+                inputMode="numeric"
+                value={quantityInput}
+                onChange={(event) => setQuantityInput(event.target.value)}
+                aria-label="Quantity to source"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={!query.trim() || effectivePhase === "searching"}
+              className="shopping-request-button"
+            >
+              <Search size={12} /> Search parts
+            </button>
+          </div>
+          <div className="shopping-form-foot">
+            <span className="shopping-form-note">
+              Quantity is attached to this handoff; no lookup runs while you
+              type.
+            </span>
+            <button
+              type="button"
+              onClick={stageDesign}
+              disabled={!requiredIds.length || effectivePhase === "searching"}
+              className="shopping-design-button"
+            >
+              <PackageCheck size={12} /> Source current design
+            </button>
+          </div>
+        </form>
+        <SourcingProgress
+          phase={effectivePhase}
+          resultCount={shopping.results.length}
+          candidateCount={discoveryCandidates.length}
+          projectPartCount={project.components.length}
+        />
+        <LookupStatus
+          phase={effectivePhase}
+          message={displayMessage}
+          hasDesign={requiredIds.length > 0}
+          onCancel={cancelLookup}
+          onRetry={retryLookup}
+          onStageDesign={stageDesign}
+        />
+        {effectivePhase === "idle" && displayMessage && (
+          <div className="shopping-inline-message" role="status">
+            <CircleAlert size={13} />
+            <span>{displayMessage}</span>
+          </div>
+        )}
+        <div className="shopping-trust-note mt-2 flex items-start gap-2 rounded-md border border-border/70 bg-card/70 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground">
+          <ShieldCheck
+            size={13}
+            className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+          />
+          <span>
+            <strong className="font-semibold text-foreground">
+              Verified before checkout.
+            </strong>{" "}
+            Public candidates never receive cart controls. A listing needs the
+            exact catalog identity, part number, provider, recent timestamp,
+            secure retailer URL, currency, and offer price before it can enter
+            the cart. Confirm stock, shipping, and final pricing with the
+            retailer.
+          </span>
+        </div>
+      </div>
+      <div
+        className={`${fullPage ? "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-1" : "flex min-h-0 flex-1 flex-col"}`}
+      >
+        <section
+          className="shopping-results-scroll min-h-0 overflow-y-auto px-3 py-3 sm:px-4"
+          aria-label="Parts lookup results"
+          aria-busy={effectivePhase === "searching"}
+        >
+          {discoveryCandidates.length > 0 && (
+            <DiscoveryZone candidates={discoveryCandidates} />
+          )}
+          {shopping.results.length === 0 ? (
+            <AgentEmptyState
+              query={query}
+              requiredIds={requiredIds}
+              phase={effectivePhase}
+              onStageQuery={submitLookup}
+              onStageDesign={stageDesign}
+              onRetry={retryLookup}
+            />
+          ) : (
+            <section
+              className="shopping-verified-zone"
+              aria-label="Verified listings"
+              data-testid="verified-listings"
+            >
+              <div className="shopping-zone-head">
+                <div>
+                  <div className="kicker">
+                    {effectivePhase === "partial"
+                      ? "Verified listings / partial publication"
+                      : "Verified listings"}
+                  </div>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    {shopping.results.length} exact catalog match
+                    {shopping.results.length === 1 ? "" : "es"} · {offerCount}{" "}
+                    sourced offer{offerCount === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="text-right text-[10px] text-muted-foreground">
+                  <div>{providers || "Authenticated WebMCP agent"}</div>
+                  <div className="mt-1 font-mono">
+                    {dateLabel(shopping.lastSearchAt)}
+                  </div>
+                </div>
+              </div>
+              <div className="shopping-verified-grid">
+                {shopping.results.map((result) => {
+                  const cartLine = cartResults.get(result.id);
+                  return (
+                    <ResultCard
+                      key={result.id}
+                      result={result}
+                      cartLine={cartLine}
+                      onAdd={() => shopping.addToCart(result.id)}
+                      onRemove={() => shopping.removeFromCart(result.id)}
+                      onQuantity={(quantity) =>
+                        shopping.setQuantity(result.id, quantity)
+                      }
+                      onOffer={(offerId) =>
+                        shopping.setOffer(result.id, offerId)
+                      }
+                      onAlternative={(catalogId) => {
+                        const changed = shopping.chooseAlternative(
+                          result.id,
+                          catalogId,
+                        );
+                        setMessage(
+                          changed
+                            ? "Cart alternative selected."
+                            : "Search the alternative listing before switching the cart line.",
+                        );
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </section>
           )}
         </section>
-        {fullPage && <aside className="min-h-0 max-h-[min(38vh,320px)] overflow-y-auto border-t border-border bg-muted/10 lg:max-h-none lg:border-l lg:border-t-0"><CartSummary shopping={shopping} quote={quote} onReset={() => void resetToProject()} detailed /></aside>}
+        {fullPage && (
+          <aside className="min-h-0 max-h-[min(38vh,320px)] overflow-y-auto border-t border-border bg-muted/10 lg:max-h-none lg:border-l lg:border-t-0">
+            <CartSummary
+              shopping={shopping}
+              quote={quote}
+              onReset={() => void resetToProject()}
+              detailed
+            />
+          </aside>
+        )}
       </div>
-      {!fullPage && <CartSummary shopping={shopping} quote={quote} onReset={() => void resetToProject()} />}
+      {!fullPage && (
+        <CartSummary
+          shopping={shopping}
+          quote={quote}
+          onReset={() => void resetToProject()}
+        />
+      )}
     </div>
   );
 }

@@ -6,6 +6,8 @@
  * and publish a fresh HTTPS retailer offer before the UI or cart accepts it.
  */
 
+import { createDirectPartsSourceGateway, type PartsSourceId as GatewaySourceId } from "./gateway";
+
 export type PublicSourceId = "jlcsearch" | "adafruit";
 
 export type PublicPartCandidate = {
@@ -212,11 +214,22 @@ function normalizeAdafruit(payload: unknown, productId: string): PublicPartCandi
   }];
 }
 
-async function fetchJson(url: string, timeoutMs: number) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+async function fetchJson(source: PublicSourceId, url: string, timeoutMs: number) {
+  const allowedHosts: Record<GatewaySourceId, readonly string[]> = {
+    jlcsearch: ["jlcsearch.tscircuit.com"],
+    adafruit: ["www.adafruit.com"],
+  };
   try {
-    const response = await fetch(url, { headers: { Accept: "application/json" }, signal: controller.signal });
+    const gateway = createDirectPartsSourceGateway(globalThis.fetch);
+    const { response } = await gateway.fetch({
+      source,
+      url,
+      allowedHosts: allowedHosts[source],
+      init: { method: "GET", headers: { Accept: "application/json" }, credentials: "omit" },
+      cacheKey: `${source}:${url}`,
+      cacheTtlSeconds: 0,
+      timeoutMs,
+    });
     const body = await response.text();
     if (new TextEncoder().encode(body).byteLength > MAX_RESPONSE_BYTES) throw new Error("public source response was too large");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -228,8 +241,6 @@ async function fetchJson(url: string, timeoutMs: number) {
       throw timeoutError;
     }
     throw error;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -305,7 +316,7 @@ async function sourceLookup(source: PublicSourceId, query: string, key: string) 
       ? `${JLC_ENDPOINT}?q=${encodeURIComponent(query)}&limit=${MAX_CANDIDATES}&full=true`
       : `${ADAFRUIT_ENDPOINT}/${encodeURIComponent(key)}`;
     try {
-      const payload = await fetchJson(url, 8_000);
+      const payload = await fetchJson(source, url, 8_000);
       const candidates = source === "jlcsearch" ? normalizeJlc(payload) : normalizeAdafruit(payload, key);
       const entry: CacheEntry = { candidates, expiresAt: Date.now() + FRESH_CACHE_MS, staleUntil: Date.now() + STALE_CACHE_MS };
       cache.set(`${source}:${key}`, entry);
