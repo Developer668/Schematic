@@ -1,8 +1,22 @@
 # ChatGPT Site release checklist
 
-Status: current release checklist (2026-08-28). This file is intentionally
+Status: current release checklist (2026-08-31). This file is intentionally
 operational; historical agent handoffs and superseded live-version claims do
 not belong here.
+
+## Current publishing blocker
+
+- The canonical public URL returns HTTP 200, and its `/api/health` and
+  `/api/docs` routes respond.
+- In the active ChatGPT workspace, the Sites connector returns
+  `project not found` for the persisted project ID below. The current workspace
+  therefore cannot save or deploy a new version even though the existing public
+  deployment remains reachable.
+- Do not replace `chatgpt-site/.openai/hosting.json`, create a duplicate Site, or
+  infer deploy permission from the public URL. Switch to the owning ChatGPT
+  workspace or obtain explicit authorization for a new binding.
+- A GitHub push and a Sites deployment are separate operations. GitHub has no
+  workflow in this repository that automatically publishes the Site.
 
 ## Canonical release
 
@@ -51,8 +65,10 @@ not belong here.
 
 ## Scope reminders
 
-- The compiled browser path is only the exact button→LED portable C/WASM
-  contract (ABI v2, deterministic virtual I/O, hash-verified artifact).
+- The fixed precompiled browser path is only the exact button→LED portable
+  C/WASM semantic contract (ABI v2, deterministic virtual I/O, hash-verified
+  artifact). A conservative recognizer selects it; the matched user sketch is
+  not compiled into or executed by that module.
 - Other supported behavior uses the bounded TypeScript interpreter and explicit
   model/protocol adapters. Catalog placement and typed validation do not imply
   executable device behavior.
@@ -71,6 +87,9 @@ entrypoint remain reference/dormant paths. They must not be used as evidence
 that the ChatGPT Site runs native engines or arbitrary firmware compilation.
 
 For the complete topology and capability matrix, see
-[ARCHITECTURE.md](../ARCHITECTURE.md). For the timed judge flow, see
+[ARCHITECTURE.md](../ARCHITECTURE.md). For the TypeScript simulation
+implementation handoff, see
+[TYPESCRIPT_WEB_SIMULATION_HANDOFF.md](TYPESCRIPT_WEB_SIMULATION_HANDOFF.md).
+For the timed judge flow, see
 [DEMO_SCRIPT.md](DEMO_SCRIPT.md). For publish, rollback, and acceptance
 procedure, see [CHATGPT_SITE_RUNBOOK.md](CHATGPT_SITE_RUNBOOK.md).

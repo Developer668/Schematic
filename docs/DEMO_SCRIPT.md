@@ -62,8 +62,9 @@ void loop() {
 ```
 
 Call `firmware.write`, then `firmware.check`. Explain that this exact grammar
-is intentionally recognized by the portable C/WASM harness; it is not a
-general C/C++ compiler.
+is intentionally recognized to select a fixed precompiled portable C/WASM
+implementation. The matched sketch is not compiled into or executed by WASM;
+this is not a general C/C++ compiler.
 
 ## 1:30–2:00 — Prove pressed and released behavior
 
@@ -76,8 +77,9 @@ general C/C++ compiler.
 4. Set `pressed` to `false` and run again. Show the same ABI/hash metadata and
    LED output `false`.
 
-The important claim is exact C/WASM execution with deterministic virtual I/O,
-not a screenshot or a simulated compiler log.
+The important claim is exact execution of the fixed C/WASM semantic contract
+with deterministic virtual I/O, not execution of arbitrary matched source, a
+screenshot, or a simulated compiler log.
 
 ## 2:00–2:25 — Show an honest unsupported result
 

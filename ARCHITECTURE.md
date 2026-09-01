@@ -68,10 +68,11 @@ same-origin: it imports the tested runtime functions from
    browser-local room; read-only tools report state without changing the graph.
 5. `simulation.run` validates the graph and chooses the narrowest honest
    execution path:
-   - A source that matches the exact button→LED grammar is executed by the
-     checked-in C/WASM artifact. The harness resolves the actual board pins and
-     connected button/LED endpoints, uses ABI version 2, and returns the
-     artifact SHA-256.
+   - A source/graph pair that matches the exact button→LED grammar selects the
+     checked-in fixed C/WASM implementation. The matched source itself is not
+     compiled into or executed by WASM. The harness resolves the actual board
+     pins and connected button/LED endpoints, uses ABI version 2, and returns
+     the artifact SHA-256.
    - Other supported source shapes use the bounded TypeScript interpreter and
      explicit protocol/device adapters. Results identify unsupported APIs and
      model limits; a generic pin map is not silently promoted to a device
@@ -140,10 +141,12 @@ producer availability must be checked at acceptance time.
 
 The portable harness is intentionally an exact contract, not a general
 compiler. It recognizes one safe `setup`/`loop` shape that reads a connected
-button and writes a connected LED. The generated module is a 400-byte,
-hash-verified artifact with ABI v2. The same portable C core has a source-only
-ESP32 Arduino export, but that export is not an ESP32 binary and does not make
-physical-device testing part of the Site.
+button and writes a connected LED, then selects a fixed precompiled
+implementation. The matched source bytes are not passed to WASM, and optional
+recognized delay syntax does not define the module's step timing. The generated
+module is a 400-byte, hash-verified artifact with ABI v2. The same portable C
+core has a source-only ESP32 Arduino export, but that export is not an ESP32
+binary and does not make physical-device testing part of the Site.
 
 The TypeScript runtime is the bounded fallback. It performs topology checks
 even when firmware execution is unavailable, caps requested run duration, and
@@ -173,7 +176,9 @@ features.
 
 See [README.md](README.md) for local checks and
 [docs/CHATGPT_SITE_RUNBOOK.md](docs/CHATGPT_SITE_RUNBOOK.md) for publication and
-acceptance gates.
+acceptance gates. The implementation-grade roadmap for consolidating compilation,
+MCU execution, graph buses, and device models into one TypeScript web runtime is
+[docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md](docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md).
 
 ## License
 

@@ -39,9 +39,11 @@ browsers, but it is not proof of native WebMCP discovery.
   the native surface when the host exposes `modelContext`; they cover project,
   workspace, component, connection, firmware, simulation, validation,
   shopping, and layout operations.
-- A verified, deterministic C/WASM path for one exact button→LED contract
-  (portable C core, ABI v2, artifact SHA-256, virtual I/O). Pressed and
-  released runs report the resolved board and component endpoints.
+- A verified, deterministic, fixed precompiled C/WASM implementation for one
+  exact button→LED semantic contract (portable C core, ABI v2, artifact
+  SHA-256, virtual I/O). A conservative recognizer selects it; the matched user
+  sketch is not compiled into or executed by the module. Pressed and released
+  runs report the resolved board and component endpoints.
 - A bounded TypeScript behavioral interpreter and explicit device/protocol
   adapters for supported browser behavior. Unsupported source or device
   behavior returns an explicit result.
@@ -63,6 +65,10 @@ The Site does not claim arbitrary C/C++ compilation, MCU-library execution,
 full analog/RF simulation, or a native simulator. `firmware.compile` on the
 Site performs target/source checks and returns a preflight/unavailable result;
 it must not be described as producing a firmware binary.
+
+For the complete implementation handoff, current simulation limitations, target
+TypeScript architecture, phased delivery plan, and acceptance gates, see
+[`docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md`](docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md).
 
 ## Run the ChatGPT Site locally
 
