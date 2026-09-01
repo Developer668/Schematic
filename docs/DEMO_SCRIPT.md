@@ -1,5 +1,11 @@
 # Judge demo — under 3 minutes
 
+> **Current legacy release flow:** this script documents the presently deployed
+> `simulation.run` demonstration. It is not the approved target architecture.
+> The replacement roadmap uses typed Behavior Plans for scripted outcome preview
+> and keeps Code-panel source editable and unexecuted; see
+> [TYPESCRIPT_WEB_SIMULATION_HANDOFF.md](TYPESCRIPT_WEB_SIMULATION_HANDOFF.md).
+
 This script uses the supported ChatGPT Site path only. Open the authenticated
 [live Site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
 inside the ChatGPT in-app browser. Ask ChatGPT to use the Site's **native

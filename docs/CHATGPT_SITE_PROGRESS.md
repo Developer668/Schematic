@@ -87,8 +87,8 @@ entrypoint remain reference/dormant paths. They must not be used as evidence
 that the ChatGPT Site runs native engines or arbitrary firmware compilation.
 
 For the complete topology and capability matrix, see
-[ARCHITECTURE.md](../ARCHITECTURE.md). For the TypeScript simulation
-implementation handoff, see
+[ARCHITECTURE.md](../ARCHITECTURE.md). For the approved Behavior Preview and
+editable-code TypeScript implementation handoff, see
 [TYPESCRIPT_WEB_SIMULATION_HANDOFF.md](TYPESCRIPT_WEB_SIMULATION_HANDOFF.md).
 For the timed judge flow, see
 [DEMO_SCRIPT.md](DEMO_SCRIPT.md). For publish, rollback, and acceptance

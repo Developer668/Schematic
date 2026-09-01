@@ -1,1235 +1,1677 @@
-# TypeScript Web Simulation Handoff
+# Behavior Preview and Editable Code Handoff
 
 Status: implementation handoff
-Audience: agents and engineers extending Schematic's browser simulation
-Last verified against repository: 2026-08-31
-Primary objective: one TypeScript codebase that can compile supported firmware,
-simulate supported hardware in the browser, and expose the same honest results to
-the UI, WebMCP tools, and Site API.
+Audience: agents and engineers extending Schematic's TypeScript web workspace
+Product direction approved: 2026-08-31
+Repository truth last checked: 2026-08-31
 
-This document records the repository facts, constraints, architectural decisions,
-and acceptance gates needed to continue the work without rediscovering the system.
-It is intentionally candid. A component being drawable, validatable, or present in
-the catalog does not mean that it has executable behavior.
+This path is intentionally retained for continuity with earlier agent handoffs.
+The former compiler/emulator roadmap in this file is superseded in full by the
+behavior-preview and code-authoring direction below.
 
-## 1. Executive truth
+## 1. Decision summary
 
-Schematic is already a useful hardware workspace, but it is not yet a general
-microcontroller or circuit simulator.
+Schematic is an agent-native hardware design and code-authoring workspace. Its
+browser preview should show the outcome a person asked for: a light turns on, a
+display shows text, a motor moves, or a sensor value changes. It should do that
+by applying typed, validated component actions to visual component models.
 
-The production ChatGPT Site currently has two execution paths:
+The browser preview must not compile, interpret, emulate, upload, or otherwise
+execute the Arduino/C/C++/Python shown in the Code panel.
 
-1. A verified, precompiled C/WASM implementation of one fixed button-to-LED
-   semantic contract, selected by a conservative source/graph recognizer.
-2. A bounded TypeScript interpreter for a deliberately small Arduino-like subset.
+Generated code remains valuable. An agent can write ordinary source into the
+Code panel, a person can edit it over many turns, and the files can later be
+copied, downloaded, opened in an existing SDK/toolchain, or moved to physical
+hardware for real testing. Schematic does not need an in-browser compiler or MCU
+emulator to deliver that workflow.
 
-The Site's HTTP simulation route invokes the same TypeScript interpreter on the
-server. Calling it `remote` describes transport and isolation, not higher fidelity.
-The Site's `firmware.compile` operation is preflight only and does not produce a
-binary. The dormant compiler and AVR packages are architectural groundwork, not
-production features.
+The product has three distinct surfaces:
 
-The correct next vertical slice is:
-
-`Arduino source -> browser AVR toolchain worker -> provenance-bound Intel HEX -> AVR8js Uno runtime -> graph-compiled GPIO nets -> explicit button and LED models -> deterministic events -> UI/WebMCP result`
-
-Do not start by promising every board or every catalog part. Finish and verify that
-vertical slice first, then extend one target and one device model at a time.
-
-## 2. Capability truth table
-
-| Claim | Current truth | Safe wording |
+| Surface | Purpose | What actually runs in Schematic |
 | --- | --- | --- |
-| Hardware graph editing | Production | Components, typed ports, connections, and project files can be edited in the browser. |
-| Graph validation | Production, bounded | Schematic detects supported structural, power-domain, and protocol metadata problems. |
-| Arbitrary Arduino/C++ compilation | Not available | Compilation is preflight-only except for checked-in verified artifacts. |
-| Exact button-to-LED C contract | Production, narrow | A recognizer can select one fixed precompiled C/WASM implementation; the matched sketch itself is not compiled or executed as WASM. |
-| Arduino-like behavioral execution | Production, bounded | Supported statements and APIs run through a deterministic TypeScript interpreter. |
-| Remote simulation | Same interpreter over HTTP | Remote execution provides transport/isolation, not a second physics or MCU engine. |
-| AVR instruction execution | Dormant scaffold | The repository contains an unconnected AVR8js adapter; production does not import it. |
-| ESP32 CPU emulation | Not available | ESP32-family targets may use bounded behavioral interpretation only. |
-| I2C devices | Partial | DS3231 reads and SSD1306 text capture have explicit behavioral models; most devices are trace/validation only. |
-| SPI devices | Trace-level | Transactions are recorded; device responses and timing are not modeled. |
-| UART | Minimal | Serial output and a scalar RX byte are modeled without baud, framing, buffering, or timing. |
-| Analog/electrical physics | Not available | Voltage metadata is validated; there is no nodal, SPICE, current, thermal, RF, or signal-integrity solver. |
-| Catalog coverage | Mostly visual/validation | Placement in the catalog is not evidence of simulation support. |
+| Behavior preview | Demonstrate the requested LED, display, actuator, and sensor outcome | Typed component actions and pure visual reducers |
+| Editable code | Hold normal agent- or human-authored source for later iteration and export | Nothing; the source is displayed and saved as editable project files |
+| External hardware/SDK handoff | Let the user test, build, upload, and refine elsewhere | Nothing inside Schematic; the external environment owns those operations |
 
-Phase 0 must make every user-visible capability response return machine-readable
-fidelity, engine, verification evidence, and unsupported-feature fields. The
-current `RuntimeResult` has engine and unsupported data but does not yet carry
-explicit fidelity or verification fields. Never infer a stronger claim from a
-successful HTTP status.
+The required product sentence is:
 
-## 3. Current production topology
+> This scripted preview shows the requested outcome. No source code ran, and
+> wiring, electrical behavior, and physical hardware were not verified.
 
-The canonical production path is:
+That distinction is a contract, not a temporary disclaimer.
+
+## 2. Non-negotiable product boundaries
+
+Future agents must preserve all of the following:
+
+1. A prepared Behavior Plan plus its ordered, hashed session input/invocation
+   log is the complete source of truth for the browser preview.
+2. Code is an independently editable document, not preview input.
+3. A model may request only registered, typed component actions. It may not name
+   arbitrary JavaScript functions or mutate React/Zustand state directly.
+4. Every action is validated against the exact component instance, definition,
+   behavior profile, action schema, and current project fingerprint.
+5. Unknown components and unsupported actions fail explicitly. They never become
+   silent no-ops and never receive guessed behavior.
+6. Preview output proves only what the declared Behavior Plan projects. It does
+   not prove source correctness, compilation, wiring correctness, timing, power,
+   electrical safety, or physical-device behavior.
+7. Whole-project graph validation and Behavior Plan validation are separate
+   results. Neither should be relabeled as code verification.
+8. Manual code edits never change the preview automatically.
+9. Behavior Plan changes never overwrite manually edited source automatically.
+10. No compiler, binary artifact, MCU emulator, upload/flashing path, native
+    engine, or remote execution service is required by this roadmap.
+11. Existing compiler/AVR scaffolds may remain as dormant repository history, but
+    agents must not integrate or expand them under this plan.
+12. Existing SDKs and physical toolchains are export destinations, not hidden
+    runtime dependencies of the Site.
+
+## 3. Current repository truth
+
+The repository does not yet implement the target architecture. An implementing
+agent must migrate from these current facts rather than assuming the new types
+already exist.
+
+### 3.1 Current canonical project state
+
+`frontend/src/store/useProjectStore.ts` owns the active frontend-local
+`HardwareGraph`. It includes:
+
+- component instances and their positions/properties;
+- typed connections;
+- firmware targets and source files;
+- an optional legacy `compiledArtifact` field;
+- legacy simulation configuration.
+
+The separate `@schematic/hardware-graph` package is stricter but is not yet the
+only graph contract. The Behavior System should depend on the canonical package
+DTOs and use one explicit frontend adapter until the store migration is complete.
+Do not create a third graph model.
+
+### 3.2 Current code panel
+
+`frontend/src/components/editor/MonacoWorkspace.tsx` already:
+
+- shows Arduino/C++ or other board source;
+- saves edits through `updateFirmware`;
+- supports copying code;
+- uses Monaco syntax services;
+- invokes a `firmware.compile` preflight path from a button labeled “Check source.”
+
+The new direction keeps Monaco and source persistence but removes compilation
+from the recommended product flow. Monaco highlighting or editor diagnostics are
+editor assistance only. They must not become a “compiled,” “verified,” or
+“hardware ready” badge.
+
+### 3.3 Current runtime and visual state
+
+The current “Run” flow routes through `simulation.run`. It can select a fixed
+precompiled 400-byte button-to-LED C/WASM fixture or a bounded TypeScript
+Arduino-like interpreter. The Site API exposes a related behavioral runtime and
+compile preflight. These are truthful but narrow historical capabilities.
+
+`useSimulationStore` currently mixes:
+
+- run/stop state;
+- simulated nanoseconds;
+- loose `pinStates` keys;
+- engine availability;
+- serial text;
+- remote session state;
+- the most recent runtime result.
+
+`HardwareNode.tsx` infers several visual effects by searching those loose keys
+and contains component-specific display/actuator branches. This is the main
+visual seam to replace.
+
+### 3.4 Current component capability metadata
+
+`modelContract.ts` and `capabilityRegistry.ts` describe simulation-oriented
+families and adapters. Much of the assignment is inferred from catalog IDs,
+categories, ports, or text. The new behavior preview needs a separate explicit
+profile binding. Simulation support and preview-action support are different
+questions and must not share one overloaded badge.
+
+### 3.5 Existing tool seams worth reusing
+
+The current WebMCP surface already has useful low-level operations:
+
+- `project.get_graph` and graph mutation tools;
+- `firmware.write` and `firmware.read`;
+- component and connection inspection;
+- project validation;
+- browser-local persistence and board selection.
+
+Use these seams where their semantics remain accurate. Add preview-oriented tools
+through shared application commands; do not implement separate rules inside
+`webmcp/tools.ts`.
+
+## 4. Target product semantics
+
+### 4.1 Behavior Plan
+
+A Behavior Plan is a finite, versioned declaration of interactive rules and
+optional timed cues. It references exact component instance IDs and exact
+registered events/actions.
+
+Examples:
+
+- when `button-1` emits `button.pressed`, set `led-1` on;
+- when preview starts, show “Ready” on `display-1`;
+- 500 ms after preview starts, set `servo-1` to 90 degrees;
+- when `sensor-1` input changes, update a numeric readout.
+
+It contains data only. Imported plans cannot contain callbacks, JavaScript,
+source expressions, URLs, templates, or executable plugins.
+
+### 4.2 Behavior preview
+
+The preview is a deterministic projection of the plan:
+
+- component events enter the Behavior System;
+- matching rules emit validated component actions;
+- pure profile reducers calculate component state;
+- profile projectors return generic visual primitives;
+- the canvas renders those primitives over static component artwork;
+- a bounded logical timeline records what occurred.
+
+The preview is conceptual by default. It may show the requested outcome even
+when graph validation reports missing power or questionable wiring, but it must
+show those graph diagnostics beside the preview. Missing target components,
+unknown actions, invalid payloads, or stale profile bindings are plan errors and
+must block the affected action.
+
+### 4.3 Editable code
+
+Code is a durable project document associated with a programmable board. It may
+be:
+
+- written by an agent through a tool call;
+- typed or edited by a person in Monaco;
+- imported from another project;
+- copied or downloaded;
+- exported with the project;
+- passed to an external SDK, IDE, compiler, or hardware workflow later.
+
+The Behavior System does not generate, parse, interpret, lint semantically,
+compile, or execute this source. Agents remain free to write ordinary, nuanced
+code rather than code constrained by a small built-in template generator.
+
+When an agent writes a Behavior Plan and source in the same workflow, Schematic
+may record that the code revision was authored alongside a specific plan hash.
+That is provenance, not verification.
+
+### 4.4 Code/preview relationship
+
+Do not use one status ladder that implies increasing verification. Track
+orthogonal facts instead:
+
+| Dimension | Values | Meaning |
+| --- | --- | --- |
+| Origin | `ai-generated`, `human-authored`, `imported`, `mixed` | Who or what last established the document |
+| Preview relation | `linked`, `stale`, `unlinked` | Whether this exact code revision was authored alongside the current plan revision |
+| Edit state | `draft`, `saved` | Whether the current editor revision reached durable project state |
+| Export state | `never-exported`, `exported` | Whether this exact revision was copied/downloaded as a handoff |
+| In-app verification | always `not-performed` | Schematic did not compile, upload, run, or physically test it |
+
+“Linked” does not mean the code caused the preview. The UI copy must say:
+
+> Linked to this Behavior Plan revision. The preview follows the plan, not this
+> source code.
+
+Any manual source edit changes the code hash and makes the preview relation
+`stale`. Any plan edit changes the plan hash and makes linked code stale. Neither
+side is overwritten.
+
+### 4.5 External handoff
+
+Schematic’s responsibility ends at producing portable project data and source
+files. External destinations may include Arduino IDE, PlatformIO, vendor SDKs,
+command-line toolchains, a hardware lab, or future integrations. The core app
+does not need to know which one the user chooses.
+
+Every export must include a machine-readable handoff manifest with the exact
+board definition/FQBN when known, language, filenames and hashes, declared
+dependencies, Behavior Plan/source provenance, graph diagnostics, and a
+plain-language plus machine-readable statement that the source was not built or
+tested in Schematic.
+
+## 5. Target topology and dependency direction
 
 ```text
-ChatGPT in-app browser
-  -> chatgpt-site Vinext wrapper
-  -> shared React frontend
-  -> Zustand project stores
-  -> active frontend-local project graph and firmware workspace
-  -> 42 WebMCP tool callbacks and human UI actions
-  -> browser runtime or same-origin Site API
+Human or agent intent
+        │
+        ├── graph tools ───────────────► canonical hardware project
+        │                                      │
+        ├── behavior.plan.write ───────► versioned Behavior Plan
+        │                                      │
+        │                                      ▼
+        │                           @schematic/behavior
+        │                         inspect · prepare · session
+        │                                      │
+        │                        typed actions + snapshots
+        │                                      │
+        │                                      ▼
+        │                           preview store/timeline
+        │                                      │
+        │                                      ▼
+        │                       generic visual overlay on canvas
+        │
+        └── code.write ────────────────► editable code documents
+                                               │
+                                               ├── Monaco editing
+                                               ├── copy/download
+                                               └── external SDK/hardware handoff
 ```
 
-Important boundaries:
+Source code never feeds back into `@schematic/behavior`.
 
-- `chatgpt-site/` is the production Site wrapper.
-- `frontend/` contains the shared application, stores, WebMCP registry, current
-  behavioral runtime, and presentation.
-- `functions/api/_runtime.ts` supplies the same-origin Site API implementation.
-- `packages/hardware-graph/` owns the stricter intended canonical graph contracts,
-  but production frontend state still uses a separate loose `HardwareGraph` shape
-  and the Site API performs its own normalization.
-- `packages/browser-toolchain/` contains a dormant browser compiler abstraction.
-- `packages/avr-runtime/` contains a dormant structural AVR8js adapter.
-- `packages/firmware-harness/` owns the checked-in exact C/WASM harness.
-- `backend/` and vendored Velxio/Renode material are reference paths, not the Site
-  runtime.
-
-The React Flow canvas is a view of the graph. It must never become the source of
-truth. Human UI commands and WebMCP commands must continue to call the same store
-actions and therefore mutate the same active frontend state. Unifying that state
-with the shared `HardwareProject` contract is a prerequisite of the target
-architecture, not a completed production boundary.
-
-## 4. Current simulation engines
-
-### 4.1 Exact portable C/WASM harness
-
-Relevant files:
-
-- `frontend/src/simulation/portableHarness.ts`
-- `packages/firmware-harness/generated/button-led.wasm`
-- `packages/firmware-harness/`
-
-Properties:
-
-- The artifact is checked in, hash-verified, 400 bytes, and uses ABI v2.
-- It implements one fixed button-input to LED-output semantic contract whose C
-  source lives in `packages/firmware-harness/firmware/src/button_led.c`.
-- A narrow source and graph recognizer decides whether that fixed implementation
-  applies.
-- Pressed and released runs resolve actual component/board endpoints.
-- The user's source bytes are never passed to the WASM module. Matching source is
-  eligibility input, not code compiled or interpreted by this path.
-- An optional recognized `delay(n)` affects eligibility only; execution step count
-  is derived from requested duration, so this path does not preserve matched
-  source-level timing.
-- This is not an on-demand compiler and does not generalize to arbitrary source.
-- The source-only ESP32 Arduino export is not an ESP32 binary or emulator.
-
-Preserve this path as a golden conformance fixture even after the AVR path lands.
-It is valuable because it proves that deterministic virtual I/O can cross the
-graph/runtime boundary with a verified artifact.
-
-### 4.2 TypeScript behavioral interpreter
-
-Relevant files:
-
-- `frontend/src/simulation/runtime.ts`
-- `frontend/src/simulation/protocolRuntime.ts`
-- `frontend/src/simulation/modelContract.ts`
-- `frontend/src/simulation/capabilityRegistry.ts`
-
-The interpreter is intentionally fail-closed. It recognizes a small source subset,
-executes supported operations, and reports unknown APIs rather than pretending they
-worked.
-
-Supported or partially supported behavior includes:
-
-- `setup()` and `loop()` extraction;
-- simple numeric and boolean variables;
-- simple `#define` and constant values;
-- assignments, comparisons, basic arithmetic, ternaries, and bounded safe math;
-- `if`/`else` control flow;
-- `pinMode` as a no-op; GPIO reads/writes; ADC reads; PWM writes; `delay`; and only
-  the three-argument `tone(pin, frequency, duration)` form;
-- the finite `Wire`, `SPI`, and `Serial` method set declared by
-  `SUPPORTED_PROTOCOL_APIS`; `Wire.begin` and `Serial.begin` are accepted no-ops;
-- graph-aware input/output resolution;
-- explicit protocol traces, validation summaries, unsupported APIs, and target
-  issues.
-
-The following are not a supported language/runtime surface:
-
-- `for`, `while`, `do`, or `switch` execution;
-- arbitrary functions beyond `setup` and `loop`;
-- classes, structs, templates, pointers, arrays, callbacks, or lambdas;
-- a real preprocessor, header/include system, libraries, linking, or type checking;
-- interrupts, tasks, RTOS behavior, concurrency, timers, or peripheral registers;
-- dynamic allocation or faithful C/C++ integer/overflow semantics.
-
-Implementation limits and heuristics that future work must not hide:
-
-- Parsing is based on bounded string/regular-expression logic, not a C++ AST.
-- Expression recursion is capped at 12 levels.
-- Statement execution is capped at 20,000 per firmware target, and loop iterations
-  have a separate 20,000 maximum.
-- Requested duration is capped at 86,400,000 ms.
-- A loop generally needs cursor advancement such as `delay`; a no-delay loop can
-  execute once and stop instead of behaving like an MCU's infinite main loop.
-- Active-low button semantics can be inferred from names such as `pressed` or
-  `button`.
-- ADC and sensor conversions use deterministic heuristics, not electrical models.
-- Controller voltage may be inferred from controller IDs.
-- PWM duty can map to a generic 0-180 actuator angle.
-- Every run rebuilds state synchronously. There is no persistent live scheduler.
-- Multiple firmware targets execute sequentially into shared result structures;
-  they are not concurrent processors.
-
-These limitations are acceptable for the current `behavioral` fidelity label. They
-are not acceptable under `engine-backed`, `compiled`, `cycle-accurate`, or
-`electrical` labels.
-
-### 4.3 Protocol behavior
-
-Current protocol behavior is useful but narrow:
-
-- GPIO: graph-resolved digital inputs and outputs.
-- ADC: deterministic source heuristics; no impedance, noise, or sampling circuit.
-- PWM: duty-level behavior; no timer/channel fidelity.
-- I2C: address/transaction traces, a behavioral DS3231 read model, and SSD1306 text
-  capture.
-- DS3231 writes: warned about or ignored; register-complete RTC behavior is absent.
-- SSD1306: printable payload capture, not command decoding, pixels, bus timing, or
-  controller state.
-- SPI: trace and validation; reads return a neutral value without device response
-  models.
-- Serial/UART: basic output and one scalar RX value; no baud, frames, queues,
-  overrun, or clocked transport.
-
-Power and connectivity are inferred from topology, port metadata, and naming. The
-runtime does not solve Kirchhoff's laws and does not model pull-up resistance,
-contention over time, current draw, regulator behavior, brownout, heat, RF, or
-mechanics.
-
-### 4.4 Same-origin HTTP runtime
-
-Relevant files:
-
-- `chatgpt-site/app/api/[[...path]]/route.ts`
-- `functions/api/_runtime.ts`
-
-The route imports the frontend interpreter and invokes `runFirmwareRuntime`.
-Therefore:
-
-- browser and HTTP results should remain contract-compatible;
-- direct HTTP execution never selects the portable C/WASM harness; WebMCP selects
-  that harness locally first when its exact recognizer matches;
-- `runtime: "remote"` means the operation crossed the Site API boundary;
-- it must not be described as more accurate than the browser path;
-- API sessions are held in a module-global in-memory map capped at 128 entries;
-- sessions are not durable, globally coordinated, or a persistent simulation
-  process and can reset or be evicted per Worker instance;
-- raw WebSocket simulation is not available on the Site.
-
-### 4.5 Compile preflight
-
-`functions/api/_runtime.ts` checks the target binding/profile, source-size limits,
-balanced delimiters, and the presence of an `.ino` file. It does not check or
-compile `setup()`/`loop()` entrypoints. The separate validator emits regex-based
-entrypoint warnings, which are not compiler diagnostics. The API response truthfully
-reports that no binary compiler is configured.
-
-Do not turn that result into a synthetic artifact, success toast, or `compiled`
-state. A compile operation is successful only when an approved toolchain returns a
-valid artifact whose bytes and provenance are verified.
-
-## 5. Capability models and catalog coverage
-
-The model contract uses four support levels:
-
-```ts
-type SimulationSupport =
-  | "visual"
-  | "validation"
-  | "behavioral"
-  | "engine-backed";
-```
-
-Interpret them literally:
-
-- `visual`: drawable only;
-- `validation`: graph/metadata rules only;
-- `behavioral`: explicit deterministic high-level model, possibly heuristic;
-- `engine-backed`: execution by a declared compiled/CPU/device engine with tested
-  fidelity bounds.
-
-The current registry grants behavioral support to a small explicit set, including
-common Uno/Nano, ESP32 DevKit, and Pico-family boards; button/switch/PIR inputs;
-several LEDs; a generic buzzer; servo-like PWM actuators; selected ADC sources;
-DS3231; and SSD1306 variants. For boards, `behavioral` means the source interpreter
-can handle supported code. It does not mean that the board CPU is emulated.
-
-Most catalog entries are visual or validation-only. Current behavioral support is
-mostly granted by conservative exact definition-ID allowlists, while category,
-text, tags, and ports can classify non-executable families. Two current exceptions
-matter: generic GPIO execution propagates values across connected nets without
-requiring a device adapter, and the portable harness recognizes button/LED roles
-with definition/title patterns. Requiring an explicit tested adapter/model ID for
-every executable catalog device is a target-architecture rule, not current truth.
-Catalog search results should show support state throughout the migration.
-
-Known contract risk: simulation contract shapes exist in both
-`packages/hardware-graph/src/types.ts` and frontend simulation code, with the
-frontend carrying adapter data that can drift from the package definition. The
-shared contracts package described below must eliminate that duplication.
-
-## 6. What graph validation does and does not prove
-
-Current validation covers supported structural rules such as:
-
-- missing definitions and ports;
-- incompatible port domains;
-- output-to-output and input-to-input conflicts;
-- nominal/max voltage metadata;
-- project-wide presence of at least one connected ground net and one connected
-  power net, not per-component power correctness;
-- I2C address collisions and pull-up metadata;
-- UART TX-to-TX conflicts;
-- USB host-to-host and PCIe endpoint-to-endpoint conflicts;
-- RF impedance metadata.
-
-Firmware validation is currently brace/entrypoint-level, not C++ compilation.
-
-A valid graph does not prove:
-
-- that a circuit is physically safe;
-- that voltage propagates correctly through regulators and rails;
-- that current budgets, resistor values, or pull-ups are adequate;
-- that analog behavior converges;
-- that a library exists or firmware compiles;
-- that timing, interrupts, or peripherals behave like real silicon.
-
-Keep three distinct concepts in contracts and UI:
-
-1. `graphValidation`: structural and metadata diagnostics.
-2. `firmwareCompilation`: compiler diagnostics and artifact production.
-3. `simulationExecution`: runtime/device events with declared fidelity.
-
-Never collapse them into a single green `valid` or `supported` indicator.
-
-Today validation does not gate execution: Studio validates and then still runs, and
-WebMCP attaches validation data without blocking the runtime. A runtime result can
-therefore say `status: "completed"` while `validation.valid` is false. Result v2
-must preserve these as separate dimensions rather than treating runtime completion
-as graph approval.
-
-## 7. Dormant foundations
-
-### 7.1 Browser toolchain package
-
-`packages/browser-toolchain/` already provides useful seams:
-
-- `BrowserCompiler` and `CompilerManager` abstractions;
-- worker messages and progress;
-- cancellation and timeouts;
-- target pinning;
-- source and artifact SHA-256;
-- Intel HEX validation;
-- manifests, licensing metadata, and verified asset loading;
-- artifact provenance.
-
-It is not imported by the production frontend or Site runtime.
-
-An assessed candidate, `@horang-corp/avr-gcc-wasm@0.2.0`, is not installed or
-approved. The feasibility notes estimate roughly 55 MB unpacked and identify
-GPLv3 compiler/binutils obligations. Before checking in, downloading, caching, or
-shipping compiler assets, an owner must approve:
-
-- toolchain and core versions;
-- exact upstream source and checksums;
-- license and source-offer obligations;
-- NOTICE updates;
-- asset size, cold-start, memory, and caching budgets;
-- reproducibility and supply-chain policy.
-
-Do not silently fetch mutable compiler binaries from a CDN.
-
-### 7.2 AVR runtime package
-
-`packages/avr-runtime/` defines and unit-tests the artifact, pin, stepping,
-cancellation, and event boundary of an Uno CPU/GPIO adapter against fake structural
-CPU and port implementations. The fake instruction callback increments cycles; it
-does not establish real AVR instruction or GPIO conformance.
-
-It is not connected to production, and `avr8js` is not currently an installed
-runtime dependency. Real AVR behavior remains unverified until an exact AVR8js
-version is pinned and tested. The current artifact-like input also accepts an
-optional target FQBN without rejecting a mismatched target, so target-provenance
-enforcement is unfinished. The intended adapter surface covers CPU/GPIO only;
-timers, interrupts, UART, ADC, PWM timer channels, and I2C/SPI peripheral hooks are
-not a finished engine. Its synchronous run loop checks cancellation once per
-instruction; hard budgets and termination require the future Worker orchestrator.
-
-Treat this package as a tested starting boundary, not a completed emulator.
-
-### 7.3 Architecture islands
-
-`frontend/src/simulation/SimulationEngine.ts` and `bridges.ts` express helpful
-adapter ideas but are mostly separate from the interpreter that actually runs.
-The migration should consolidate them behind one runtime contract rather than add a
-third parallel abstraction.
-
-## 8. Root causes preventing one coherent web simulator
-
-The main problems are architectural, not a missing `simulate()` function:
-
-1. Graph, firmware, capability, artifact, and runtime contracts are spread across
-   packages and frontend-local definitions.
-2. The active interpreter and dormant compiled path do not share a single runtime
-   lifecycle.
-3. There is no graph compiler that turns connections into stable nets, board pin
-   bindings, bus instances, and device model instances.
-4. There is no deterministic discrete-event scheduler shared by CPUs and devices.
-5. Exact ID allowlists are conservative, but generic-net GPIO and fuzzy portable
-   harness role recognition bypass a universal versioned device-model gate.
-6. Compilation artifacts are not connected end-to-end to project source identity,
-   target identity, emulator loading, and stale-artifact rejection.
-7. Worker isolation is designed but not production-wired, so large compile/runtime
-   work would block the UI if added naively.
-8. Server normalization drops fields that are not needed by the current interpreter,
-   increasing schema-drift risk for a future artifact-backed path.
-9. The UI, API, and WebMCP vocabulary can overstate preflight, validation, or
-   behavioral success.
-10. Most parts lack executable device models, and no electrical solver exists.
-
-## 9. Target TypeScript architecture
-
-Keep the monorepo and implement the following dependency direction. Arrows below
-mean “imports/depends on”:
+Required package direction:
 
 ```text
-@schematic/hardware-graph                    (canonical graph foundation)
-@schematic/simulation-contracts
-  -> @schematic/hardware-graph
-@schematic/graph-compiler
-  -> @schematic/hardware-graph
-  -> @schematic/simulation-contracts
-@schematic/device-models
-  -> @schematic/simulation-contracts
-@schematic/runtime-core
-  -> graph-compiler + device-models + simulation-contracts
-@schematic/avr-runtime
-  -> runtime-core + simulation-contracts
-@schematic/behavioral-runtime
-  -> runtime-core + simulation-contracts
-frontend worker clients
-  -> the runtime/compiler packages above
-frontend stores + WebMCP + Site API adapters
-  -> worker clients + simulation-contracts
-React presentation
-  -> frontend stores only
+@schematic/hardware-graph
+        ▲
+        │
+@schematic/behavior
+        ▲
+        │
+frontend application commands
+        ▲
+        ├── Zustand adapters
+        ├── React UI
+        └── WebMCP tools
 ```
 
-No package below the UI layer may import React, Zustand, React Flow, DOM nodes, or
-WebMCP host globals. Runtime-core should use platform-neutral TypeScript plus
-explicit injected clock/worker/storage adapters. The browser should be the primary
-execution environment; optional remote engines implement the same contracts.
+`@schematic/behavior` must not import React, Zustand, React Flow, Monaco, WebMCP,
+DOM APIs, network clients, compiler packages, MCU runtimes, or Site APIs.
 
-### 9.1 Shared contracts package
+Dependency category: in-process. Schema parsing, capability resolution, plan
+normalization, event dispatch, deterministic reduction, visual projection,
+hashing inputs, and diagnostics belong behind one deep module boundary. Saved
+plan persistence is local-substitutable and should use the existing project
+repository rather than a new remote service.
 
-Create `packages/simulation-contracts/` and make it the only owner of:
+## 6. Core TypeScript contracts
 
-- runtime IDs and versions;
-- runtime-facing compiled artifact references and provenance evidence;
-- graph compilation output contracts;
-- capabilities and fidelity claims;
-- runtime commands, events, results, snapshots, and diagnostics;
-- device adapter identities and versions;
-- deterministic seeds and time units;
-- worker request/response envelopes.
+The signatures below are architectural contracts. Agents may refine names, but
+must preserve the semantics and separation.
 
-Keep durable project, firmware-target, and compiled-artifact cache fields in
-`@schematic/hardware-graph` unless an explicit project-schema migration moves them.
-`@schematic/simulation-contracts` imports the foundational `HardwareProject` type;
-the graph package must not import simulation contracts back.
-
-Suggested baseline:
+### 6.1 JSON-safe values
 
 ```ts
-export type SimulationFidelity =
-  | "validation"
-  | "behavioral"
-  | "instruction"
-  | "electrical";
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
 
-export interface VerificationEvidence {
-  basis: "fixture" | "cross-engine" | "reference-emulator" | "physical-capture";
-  fixtureIds: readonly string[];
-  verifierVersion: string;
-  artifactSha256?: string;
-  toolchainManifestSha256?: string;
-  releaseId?: string;
-  verifiedAt?: string;
-}
+export type BehaviorActionId = `${string}.${string}`;
+export type BehaviorEventId = `${string}.${string}`;
+```
 
-export interface EngineDescriptor {
+No `bigint`, `Map`, function, class instance, or binary value crosses a stored
+plan or WebMCP wire boundary.
+
+### 6.2 Behavior Plan v1
+
+```ts
+export interface BehaviorPlanV1 {
+  schemaVersion: 1;
   id: string;
-  version: string;
-  fidelity: SimulationFidelity;
-  targetIds: readonly string[];
+  projectId: string;
+  name: string;
+  intent?: string;
+  revision: number;
+  rules: readonly BehaviorRuleV1[];
+  cues?: readonly BehaviorCueV1[];
+}
+
+export interface BehaviorRuleV1 {
+  id: string;
+  enabled: boolean;
+  when: BehaviorTriggerV1;
+  then: readonly ComponentActionRequestV1[];
+}
+
+export type BehaviorTriggerV1 =
+  | { type: "preview.started" }
+  | {
+      type: "component.event";
+      componentId: string;
+      definitionId: string;
+      eventId: BehaviorEventId;
+      payload?: JsonValue;
+    }
+  | {
+      type: "input.changed";
+      componentId: string;
+      definitionId: string;
+      inputId: string;
+    }
+  | {
+      type: "time.elapsed";
+      afterMs: number;
+    };
+
+export interface BehaviorCueV1 {
+  id: string;
+  atMs: number;
+  order: number;
+  action: ComponentActionRequestV1;
+}
+
+export interface ComponentActionRequestV1 {
+  componentId: string;
+  definitionId: string;
+  actionId: BehaviorActionId;
+  payload: BehaviorPayloadV1;
+}
+
+export type BehaviorPayloadV1 =
+  | { kind: "literal"; value: JsonValue }
+  | {
+      kind: "trigger-payload";
+      select: "$" | "$.value";
+      fallback?: JsonValue;
+    };
+
+export interface ComponentEventRequest {
+  componentId: string;
+  definitionId: string;
+  eventId: BehaviorEventId;
+  payload: JsonValue;
+}
+
+export interface InputChangeRequest {
+  componentId: string;
+  definitionId: string;
+  inputId: string;
+  value: JsonValue;
+}
+```
+
+V1 has no arbitrary conditions, loops, recursion, source expressions, or
+unbounded repeating timers. Add new versioned trigger/action forms only with
+limits and boundary fixtures. `trigger-payload` is a bounded data binding, not
+an expression language: it may forward only the full triggering payload or its
+top-level `value`. It is valid only inside a `component.event` or
+`input.changed` rule. Reject it in `preview.started`, `time.elapsed`, standalone
+cues, and direct action dispatch—even when a fallback exists—because those
+contexts have no trigger payload. The resolved value is validated against the
+destination action schema before reduction. This is sufficient for
+`sensor.changed` or an input update to forward a typed reading into a
+numeric-readout action without hidden arbitrary dataflow.
+
+### 6.3 Exact component behavior bindings
+
+Catalog definitions must explicitly opt into a checked-in behavior profile:
+
+```ts
+export interface CatalogBehaviorBinding {
+  profileId: string;
+  profileVersion: number;
+  variant?: string;
+}
+
+export interface BehaviorActionDescriptor {
+  id: BehaviorActionId;
+  label: string;
+  description: string;
+  payloadSchema: BehaviorPayloadSchemaV1;
+  control:
+    | { kind: "trigger" }
+    | { kind: "toggle" }
+    | { kind: "number"; min: number; max: number; step: number; unit?: string }
+    | { kind: "text"; maxLength: number }
+    | {
+        kind: "select";
+        options: readonly { value: JsonValue; label: string }[];
+      };
+}
+
+export interface BehaviorEventDescriptor {
+  id: BehaviorEventId;
+  label: string;
+  description: string;
+  payloadSchema: BehaviorPayloadSchemaV1;
+  control: { kind: "trigger"; label: string };
+}
+
+export interface BehaviorPayloadSchemaV1 {
+  schemaId: string;
+  dialect: "https://json-schema.org/draft/2020-12/schema";
+  schema: JsonValue;
+}
+
+export type CapabilityAvailability =
+  | { status: "available" }
+  | {
+      status: "disabled";
+      code: "PRECONDITION_FAILED" | "STALE_PROJECT";
+      reason: string;
+      recovery?: string;
+    }
+  | {
+      status: "unsupported";
+      code: "ACTION_NOT_DECLARED" | "EVENT_NOT_DECLARED" | "PROFILE_NOT_INSTALLED";
+      reason: string;
+      recovery?: string;
+      alternatives?: readonly string[];
+    };
+
+export interface ComponentActionCapability {
+  actionId: BehaviorActionId;
+  descriptor?: BehaviorActionDescriptor;
+  availability: CapabilityAvailability;
+}
+
+export interface ComponentEventCapability {
+  eventId: BehaviorEventId;
+  descriptor?: BehaviorEventDescriptor;
+  availability: CapabilityAvailability;
+}
+
+export interface ComponentBehaviorCapabilityReport {
+  componentId: string;
+  definitionId: string;
+  profile?: CatalogBehaviorBinding;
+  actions: readonly ComponentActionCapability[];
+  events: readonly ComponentEventCapability[];
   limitations: readonly string[];
-  verification: readonly VerificationEvidence[];
 }
-
-export interface FirmwareArtifactRef {
-  format: "intel-hex" | "wasm-module";
-  artifactSha256: string;
-  sourceSha256: string;
-  targetDefinitionId: string;
-  fqbn: string;
-  compilerId: string;
-  compilerVersion: string;
-  coreVersion: string;
-  libraryLockSha256: string;
-}
-
-export interface SimulationRequest {
-  schemaVersion: 2;
-  graph: HardwareProject;
-  firmware: readonly FirmwareTargetInput[];
-  durationNs: bigint;
-  seed: string;
-  requestedEngine?: string;
-  allowFallback: boolean;
-}
-
-export interface SimulationRequestWire
-  extends Omit<SimulationRequest, "durationNs"> {
-  durationNs: string;
-}
-
-export interface RunProvenance {
-  artifactSha256?: string;
-  inputGraphSha256: string;
-  // Required only for engines that consume a canonical compiled graph.
-  // Phase 0 behavioral runs do not invent this value from their ephemeral DSU.
-  compiledGraphSha256?: string;
-  deviceModels: readonly { adapterId: string; version: string }[];
-  seed: string;
-  requestSha256: string;
-}
-
-export interface SimulationResultBase {
-  schemaVersion: 2;
-  runId: string;
-  requestedEngine?: string;
-  selectedEngine?: EngineDescriptor;
-  fallback?: { permitted: boolean; reason: string };
-  simulatedUntilNs: bigint;
-  graphDiagnostics: readonly SimulationDiagnostic[];
-  compilerDiagnostics: readonly SimulationDiagnostic[];
-  runtimeDiagnostics: readonly SimulationDiagnostic[];
-  unsupported: readonly UnsupportedCapability[];
-}
-
-export interface SimulationCompletedResult extends SimulationResultBase {
-  status: "completed" | "partial";
-  selectedEngine: EngineDescriptor;
-  provenance: RunProvenance;
-  events: readonly RuntimeEvent[];
-  finalSnapshot: SimulationSnapshot;
-}
-
-export interface SimulationStoppedResult extends SimulationResultBase {
-  status: "invalid" | "failed" | "cancelled";
-  events?: readonly RuntimeEvent[];
-  lastSnapshot?: SimulationSnapshot;
-}
-
-export type SimulationResult =
-  | SimulationCompletedResult
-  | SimulationStoppedResult;
-
-export type JsonWire<T> =
-  T extends bigint ? string
-    : T extends Uint8Array ? string
-      : T extends readonly (infer U)[] ? readonly JsonWire<U>[]
-        : T extends object ? { [K in keyof T]: JsonWire<T[K]> }
-          : T;
-
-export type SimulationResultWire = JsonWire<SimulationResult>;
-export type SimulationSnapshotWire = JsonWire<SimulationSnapshot>;
-export type RuntimeCommandWire = JsonWire<RuntimeCommand>;
-export type RuntimeAckWire = JsonWire<RuntimeAck>;
-export type CapabilityRequestWire = JsonWire<CapabilityRequest>;
-export type CapabilityResponseWire = JsonWire<CapabilityResponse>;
-export type CompileRequestWire = JsonWire<CompileRequest>;
-export type CompileResultWire = JsonWire<CompileResult>;
-export type SimulationRunHandleWire = JsonWire<SimulationRunHandle>;
 ```
 
-Use separate domain models and wire DTOs. JSON transport cannot serialize `bigint`
-or `Map`; Worker/API envelopes encode nanoseconds as canonical decimal strings and
-use schema-validated sorted arrays/records. `Uint8Array` fields use an explicitly
-named base64 encoding in the wire schema. Explicit, tested codecs convert every
-request, result, snapshot, event, command, acknowledgement, capability response,
-compile response, and artifact payload to/from internal `bigint`, bytes, and
-derived indexes. Conditional aliases above show intent; runtime schemas/codecs are
-still mandatory because TypeScript types do not validate input. Never hash raw
-`Map` iteration or an unvalidated JSON object.
+Unknown definitions resolve to `catalog-only:v1`. Do not infer preview support
+from a title, tag, category, port, manufacturer, or fuzzy model name.
+Unknown action/event requests also remain in preparation diagnostics or the
+timeline with `unsupported` availability; they are not discarded merely because
+there is no descriptor.
 
-### 9.2 Deterministic graph compiler
+All profile payload schemas use one shared JSON Schema Draft 2020-12 validator
+and a deliberately bounded keyword subset: `type`, `properties`, `required`,
+`additionalProperties` as a boolean, `items`, `enum`, `const`, `minimum`,
+`maximum`, `multipleOf`, `minLength`, `maxLength`, `minItems`, and `maxItems`.
+Reject all other keywords, remote references, custom formats, and dynamic schema
+loading. Canonical schema IDs and canonicalized schema JSON participate in the
+registry hash. UI controls, plan preparation, direct invocation, and WebMCP must
+call this same validator rather than reimplementing payload checks.
 
-Create `packages/graph-compiler/` with a pure function:
+### 6.4 Trusted profile implementation
 
 ```ts
-export interface CompiledGraph {
-  graphSha256: string;
-  components: ReadonlyMap<string, CompiledComponent>;
-  nets: ReadonlyMap<string, CompiledNet>;
-  boardBindings: readonly BoardBinding[];
-  buses: readonly CompiledBus[];
-  devices: readonly DeviceInstanceSpec[];
-  diagnostics: readonly SimulationDiagnostic[];
+export interface BehaviorProfile<State> {
+  manifest: {
+    id: string;
+    version: number;
+    actions: readonly BehaviorActionDescriptor[];
+    events: readonly BehaviorEventDescriptor[];
+  };
+
+  parseState(value: unknown): State;
+  initialState(instance: ComponentInstance): State;
+
+  reduce(
+    state: State,
+    action: ResolvedComponentAction,
+    context: DeterministicActionContext,
+  ): readonly StateTransition<State>[];
+
+  projectVisual(state: State): ComponentVisualProjection;
 }
-
-export function compileHardwareGraph(
-  graph: HardwareProject,
-  registry: DeviceModelManifest,
-): CompiledGraph;
 ```
 
-`CompiledGraph` above is an internal domain structure. Define a separate
-`CompiledGraphWire` using sorted arrays/records for canonical hashing, persistence,
-workers, and APIs; build `ReadonlyMap` indexes only after decoding and validation.
+Profiles are trusted checked-in TypeScript. Imported plans reference profile and
+action IDs only; they never import reducers or renderer code.
 
-Requirements:
-
-- stable ordering independent of object insertion order;
-- stable IDs derived from canonical graph content where appropriate;
-- union-find or equivalent net construction;
-- explicit board-pin-to-net bindings;
-- separate digital, analog, power, I2C, SPI, UART, USB, PCIe, and RF domains;
-- validation diagnostics without mutating the input graph;
-- no title/tag heuristics for executable adapters;
-- graph hash included in snapshots and run identity, not ordinary compiler-artifact
-  identity;
-- golden fixtures for every supported topology.
-
-### 9.3 Toolchain worker
-
-Compilation must run in a dedicated Web Worker with an explicit state machine:
-
-```text
-idle -> loading-assets -> preparing -> compiling -> linking -> validating
-     -> completed | failed | cancelled | timed-out
-```
-
-Required controls:
-
-- approved immutable manifest and SHA-256 for every fetched asset;
-- origin allowlist and no arbitrary compiler URLs;
-- size and memory ceilings;
-- cancellation and hard timeout;
-- progress events that do not imply success;
-- source tree canonicalization before hashing;
-- exact FQBN, core, compiler, and library lock in provenance;
-- Intel HEX parse/shape/flash-size validation;
-- cache by the full provenance key, never source hash alone;
-- stale artifact rejection when source, target, compiler, core, libraries, or other
-  actual build inputs change;
-- worker crash recovery without corrupting project state.
-
-The UI may persist artifacts, but artifacts are caches. Source plus target/toolchain
-identity remains canonical. Bind a simulation run—not the compiler artifact—to the
-artifact SHA, compiled-graph SHA, device-model versions, and deterministic seed.
-Only invalidate compilation for a graph edit when graph-derived data is an explicit
-build input included in provenance.
-
-### 9.4 MCU runtime contract
-
-Use one adapter per engine/target family, not one adapter per component:
+### 6.5 Generic visual primitives
 
 ```ts
-export interface McuRuntime {
-  readonly descriptor: EngineDescriptor;
-  load(input: {
-    artifact: FirmwareArtifactRef;
-    bytes: Uint8Array;
-    board: BoardBinding;
-  }): Promise<void>;
-  reset(seed: string): void;
-  runUntil(deadlineNs: bigint, scheduler: EventScheduler): RuntimeSlice;
-  setDigitalInput(pin: string, value: 0 | 1, atNs: bigint): void;
-  setAnalogInput(pin: string, microvolts: bigint, atNs: bigint): void;
-  snapshot(): McuSnapshot;
+export type VisualPrimitive =
+  | {
+      kind: "indicator";
+      key: string;
+      on: boolean;
+      color: string;
+      intensity: number;
+    }
+  | { kind: "button"; key: string; pressed: boolean }
+  | { kind: "switch"; key: string; position: string }
+  | {
+      kind: "text-display";
+      key: string;
+      lines: readonly string[];
+    }
+  | {
+      kind: "numeric-readout";
+      key: string;
+      value: number;
+      unit?: string;
+    }
+  | { kind: "rotation"; key: string; degrees: number }
+  | {
+      kind: "activity";
+      key: string;
+      state: "idle" | "active" | "warning";
+    };
+
+export interface ComponentVisualProjection {
+  primitives: readonly VisualPrimitive[];
+  accessibleSummary: string;
+}
+```
+
+`ComponentArtwork` remains the static base. A generic
+`ComponentVisualOverlay` renders these primitives. Truly specialized displays
+may use explicitly registered renderer extensions; never scatter new
+definition-ID conditionals through `HardwareNode`.
+
+### 6.6 Plan preparation
+
+```ts
+export type PlanPreparation =
+  | {
+      status: "ready";
+      prepared: PreparedBehaviorPlan;
+      diagnostics: readonly BehaviorDiagnostic[];
+    }
+  | {
+      status: "partial";
+      prepared: PreparedBehaviorPlan;
+      rejected: readonly RejectedBehaviorItem[];
+      diagnostics: readonly BehaviorDiagnostic[];
+    }
+  | {
+      status: "blocked";
+      rejected: readonly RejectedBehaviorItem[];
+      diagnostics: readonly BehaviorDiagnostic[];
+    };
+
+export interface PreparedBehaviorPlan {
+  schemaVersion: 1;
+  plan: BehaviorPlanV1;
+  planSha256: string;
+  projectSha256: string;
+  registrySha256: string;
+  profileVersions: Readonly<Record<string, number>>;
+  normalizedRules: readonly ResolvedBehaviorRule[];
+  normalizedCues: readonly ResolvedBehaviorCue[];
+}
+```
+
+Default preparation policy is to block unsupported items. An explicit
+`onUnsupported: "skip"` policy may produce `partial`; it must list every skipped
+item and the preview must remain visibly partial.
+
+### 6.7 Preview session and results
+
+```ts
+export interface BehaviorSystem {
+  inspect(project: HardwareProject): ProjectBehaviorReport;
+
+  prepare(
+    project: HardwareProject,
+    plan: unknown,
+    policy?: { onUnsupported: "block" | "skip" },
+  ): Promise<PlanPreparation>;
+
+  open(
+    project: HardwareProject,
+    prepared: PreparedBehaviorPlan,
+  ): BehaviorPreviewSession;
+}
+
+export interface BehaviorPreviewSession {
+  dispatch(
+    currentProject: HardwareProject,
+    request: ComponentEventRequest | InputChangeRequest | ComponentActionRequestV1,
+  ): ActionOutcome;
+  seek(currentProject: HardwareProject, timeMs: number): BehaviorSnapshot;
+  reset(currentProject: HardwareProject): BehaviorSnapshot;
+  snapshot(): BehaviorSnapshot;
   dispose(): void;
 }
+
+export interface BehaviorSnapshot {
+  source: "behavior-preview";
+  execution: "typed-actions-only";
+  sourceCodeExecution: "none";
+  logicalTimeMs: number;
+  sequence: number;
+  components: Readonly<Record<string, ComponentVisualProjection>>;
+  inputs: Readonly<Record<string, JsonValue>>;
+  sessionLog: readonly BehaviorSessionLogEntry[];
+  sessionLogSha256: string;
+  events: readonly BehaviorTimelineEvent[];
+  diagnostics: readonly BehaviorDiagnostic[];
+  snapshotSha256: string;
+}
+
+export interface BehaviorSessionLogEntry {
+  sequence: number;
+  logicalTimeMs: number;
+  kind: "component-event" | "input-change" | "direct-action";
+  request: ComponentEventRequest | InputChangeRequest | ComponentActionRequestV1;
+  outcome: "accepted" | "rejected";
+  diagnosticCodes: readonly string[];
+}
 ```
 
-For Uno v1, support only what is demonstrably wired:
+Playback controls belong to a frontend adapter. They call `seek` based on
+logical time. `requestAnimationFrame` may render snapshots but may not decide
+state; dropped frames must not change results. `open` recomputes the current
+project and registry hashes before creating a session. Every state-changing
+session method receives the current project again and rejects/disposes the
+session if its fingerprint changed; the registry is immutable for one
+`BehaviorSystem` instance and its hash is checked against the prepared plan.
+Every accepted or rejected dispatch is appended to the ordered bounded session
+log before a new snapshot is exposed.
+Thus direct `behavior.invoke` calls remain reproducible without silently
+mutating the durable plan: preview truth is the prepared plan plus this exact
+session log.
 
-- ATmega328P instruction stepping;
-- Uno digital pins mapped to AVR ports B/C/D;
-- reset and deterministic cycle count;
-- external digital input injection;
-- digital output change events;
-- bounded cancellation and worker termination.
-
-Do not label timers, interrupts, UART, ADC, PWM, I2C, or SPI as supported until
-their AVR peripheral hooks and conformance tests exist.
-
-### 9.5 Discrete-event scheduler
-
-Runtime-core needs a deterministic scheduler shared by MCUs and device models:
+### 6.8 Code documents
 
 ```ts
-export interface ScheduledEvent {
-  timeNs: bigint;
-  priority: number;
-  sequence: bigint;
-  sourceId: string;
-  kind: string;
-  payload: unknown;
+export interface CodeDocument {
+  schemaVersion: 1;
+  id: string;
+  projectId: string;
+  targetComponentId: string;
+  targetDefinitionId: string;
+  boardFqbn?: string;
+  language: "arduino" | "micropython" | "espidf" | "c" | "cpp" | "python";
+  files: readonly CodeFile[];
+  dependencies: readonly CodeDependency[];
+  revision: number;
+  contentSha256: string;
+  exportHistory: readonly CodeExportRecord[];
+  origin: "ai-generated" | "human-authored" | "imported" | "mixed";
+  previewLink:
+    | { status: "unlinked" }
+    | {
+        status: "linked";
+        behaviorPlanId: string;
+        behaviorPlanSha256: string;
+        projectSha256: string;
+        linkedContentSha256: string;
+      }
+    | {
+        status: "stale";
+        behaviorPlanId: string;
+        behaviorPlanSha256: string;
+        projectSha256: string;
+        linkedContentSha256: string;
+        changed: readonly ("code" | "plan" | "project")[];
+      };
+  inAppVerification: "not-performed";
+  updatedAt: string;
 }
 
-export interface EventScheduler {
-  readonly nowNs: bigint;
-  schedule(event: Omit<ScheduledEvent, "sequence">): bigint;
-  cancel(sequence: bigint): boolean;
-  runUntil(deadlineNs: bigint, budget: ExecutionBudget): SchedulerResult;
+export interface CodeFile {
+  name: string;
+  content: string;
+}
+
+export interface CodeDependency {
+  ecosystem: "arduino-library" | "platformio" | "python-package" | "vendor-sdk" | "other";
+  name: string;
+  version?: string;
+  sourceUrl?: string;
+}
+
+export interface CodeExportRecord {
+  contentSha256: string;
+  exportedAt: string;
+  format: "source-files" | "handoff-manifest" | "project-bundle";
+}
+
+export interface ExternalCodeHandoffV1 {
+  schemaVersion: 1;
+  projectId: string;
+  projectSha256: string;
+  target: {
+    componentId: string;
+    definitionId: string;
+    boardFqbn?: string;
+  };
+  language: CodeDocument["language"];
+  files: readonly {
+    name: string;
+    content: string;
+    sha256: string;
+  }[];
+  sourceSha256: string;
+  dependencies: readonly CodeDependency[];
+  previewLink: CodeDocument["previewLink"];
+  graphDiagnostics: readonly GraphDiagnosticWire[];
+  claims: {
+    builtInSchematic: false;
+    compiledInSchematic: false;
+    executedInSchematic: false;
+    uploadedBySchematic: false;
+    physicallyTestedBySchematic: false;
+  };
+  exportedAt: string;
+}
+
+export interface GraphDiagnosticWire {
+  code: string;
+  severity: "error" | "warning" | "info";
+  message: string;
+  componentIds?: readonly string[];
+  connectionIds?: readonly string[];
 }
 ```
 
-Ordering must be `(timeNs, priority, sequence)` with a monotonic sequence as the
-final tie-breaker. Never use wall-clock time or JavaScript timer ordering to define
-simulation results. Wall time is only for cancellation, progress, and performance
-budgets.
+Do not retain `compiledArtifact` in the next canonical project schema. A
+backward-compatible importer may preserve it as ignored legacy metadata during
+migration, but it must not affect badges, preview, export claims, or status.
 
-Guardrails:
+## 7. Initial profile and action vocabulary
 
-- maximum queued events;
-- maximum events per simulated interval;
-- maximum instructions per slice;
-- cancellation checks;
-- zero-time feedback-loop detection;
-- deterministic seeded randomness only;
-- snapshot size limits;
-- explicit `budget-exceeded` diagnostics.
+Ship a deliberately small, useful profile set before expanding catalog
+coverage:
 
-### 9.6 Device model registry
+| Profile | Events | Actions | Visual result |
+| --- | --- | --- | --- |
+| `momentary-input:v1` | `button.pressed`, `button.released` | `button.setPressed` for direct demonstrations | Pressed/released overlay |
+| `digital-indicator:v1` | none | `indicator.set`, `indicator.setBrightness` | On/off/color/intensity overlay |
+| `text-display:v1` | none | `display.showText`, `display.clear` | Bounded text lines |
+| `buzzer:v1` | none | `buzzer.start`, `buzzer.stop` | Active/frequency state; audio optional and user-gated |
+| `relay:v1` | none | `relay.set` | Open/closed state |
+| `rotary-actuator:v1` | none | `servo.setAngle` | Bounded rotation |
+| `motor:v1` | none | `motor.setSpeed`, `motor.stop` | Direction/speed/activity state |
+| `numeric-sensor:v1` | `sensor.changed` | `sensor.setReading` for injected preview input | Numeric value and unit |
 
-Every executable model must be explicit and versioned:
+Every profile needs:
+
+- exact payload bounds;
+- initial state;
+- pure reducer fixtures;
+- generic visual projection;
+- accessible summary;
+- unsupported-action behavior;
+- version and migration policy;
+- explicit catalog definition bindings.
+
+Preview actions intentionally do not propagate automatically across wires.
+Authors express the desired causality in rules. The graph remains valuable for
+design context and diagnostics, but the preview does not pretend to solve
+electrical behavior.
+
+## 8. Validation model
+
+Report four independent layers:
+
+1. **Graph validation**: structural ports, connection domains, required project
+   references, and existing wiring checks.
+2. **Behavior Plan validation**: schema, exact instances/definitions, registered
+   events/actions, payloads, limits, conflicting writers, and staleness.
+3. **Preview result**: typed actions projected, rejected, skipped, and final
+   visual state.
+4. **Code-document state**: saved files, origin, hashes, preview link, and export
+   history.
+
+None of these is compilation or physical verification.
+
+Blocking plan errors include:
+
+- component instance does not exist;
+- current definition differs from the plan target;
+- behavior profile is absent or at the wrong version;
+- event/action ID is not declared;
+- payload fails its exact schema;
+- non-finite or out-of-range time/value;
+- plan exceeds rule/action/event budgets;
+- conflicting same-rule writes with no explicit order;
+- project/profile fingerprint changed after preparation.
+
+Graph electrical issues may be warnings in a conceptual preview, but must remain
+visible. The UI should never turn a successful conceptual preview into a green
+claim that the hardware will work.
+
+## 9. Determinism and conflict rules
+
+The same project, registry, plan, inputs, and logical time must produce the same
+snapshot hash.
+
+Required rules:
+
+- canonical stored order is rule ID and explicit action order;
+- cues sort by `(atMs, order, cue.id)`;
+- event dispatch increments a monotonic sequence;
+- reducers cannot call `Date`, `Math.random`, DOM APIs, timers, storage, or
+  network APIs;
+- seeded examples use an injected deterministic generator only;
+- timestamps are non-negative bounded integers;
+- simultaneous writes to one state field are either rejected during preparation
+  or resolved by an explicit documented order;
+- event chains have depth and total-event budgets;
+- direct seek and sequential playback yield identical snapshots;
+- reset always returns the exact initial snapshot;
+- reduced-motion changes interpolation only, never logical state.
+
+## 10. Code-panel lifecycle
+
+### 10.1 Common agent workflow
+
+The preferred model/agent sequence is:
+
+1. Read the graph and exact behavior capabilities.
+2. Create or update a Behavior Plan from user intent.
+3. Preview the plan and resolve unsupported actions or missing bindings.
+4. Write normal source files to the chosen board’s code document.
+5. Record an optional link between the exact source hash and exact plan hash.
+6. Select the board and open the Code panel.
+7. Let the human and later agents edit the code without restriction.
+8. Copy/download/export the code for external testing when requested.
+
+No step calls a compiler, simulator, emulator, or uploader.
+
+### 10.2 Model code responses in the side panel
+
+Do not rely on scraping fenced code from a chat response. A model should call a
+typed `code.write` tool (initially this can adapt the existing `firmware.write`)
+with exact files. The shared application command then persists the files,
+selects the target board, and opens Monaco.
+
+The model may still explain the code normally in chat. The authoritative editor
+content is the tool payload stored in the project.
+
+### 10.3 Overwrite safety
+
+Writing code must use optimistic concurrency:
 
 ```ts
-export interface DeviceModel<TState = unknown> {
-  readonly manifest: DeviceModelEntry;
-  create(context: DeviceContext): DeviceInstance<TState>;
-}
-
-export interface DeviceModelEntry {
-  adapterId: string;
-  version: string;
-  definitionIds: readonly string[];
-  fidelity: "behavioral" | "instruction" | "electrical";
-  requiredPorts: readonly PortRequirement[];
-  supportedOperations: readonly string[];
-  limitations: readonly string[];
-  fixtureIds: readonly string[];
+export interface WriteCodeRequest {
+  targetComponentId: string;
+  files: readonly CodeFile[];
+  language: CodeDocument["language"];
+  dependencies: readonly CodeDependency[];
+  expectedContentSha256: string | null;
+  origin: CodeDocument["origin"];
+  linkToBehaviorPlan?: {
+    planId: string;
+    planSha256: string;
+    projectSha256: string;
+  };
 }
 ```
 
-Rules:
+- `expectedContentSha256: null` means create only if empty.
+- An exact hash allows replacement of the revision the caller actually read.
+- A mismatch returns `source-conflict` without changing files.
+- A destructive replacement tool requires explicit overwrite intent and an
+  exact expected hash.
+- Plan regeneration may offer a new draft but cannot overwrite existing code.
 
-- A catalog definition is executable only when listed in a tested manifest.
-- Aliases are explicit definition IDs, not fuzzy title matches.
-- Model versions are included in result provenance and snapshots.
-- Device state is serializable and deterministic.
-- Unsupported register/command behavior yields a diagnostic, not a guessed result.
-- Bus ownership and addressing are compiled from the graph.
-- Each model ships golden test vectors and at least one end-to-end graph fixture.
+### 10.4 UI badges and copy
 
-Initial device sequence:
+Recommended badges:
 
-1. pushbutton;
-2. single digital LED;
-3. UART console after AVR UART support;
-4. DS3231 register model after AVR I2C support;
-5. SSD1306 command/framebuffer model after AVR I2C support;
-6. PWM servo after AVR timer/PWM support.
+- `AI draft`
+- `Human edited`
+- `Imported`
+- `Linked to preview plan`
+- `Preview link stale`
+- `Not tested in Schematic`
+- `Exported`
 
-### 9.7 Behavioral compatibility adapter
+Persistent Code-panel notice:
 
-Do not delete the current interpreter. Wrap it behind the same runtime result
-contract as `@schematic/behavioral-runtime`.
+> Editable source for external use. Schematic has not compiled, uploaded, run,
+> or physically tested this code. Behavior Preview follows the Behavior Plan.
 
-It should remain the bounded fallback when:
+Remove `Compiled` and `Uploaded` from the in-app lifecycle. External workflows
+may report their own results in a future integration, but that is a separate
+provenance domain and not part of this roadmap.
 
-- no compiler is installed/approved;
-- the target family has no instruction engine;
-- the user explicitly chooses fast behavioral execution.
+## 11. UI and interaction handoff
 
-Its result must preserve `behavioral` fidelity and surface every unsupported API.
-It must not consume a compiled artifact or inherit verification evidence merely
-because another engine exists in the repository.
+### 11.1 Studio top bar
 
-Model the fixed C/WASM harness as a separate `portable-contract` engine. Current
-WebMCP orchestration selects it before the interpreter when the exact recognizer
-matches and fails closed if its verified artifact cannot load; do not silently
-downgrade that selected path to the interpreter.
+- Rename `Run` to `Preview behavior`.
+- Rename `Stop` to `Pause preview` when playback is active.
+- Provide `Reset preview`.
+- Show a persistent `Scripted outcome · no code ran · wiring and hardware not
+  verified` badge while a preview session is present.
+- Show plan errors separately from graph issues.
+- Use the same two-axis warning in preview empty, ready, partial, and completed
+  result states so no attractive visual state becomes an implicit hardware claim.
 
-### 9.8 Runtime orchestrator
+### 11.2 Canvas
 
-The orchestrator selects an engine by an explicit capability intersection:
+- `HardwareNode` consumes `visualStates[componentId]` or the generic projected
+  primitives, not suffix matches over loose `pinStates`.
+- Add one `ComponentVisualOverlay` for generic primitives.
+- Render preview state over static `ComponentArtwork`.
+- Interactive components dispatch registered events through the Behavior
+  System. A button click cannot directly toggle an unrelated LED.
+- Unsupported actions remain visible in Inspector with their exact reason.
+
+### 11.3 Inspector
+
+Generate an `Events and actions` section from profile descriptors:
+
+- event buttons for interactive inputs;
+- typed controls for registered actions;
+- payload ranges/options from descriptors;
+- disabled/unsupported explanations;
+- an option to invoke once for preview;
+- an explicit option to add the invocation as a plan cue or rule action.
+
+One-off invocation uses the same validator and reducer as plan playback. It is
+never an arbitrary component method call.
+
+All event/action controls must be keyboard operable and have visible labels.
+Disabled or unsupported controls must expose their reason and recovery as
+adjacent readable text or through `aria-describedby`; a disabled control or
+hover-only tooltip cannot be the sole explanation. Use one throttled polite live
+region for accepted/rejected action boundaries. Do not announce every animation
+frame or repeat each component's visual summary on every timeline tick.
+
+### 11.4 Timeline and results
+
+The bottom dock should evolve from engine/pin debugging to:
+
+- logical preview time;
+- play/pause/seek/reset;
+- component events;
+- accepted and rejected actions;
+- current accessible component summaries;
+- plan and project hashes;
+- graph warnings;
+- the statement `Source code execution: none`.
+
+### 11.5 Code panel
+
+Move the active right-panel tab from component-local state into
+`useWorkspaceStore` so an agent tool can reliably open Code after writing files.
+
+Replace the compile/preflight button with appropriate authoring actions:
+
+- Copy
+- Download files
+- View revision/link status
+- Revert only through explicit version/history UI if implemented
+
+Do not add a fake “Validate” button that performs the old regex preflight under
+a new name.
+
+## 12. WebMCP and application command design
+
+WebMCP callbacks must be thin adapters over shared application commands.
+
+### 12.1 Recommended tools
+
+`behavior.get_capabilities`
+
+- read-only;
+- returns exact events/actions for project components;
+- separates preview support from graph/simulation metadata;
+- includes payload schema and limitations.
+
+`behavior.plan.write`
+
+- creates or updates a versioned plan with an expected revision;
+- validates schema and project references;
+- does not start playback or write code.
+
+`behavior.preview`
+
+- prepares the selected plan and returns the initial/scenario snapshots;
+- may open a local preview session;
+- always reports `sourceCodeExecution: "none"`;
+- never reads code content as behavior input.
+
+`behavior.invoke`
+
+- validates and applies one registered action or event to the current preview;
+- optional `record` data may be returned to help the caller add a cue;
+- does not mutate the durable plan unless the caller separately writes it.
+
+`behavior.get_state`
+
+- read-only snapshot and diagnostics;
+- contains project/plan/registry hashes and logical time.
+
+`code.write`
+
+- writes normal editable files with exact-hash conflict protection;
+- may link the written revision to a plan hash;
+- selects the target board and opens Code;
+- response always says it was not compiled, uploaded, run, or tested.
+
+`code.read`
+
+- reads exact file content and status dimensions;
+- read-only.
+
+`code.export`
+
+- always creates/returns an `ExternalCodeHandoffV1` manifest alongside the local
+  source download/package;
+- records the exact exported revision hash and manifest format;
+- does not send the source to a third party without separate user authority.
+
+### 12.2 Compatibility aliases
+
+During migration:
+
+- `firmware.write` may adapt to `code.write`;
+- `firmware.read` may adapt to `code.read`;
+- `simulation.run` may return a deprecation result pointing to
+  `behavior.preview`, or remain behind an explicitly labeled legacy flag;
+- `firmware.compile` must be removed from the recommended workflow and later
+  from native registration;
+- `/api/compile` and `/api/simulation/*` are not needed for the target preview
+  path.
+
+Do not silently change an old tool’s meaning while claiming protocol
+compatibility. Version or deprecate it clearly.
+
+### 12.3 Result truth
+
+Every preview result includes machine-readable claims:
+
+```ts
+export interface PreviewClaims {
+  basis: "declared-behavior-plan";
+  componentActionsValidated: boolean;
+  sourceCodeRead: false;
+  sourceCodeExecuted: false;
+  sourceCodeCompiled: false;
+  hardwareUploaded: false;
+  electricalBehaviorSimulated: false;
+  physicalWiringVerified: false;
+  physicalBehaviorVerified: false;
+}
+```
+
+## 13. Persistence and project schema
+
+Durable canonical project data:
+
+- hardware graph;
+- Behavior Plans;
+- editable code documents;
+- plan/code provenance links;
+- graph and plan diagnostics that are safe to recompute;
+- timestamps and schema versions.
+
+Ephemeral/recomputable data:
+
+- prepared plans;
+- registry resolution caches;
+- preview sessions;
+- current logical cursor;
+- projected snapshots;
+- action/event timelines;
+- selection and open panels.
+
+Do not persist active timers or reducer closures. A page reload prepares the
+saved plan again and begins from an initial snapshot unless a future explicit
+bookmark format is added.
+
+Project import/export must:
+
+- validate Behavior Plans as untrusted JSON;
+- bound rule/cue/file counts and text sizes;
+- reject duplicate IDs and dangling component references;
+- preserve unknown future plan versions as unsupported data only when safe;
+- never load executable behavior code from an imported project;
+- mark code/plan links stale if canonical hashes no longer match;
+- ignore or quarantine legacy compiled artifacts.
+
+## 14. Security and resource budgets
+
+### 14.1 Trust boundaries
+
+- Model-authored and imported plans are untrusted data.
+- Profile reducer and visual projector code is trusted checked-in application
+  code.
+- Code documents are untrusted text and are never evaluated by Schematic.
+- Behavior action payloads are parsed against runtime schemas before reducers.
+- Text displayed on virtual screens is rendered as text, never HTML.
+- Source comments derived from intent text must be escaped if an agent chooses
+  to include them.
+- Preview tools cannot navigate, fetch URLs, open sockets, or call external
+  SDKs.
+
+### 14.2 Initial hard limits
+
+Choose explicit constants and test boundary values. Recommended starting limits:
+
+- 100 plans per project;
+- 200 rules per plan;
+- 20 actions per rule;
+- 2,000 cues per plan;
+- 60,000 ms preview duration by default;
+- 10-minute absolute logical duration ceiling;
+- 10,000 total dispatched events per session;
+- 32 event-chain depth;
+- 4,096 characters per display-text payload;
+- 1 MiB per code file and 10 MiB total project import, consistent with current
+  project-file protections;
+- 500 retained timeline items before bounded summarization;
+- bounded project-scoped prepared-plan cache with LRU eviction.
+
+Large values must fail with structured diagnostics before playback.
+
+### 14.3 Performance rules
+
+- Initial Studio load must not import legacy compiler/emulator packages.
+- Profile metadata may load eagerly if small; specialized renderers load lazily.
+- Preview reduction is synchronous and bounded for ordinary actions.
+- Long plan preparation may move to a worker only after measurement; do not add
+  worker complexity speculatively.
+- Seek may use deterministic checkpoints for large cue lists.
+- Canvas components should subscribe only to their own projected state.
+- Timeline rendering must virtualize or summarize large histories.
+- Project switching disposes the current preview session.
+
+## 15. Migration roadmap
+
+This sequence replaces the former compiler/AVR phases. Complete each vertical
+slice before adding broader catalog support.
+
+### Phase 0: lock truth and vocabulary
+
+Deliverables:
+
+- adopt this decision record;
+- update product copy from simulation/run/compile to preview/code/export where
+  the new path is active;
+- document current legacy runtime separately from the target architecture;
+- define a feature flag or compatibility boundary for migration;
+- ensure no new work depends on `browser-toolchain` or `avr-runtime`.
+
+Acceptance:
+
+- every new preview surface says code execution is absent;
+- current production claims remain accurate during transition;
+- dormant compiler/emulator packages do not enter the Site bundle;
+- agents have one canonical handoff document.
+
+### Phase 1: deep Behavior System contracts
+
+Deliverables:
+
+- create `packages/behavior/` (published name `@schematic/behavior`);
+- add plan schemas, canonical serialization/hashing, diagnostics, limits, exact
+  profile registry, preparation, sessions, and snapshots;
+- add a frontend graph adapter without introducing another graph DTO;
+- implement `catalog-only:v1`, `momentary-input:v1`, and
+  `digital-indicator:v1`.
+
+Acceptance:
+
+- button press/release can deterministically drive an LED plan rule;
+- unknown actions fail explicitly;
+- identical inputs produce identical snapshot hashes;
+- direct seek equals sequential playback;
+- package imports no frontend/browser/runtime/compiler code;
+- boundary tests exercise only public interfaces.
+
+### Phase 2: generic visual projection
+
+Deliverables:
+
+- add the minimal shared preview application command and
+  `useBehaviorPreviewStore` state needed by canvas consumers;
+- create `ComponentVisualOverlay`;
+- migrate LED/button state away from loose `pinStates` suffix matching;
+- add `text-display:v1`, `buzzer:v1`, `relay:v1`,
+  `rotary-actuator:v1`, `motor:v1`, and `numeric-sensor:v1`;
+- expose accessible summaries and reduced-motion behavior;
+- add profile support separately from existing simulation labels.
+
+Acceptance:
+
+- LED, button, display, buzzer, relay, servo, motor, and sensor outcomes render
+  from generic primitives;
+- no profile gains support through fuzzy inference;
+- unsupported controls remain visible with a reason;
+- component-specific canvas branches are reduced rather than multiplied;
+- accessible summaries match visual snapshots.
+
+### Phase 3: preview store, timeline, and persistence
+
+Deliverables:
+
+- finish replacing or migrating `useSimulationStore` to the preview-oriented
+  store introduced in Phase 2;
+- persist Behavior Plans and their project/profile revisions;
+- implement playback, pause, seek, reset, input/event dispatch, and staleness;
+- update Behavior Plan import/export validation and migrations;
+- move the right-panel tab into `useWorkspaceStore`.
+
+Acceptance:
+
+- reload preserves plans and code but recreates preview state safely;
+- project switching cannot leak sessions or snapshots;
+- graph/profile changes invalidate prepared plans;
+- no active timer is persisted;
+- preview history is bounded;
+- old projects import without trusting legacy artifacts.
+
+### Phase 4: code-document lifecycle
+
+Deliverables:
+
+- add code-document hashes, origin, revision, preview relation, and export state;
+- adapt `updateFirmware`/existing storage without losing user source;
+- persist code-document provenance and add its project import/export migration;
+- remove compile controls from Monaco’s primary workflow;
+- add copy/download and exact-hash overwrite protection;
+- mark links stale on plan, project, or code changes;
+- keep Monaco source fully editable.
+
+Acceptance:
+
+- agent-written code appears immediately in the selected board’s Code panel;
+- manual edits never change preview output;
+- plan edits never overwrite source;
+- stale links are visible and machine-readable;
+- conflicting writes fail without data loss;
+- every code surface says it was not tested in Schematic.
+
+### Phase 5: shared commands and WebMCP migration
+
+Deliverables:
+
+- add the recommended behavior/code tools as thin adapters;
+- make human UI and WebMCP use the same commands;
+- deprecate simulation/compile tools with structured replacements;
+- update agent instructions and demo flows;
+- add tool cancellation and project-switch isolation.
+
+Acceptance:
+
+- a model can build a graph, write a plan, preview outcomes, write normal code,
+  and open Code without compiler/runtime calls;
+- a direct component action is schema-checked and deterministic;
+- UI and tool results have matching hashes/diagnostics;
+- tools cannot overwrite newer human code;
+- no preview tool reads source as execution input.
+
+### Phase 6: retire legacy default execution
+
+Deliverables:
+
+- make Behavior Preview the only default top-bar outcome workflow;
+- remove legacy runtime-specific UI/store fields after compatibility review;
+- remove native registration of misleading compile/run operations;
+- decide separately whether to delete or archive legacy runtime/WASM tests and
+  packages;
+- keep graph validation and project/code history intact.
+
+Acceptance:
+
+- ordinary users and agents cannot confuse preview with firmware execution;
+- the initial bundle has no legacy engine/compiler path;
+- code export remains intact;
+- release documentation contains no compiler/emulator implementation promise;
+- legacy removal does not reduce graph validation coverage.
+
+### Phase 7: measured profile and SDK handoff expansion
+
+Deliverables:
+
+- add profiles only from observed user demand;
+- provide a profile authoring guide and conformance fixtures;
+- improve code/project export formats for existing SDK workflows;
+- optionally expose user-selected external handoff adapters in a future RFC.
+
+Acceptance:
+
+- each new action has bounds, reducer tests, projection tests, and accessibility;
+- catalog coverage reports explicit supported/unsupported counts;
+- external handoff is user initiated and never implies an in-app build;
+- no third-party SDK is called without separate authorization and security review.
+
+## 16. Test strategy
+
+Follow the architecture rule: test the deep boundary and remove obsolete shallow
+tests after migration rather than stacking duplicate suites forever.
+
+### 16.1 Package boundary tests
+
+- malformed and unknown plan versions fail closed;
+- duplicate rule/cue IDs are rejected;
+- missing, stale, or mismatched component definitions are rejected;
+- unknown profile/event/action IDs return structured unsupported diagnostics;
+- invalid payloads never reach reducers;
+- unsupported items block by default and skip only under explicit policy;
+- exact profile version and registry hashes are pinned;
+- object/map ordering does not change canonical hashes;
+- same-time actions follow explicit order;
+- event cycles stop at the budget with a diagnostic;
+- same plan/input/time produces byte-identical snapshots;
+- direct seek and sequential playback agree;
+- reset is exact;
+- profile reducers are pure under test instrumentation;
+- display text and accessible summaries are escaped/bounded;
+- imported plans cannot inject callbacks or renderer code.
+
+### 16.2 Code lifecycle tests
+
+- create-if-empty succeeds and is idempotent;
+- wrong expected source hash returns conflict;
+- manual editing changes content hash and marks a link stale;
+- plan/project changes mark links stale without changing code;
+- code edits have no effect on preview snapshots;
+- plan edits do not overwrite code;
+- agent/human/import origin transitions are correct;
+- export records the exact exported revision;
+- results always report `inAppVerification: "not-performed"`;
+- project switching isolates documents and links;
+- multi-board statuses do not leak.
+
+### 16.3 UI and accessibility tests
+
+- top bar says `Preview behavior`, not a generic `Run`;
+- persistent preview disclaimer is visible;
+- generic visual primitives render expected state;
+- interactive controls dispatch registered events only;
+- unsupported controls show exact reasons;
+- live regions announce preview changes without excessive chatter;
+- reduced-motion preserves logical results;
+- Code notice remains visible and code is editable;
+- tool-written source selects the board and opens Code;
+- overwrite conflicts preserve the editor contents.
+
+### 16.4 UI/WebMCP parity tests
+
+For shared fixtures, assert:
+
+- identical preparation diagnostics;
+- identical plan/project/registry hashes;
+- identical action outcomes;
+- identical snapshot hashes;
+- identical staleness behavior;
+- identical source-conflict behavior;
+- identical truthful claims.
+
+### 16.5 Tests to retire after migration
+
+After the new path fully replaces the default workflow, review and remove tests
+whose only purpose is the old source interpreter, portable execution selector,
+remote simulation fallback, compile preflight UI, engine-status store, or loose
+pin-state rendering. Do not delete them before the relevant production path is
+actually retired.
+
+Retain graph validation, persistence, import/export, auth isolation, catalog,
+WebMCP registration, and general workspace coverage.
+
+## 17. Release and CI gates
+
+A release containing the new preview path must fail unless:
+
+1. all existing workspace and Site verification passes;
+2. behavior schemas and canonical hashes have golden fixtures;
+3. every enabled catalog profile resolves exactly;
+4. every registered action has payload, reducer, projection, and accessibility
+   tests;
+5. unsupported-action behavior is tested;
+6. determinism and seek/playback parity pass;
+7. code/plan staleness and overwrite protection pass;
+8. UI and WebMCP parity pass;
+9. no preview result claims source execution/compilation/upload;
+10. the initial Site bundle does not import compiler/emulator assets;
+11. product-copy scans reject forbidden success phrases;
+12. import/export round trips preserve plans/code without executable data;
+13. the behavior package has no forbidden frontend/network dependencies.
+
+Suggested forbidden product phrases in the preview path:
+
+- `code executed successfully`;
+- `compiled successfully`;
+- `verified firmware`;
+- `hardware tested`;
+- `uploaded`;
+- `cycle accurate`;
+- `electrically accurate`;
+- `the code caused this output`.
+
+## 18. Risk register
+
+| Risk | Consequence | Required mitigation |
+| --- | --- | --- |
+| Preview is mistaken for code execution | Users trust untested source | Persistent disclaimer plus machine-readable claims |
+| Code and plan drift | Preview and editor tell different stories | Independent hashes and visible stale relation; never overwrite |
+| Model invents an action | False or unsafe visual state | Exact registry/schema validation and explicit unsupported result |
+| Fuzzy catalog inference grants support | Wrong device behavior | Explicit profile binding by exact definition ID/version |
+| Direct tool mutates UI/store | Nondeterminism and bypassed checks | All actions pass through the deep Behavior System |
+| Event rules loop forever | Frozen browser | Event depth/count/duration budgets |
+| Browser frame rate changes results | Non-reproducible preview | Logical time and pure seekable snapshots |
+| Graph warnings disappear behind a pretty preview | False hardware confidence | Separate persistent graph diagnostics |
+| Generated code overwrites human work | Data loss | Expected-hash concurrency and destructive overwrite confirmation |
+| Plan regeneration overwrites edited code | Lost iteration | No automatic regeneration writes |
+| Imported plan executes code | Security failure | Data-only schemas and checked-in reducers only |
+| Hundreds of profiles become unmaintainable | Quality collapse | Shared profiles, exact bindings, measured expansion |
+| Specialized visuals create conditionals everywhere | Brittle canvas | Generic primitives and controlled renderer extensions |
+| Legacy compile/runtime remains prominent | Product direction stays confusing | Deprecation, feature boundary, eventual removal |
+| External SDK handoff leaks source | Privacy/security issue | User-initiated export and separate integration authorization |
+
+## 19. Definition of done
+
+The new direction is complete when:
+
+- a human or agent can describe component behavior as a versioned plan;
+- plans reference exact registered events/actions and fail closed;
+- button, LED, display, buzzer, relay, servo, motor, and sensor profiles work
+  through generic visual primitives;
+- a preview is deterministic, seekable, resettable, and bounded;
+- the canvas clearly labels it as scripted behavior rather than firmware
+  execution;
+- graph diagnostics remain independently visible;
+- agents can write normal multi-file source to the Code panel;
+- people can edit source over many turns without plan-driven overwrites;
+- plan/code links become stale honestly;
+- code can be copied/downloaded/exported for external use;
+- no required workflow compiles, emulates, uploads, or interprets source;
+- UI and WebMCP share one application-command layer;
+- unsupported components/actions produce structured results;
+- persistence/import/export and project switching are safe;
+- all release gates pass from a clean checkout.
+
+This does not mean the generated code is correct or the physical device works.
+Those remain external testing outcomes.
+
+## 20. First-agent implementation checklist
+
+The next implementation agent should:
+
+1. Read this document, `README.md`, `ARCHITECTURE.md`, and
+   `docs/CHATGPT_SITE_RUNBOOK.md`.
+2. Run `pnpm run verify` before changing behavior.
+3. Inventory all current `simulation.run`, `firmware.compile`,
+   `useSimulationStore`, and `pinStates` call sites.
+4. Write an ADR confirming that source code is not preview input.
+5. Create `@schematic/behavior` with its public boundary tests first.
+6. Add exact behavior-profile bindings without changing current simulation
+   support metadata.
+7. Deliver the button-to-LED Behavior Plan vertical slice.
+8. Add generic visual primitives and accessible projection.
+9. Move right-panel tab state into `useWorkspaceStore`.
+10. Add durable Behavior Plans and code provenance with schema migration.
+11. Implement exact-hash code writes before exposing agent code tools.
+12. Add shared application commands before WebMCP callbacks.
+13. Rename UI only as the new path becomes functional; do not break current
+    truth during partial migration.
+14. Expand to display, buzzer, relay, servo, motor, and sensor profiles.
+15. Deprecate legacy tools with explicit structured replacements.
+16. Remove old production paths/tests only after parity and migration gates pass.
+17. Re-run the full release gate and update this handoff with actual landed state.
+
+Do not begin by integrating AVR8js, browser compilers, Arduino CLI, native
+simulators, remote execution, Web Serial upload, or third-party SDK calls.
+
+## 21. File map
+
+### Existing files to understand
+
+| Concern | Current location |
+| --- | --- |
+| Frontend project graph/source | `frontend/src/store/useProjectStore.ts` |
+| Project persistence | `frontend/src/store/projectPersistence.ts`, `packages/project-storage/` |
+| Current preview/runtime state | `frontend/src/store/useSimulationStore.ts` |
+| Current runtime | `frontend/src/simulation/runtime.ts` |
+| Current capability inference | `frontend/src/simulation/modelContract.ts`, `capabilityRegistry.ts` |
+| Current visual component state | `frontend/src/components/canvas/HardwareNode.tsx` |
+| Static artwork | `frontend/src/components/ComponentArtwork.tsx` |
+| Code editor | `frontend/src/components/editor/MonacoWorkspace.tsx` |
+| Studio run controls | `frontend/src/pages/StudioPage.tsx` |
+| Right-panel local tab state | `frontend/src/components/layout/RightPanel.tsx` |
+| Shared workspace UI state | `frontend/src/store/useWorkspaceStore.ts` |
+| WebMCP tools | `frontend/src/webmcp/tools.ts` |
+| Graph validation | `packages/validation/`, `frontend/src/store/useValidationStore.ts` |
+| Import/export validation | `frontend/src/utils/vllxFile.ts` |
+| Dormant paths not to integrate | `packages/browser-toolchain/`, `packages/avr-runtime/` |
+
+### Proposed files
 
 ```text
-requested target
-  intersect compiler target support
-  intersect available artifact provenance
-  intersect MCU runtime support
-  intersect graph/device model support
-  intersect requested features
+packages/behavior/
+  src/contracts.ts
+  src/schemas.ts
+  src/canonicalize.ts
+  src/registry.ts
+  src/prepare.ts
+  src/session.ts
+  src/diagnostics.ts
+  src/profiles/
+    catalog-only.ts
+    momentary-input.ts
+    digital-indicator.ts
+    text-display.ts
+    buzzer.ts
+    relay.ts
+    rotary-actuator.ts
+    motor.ts
+    numeric-sensor.ts
+  src/index.ts
+  src/index.test.ts
+
+frontend/src/behavior/
+  graphAdapter.ts
+  behaviorSystem.ts
+  applicationCommands.ts
+
+frontend/src/store/
+  useBehaviorPreviewStore.ts
+
+frontend/src/components/behavior/
+  BehaviorPreviewControls.tsx
+  BehaviorTimeline.tsx
+  BehaviorPlanSummary.tsx
+  ComponentVisualOverlay.tsx
+
+frontend/src/code/
+  codeDocumentCommands.ts
+  codeDocumentStatus.ts
 ```
 
-If the intersection is empty, return an actionable unsupported matrix. Do not
-silently downgrade from instruction execution to behavioral execution unless the
-request explicitly permits fallback. If fallback is permitted, record both the
-requested and selected engine plus the downgrade reason.
-
-### 9.9 UI, WebMCP, and Site API
-
-All surfaces consume the same command/result contracts:
-
-- React displays capabilities and diagnostics but does not calculate runtime truth.
-- Zustand stores run references, progress, and snapshots but does not become the
-  engine.
-- WebMCP tools invoke the same actions as the UI and return structured fidelity and
-  unsupported data.
-- The Site API validates auth/ownership and delegates to the same orchestrator or
-  an implementation of its remote backend contract.
-- A remote backend never becomes the canonical project store.
-
-Suggested backend boundary:
-
-```ts
-export interface SimulationBackend {
-  capabilities(request: CapabilityRequestWire): Promise<CapabilityResponseWire>;
-  compile(request: CompileRequestWire): Promise<CompileResultWire>;
-  start(request: SimulationRequestWire): Promise<SimulationRunHandleWire>;
-  command(runId: string, command: RuntimeCommandWire): Promise<RuntimeAckWire>;
-  snapshot(runId: string): Promise<SimulationSnapshotWire>;
-  stop(runId: string): Promise<void>;
-}
-```
-
-This is the transport boundary. Decode immediately into domain types inside the
-browser worker or server, and encode on return. Implement
-`BrowserSimulationBackend` first. A future remote backend must pass the same wire
-schema, codec, and semantic contract suites.
-
-## 10. Canonical state and persistence
-
-Canonical durable state:
-
-- project metadata;
-- the shared `HardwareProject` after Phase 0 migration (today the active frontend
-  still uses its local `HardwareGraph` shape);
-- firmware source files;
-- explicit target bindings;
-- user-selected engine/fidelity preferences;
-- lockfile-like compiler/core/library selections where approved.
-
-Derived or cache state:
-
-- compiled graph;
-- compiler artifacts;
-- runtime instances;
-- event streams;
-- snapshots;
-- visualization state;
-- server session IDs.
-
-Project import/export should version canonical data. If artifacts are exported,
-mark them optional caches and verify every hash/provenance field before reuse. Never
-trust imported verification claims; derive structured evidence from checked hashes,
-fixtures, verifier versions, and release/toolchain identity.
-
-Server normalization currently narrows project data for the behavioral API. Replace
-ad hoc double casts with a versioned boundary parser. Legacy normalization belongs
-only at import/API boundaries; internal code should use the canonical type.
-
-## 11. Security, supply-chain, and licensing constraints
-
-Browser compilers and emulators process untrusted source and graphs. Apply:
-
-- dedicated workers and termination on budget breach;
-- no `eval`, `Function`, or shell execution in the browser runtime;
-- immutable asset URLs plus checksums;
-- content-length and streamed-size limits;
-- bounded source, graph, artifact, trace, and snapshot sizes;
-- authenticated ownership checks for every remote run/session;
-- per-owner quotas and TTL eviction rather than one cross-tenant global cap;
-- no secrets in `VITE_*`, project exports, WebMCP payloads, or compiler manifests;
-- CSP-compatible worker and WASM loading;
-- explicit license review and NOTICE/source-offer updates before shipping GCC assets.
-
-Do not treat a Web Worker as a security sandbox. It protects UI responsiveness and
-limits accidental state access; hostile compiler binaries or dependencies still
-require supply-chain controls.
-
-## 12. Performance budgets
-
-Set measurable budgets before adding large assets:
-
-- initial Studio route must not preload compiler/emulator assets;
-- compiler and MCU engine load only after user intent or an agent tool request;
-- compile and runtime workers must never block the main thread;
-- progress heartbeat at least every few seconds during long compile work;
-- hard compile timeout and memory ceiling;
-- bounded event/trace retention with summarized overflow;
-- reusable immutable compiler assets in browser cache;
-- cache invalidation by manifest hash;
-- dispose workers and runtime instances on project switch or stop.
-
-The catalog and WebMCP modules are already substantial. Do not add toolchains to the
-main frontend chunk.
-
-## 13. Migration plan
-
-### Phase 0: contracts and truthful claims
-
-Deliverables:
-
-- create `@schematic/simulation-contracts`;
-- move/deduplicate capability and artifact contracts;
-- introduce result v2 with fidelity, engine, verification, limitations, and
-  unsupported fields;
-- wrap the behavioral interpreter without changing behavior;
-- add an architecture decision record for browser-first execution;
-- update UI/WebMCP vocabulary so preflight, validation, behavior, and compilation
-  cannot be confused.
-
-Acceptance:
-
-- existing behavioral fixtures are byte-for-byte or semantically stable;
-- every completed result hashes the canonical input graph; behavioral results omit
-  `compiledGraphSha256` until a canonical graph compiler exists;
-- browser and Site HTTP results pass one contract suite;
-- no production code claims binary compilation;
-- no package imports frontend/UI code from a lower layer.
-
-### Phase 1: approve and wire the Uno compiler
-
-Deliverables:
-
-- owner-approved AVR compiler/core assets, checksums, licenses, and NOTICE changes;
-- browser toolchain worker connected to `CompilerManager`;
-- exact Arduino Uno FQBN only;
-- compile progress, cancellation, timeout, diagnostics, and cache;
-- artifact provenance persisted as a derived cache;
-- stale artifact rejection.
-
-Acceptance:
-
-- Blink and button/LED sketches compile from user source in a clean browser;
-- identical inputs produce identical artifact hashes under the pinned toolchain;
-- malformed source returns real compiler diagnostics;
-- no toolchain bytes load on landing or ordinary graph editing;
-- forced worker crash/cancel/timeout leaves project source intact.
-
-### Phase 2: Uno CPU plus GPIO vertical slice
-
-Deliverables:
-
-- install/pin AVR8js after dependency review;
-- load only verified Intel HEX;
-- graph compiler for Uno digital pins and simple nets;
-- canonical compiled-graph hashing, required in instruction-engine provenance;
-- deterministic scheduler;
-- button input and LED output device models;
-- runtime worker and orchestrator;
-- UI/WebMCP selection of `instruction` fidelity.
-
-Acceptance:
-
-- a user-authored compiled, explicitly delay-free button-to-LED sketch changes the
-  graph LED state;
-- pressed/released static GPIO results match the exact portable harness fixture;
-- pin mapping is tested for all Uno digital pins;
-- two identical runs yield identical events and snapshot hashes;
-- unsupported peripherals are listed explicitly;
-- cancellation and budgets terminate infinite firmware safely.
-
-Do not use Arduino `delay()` as a Phase 2 acceptance requirement. Real `delay()`
-depends on Timer0/interrupt progress, which belongs to Phase 3 unless minimal Timer0
-support is deliberately moved forward with its own conformance tests.
-
-### Phase 3: clocks, timers, interrupts, UART
-
-Deliverables:
-
-- calibrated AVR cycle-to-simulated-time mapping;
-- timer/interrupt peripheral setup;
-- UART TX/RX queues and console device;
-- delay/timing tests;
-- snapshot/restore of new state.
-
-Acceptance:
-
-- timer and interrupt fixtures match documented AVR8js/reference behavior;
-- UART ordering and baud-limited timing are deterministic;
-- overflow/unsupported configurations produce diagnostics;
-- no claim extends beyond configured peripherals.
-
-### Phase 4: I2C devices
-
-Deliverables:
-
-- AVR I2C/TWI hooks;
-- bus arbitration/address lifecycle appropriate to declared fidelity;
-- register-complete bounded DS3231 model;
-- SSD1306 command parser and framebuffer model;
-- migration of behavioral fixtures to shared device tests.
-
-Acceptance:
-
-- known sketches read/write supported DS3231 registers;
-- known SSD1306 sketch produces a stable framebuffer snapshot;
-- unknown commands/registers are traceable and fail honestly;
-- address collision diagnostics remain consistent with graph validation.
-
-### Phase 5: expand deliberately
-
-Add devices only through explicit manifests and fixtures. Add another MCU family only
-after toolchain, emulator, peripheral, licensing, size, and conformance decisions are
-documented. ESP32 CPU emulation is not a small extension of the AVR work; keep the
-behavioral path until a credible engine exists.
-
-### Phase 6: optional specialized remote engines
-
-Analog/SPICE, RF, thermal, mechanical, Renode, or hardware-in-the-loop backends may
-be remote implementations. They must receive canonical graph/source inputs and
-return the shared result contract. They do not own or mutate canonical project state.
-
-## 14. Test strategy
-
-### Unit tests
-
-- canonical serialization and hashes;
-- graph net construction and stable ordering;
-- scheduler ordering, cancellation, zero-time loops, and budgets;
-- compiler manifest/hash validation;
-- Intel HEX validation and target size;
-- artifact staleness;
-- pin mappings;
-- each device register/command/state transition;
-- capability intersection and fallback policy.
-
-### Golden fixtures
-
-Version fixtures with:
-
-- graph;
-- source;
-- toolchain lock/provenance;
-- expected compile diagnostics/hash when legally reproducible;
-- input event sequence;
-- expected runtime events;
-- expected final snapshot hash;
-- declared engine/fidelity/limitations.
-
-Keep the exact C/WASM button-to-LED fixture as a cross-engine oracle.
-
-### Contract tests
-
-Run identical suites against:
-
-- behavioral backend;
-- browser compiled/AVR backend;
-- Site HTTP backend;
-- any future remote backend.
-
-Contract tests must verify error shapes and unsupported reporting, not just success.
-
-### End-to-end tests
-
-- edit firmware -> compile -> run -> graph state changes;
-- source edit invalidates artifact;
-- target/board change invalidates artifact;
-- project switch disposes run;
-- reload restores source but not a falsely live runtime;
-- WebMCP and UI produce equivalent commands/results;
-- large/infinite input is bounded;
-- offline cached approved toolchain behavior is understood and tested.
-
-### Reference validation
-
-For instruction/peripheral features, compare stable fixtures with at least one of:
-
-- documented AVR8js behavior;
-- a pinned native AVR toolchain/emulator in CI;
-- physical Uno capture for externally visible pin/timing behavior.
-
-Record tolerance and sampling rules. Do not call a model `verified` because it passes
-its own implementation's tests.
-
-## 15. Release and CI gates
-
-The current root release gate is `pnpm run verify` plus `git diff --check`. Expand it
-with simulation-specific jobs:
-
-1. contract/type boundary checks;
-2. compiler manifest and asset checksum verification;
-3. deterministic compile fixture hashes;
-4. runtime golden fixtures;
-5. worker cancellation/budget tests;
-6. Site/browser contract parity;
-7. bundle-route checks proving toolchain chunks are lazy;
-8. dependency/license and NOTICE checks;
-9. clean-checkout build with no network beyond declared package/assets policy.
-
-Do not use `--passWithNoTests` as evidence that a simulation package is verified.
-
-## 16. Risk register
-
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| Compiler asset licensing is incomplete | Cannot legally ship | Owner approval, pinned source, NOTICE/source obligations before integration |
-| Toolchain adds tens of MB | Slow cold start and memory pressure | Lazy worker chunks, immutable cache, strict budgets, Uno-only first |
-| JS/WASM worker hangs | Frozen or exhausted browser | Timeouts, cancellation, instruction/event budgets, worker termination |
-| Artifact/source drift | Wrong firmware executes | Full provenance key and stale rejection |
-| Contract duplication | Browser/API disagree | One shared contracts package and cross-backend tests |
-| Fuzzy model inference overclaims support | Incorrect simulation result | Explicit manifest IDs only |
-| AVR peripheral gaps are marketed as MCU fidelity | Misleading product behavior | Feature-level capability manifest and limitations in every result |
-| Event order differs by browser | Nondeterministic tests/results | Bigint simulated time and stable sequence tie-breaker |
-| Trace/snapshot growth | Memory exhaustion | Retention caps, summaries, streaming, backpressure |
-| Module-global remote sessions evict other users | Cross-tenant availability issue | Owner quotas, TTL, durable coordination if persistence is required |
-| Catalog scale is mistaken for model coverage | User expectation failure | Visible support badges and exact counts from generated manifest |
-| ESP32 scope swallows delivery | Vertical slice never completes | AVR Uno first; behavioral ESP32 remains explicitly bounded |
-
-## 17. Non-goals for the first compiled release
-
-The first release must not claim or attempt:
-
-- all Arduino boards;
-- ESP32 or RP2040 CPU emulation;
-- arbitrary third-party Arduino libraries;
-- analog/SPICE accuracy;
-- RF, thermal, mechanical, or power-integrity simulation;
-- cycle-accurate behavior for unconfigured AVR peripherals;
-- multi-MCU concurrency before the scheduler and arbitration tests exist;
-- remote persistent simulations;
-- source compatibility with all C++ accepted by desktop Arduino IDE releases.
-
-A narrow verified engine is better than a wide unverifiable one.
-
-## 18. Definition of done for “one web codebase”
-
-The objective is met for a target/device set only when:
-
-- the graph, firmware, compiler, engine, and device contracts come from shared
-  TypeScript packages;
-- the target appears in an explicit generated capability manifest;
-- source compiles in a worker using pinned approved assets;
-- the artifact is hash- and provenance-bound to the exact source/target/toolchain;
-- the graph compiler maps board pins and devices without UI heuristics;
-- the MCU and device models run under the deterministic scheduler;
-- UI, WebMCP, browser backend, and Site API use the same result contract;
-- unsupported features are explicit;
-- golden, contract, worker-failure, and end-to-end tests pass;
-- bundle and memory budgets pass;
-- user-facing wording matches the measured fidelity;
-- the release is reproducible from a clean checkout.
-
-This definition is per supported target/device set. It does not require pretending
-that the entire catalog is executable.
-
-## 19. First-agent implementation checklist
-
-An agent beginning implementation should do this in order:
-
-1. Read this document, `ARCHITECTURE.md`, `README.md`, both feasibility documents,
-   and the Site runbook.
-2. Run the existing root verification gate before editing.
-3. Confirm no other task owns overlapping simulation files.
-4. Create an ADR for shared contracts and browser-first engine selection.
-5. Implement Phase 0 without changing behavioral outputs.
-6. Add contract tests that run against browser and Site HTTP paths.
-7. Stop and obtain owner approval before adding compiler assets or new licensing
-   obligations.
-8. Integrate the Uno compiler through the existing worker/toolchain seams.
-9. Integrate AVR8js only after pinning and reviewing it.
-10. Finish the button/LED compiled vertical slice before adding peripherals.
-11. Update capability counts and user-facing limitations from generated data.
-12. Run the full gate, inspect production bundle splits, and update this handoff with
-    any new facts before commit/deployment.
-
-Do not rewrite the application, replace the canonical graph with React Flow state,
-or create a separate simulator-specific project format.
-
-## 20. File map for the next agent
-
-| Area | Primary files |
+File names are recommendations, not a license to create shallow pass-through
+modules. Keep normalization, resolution, validation, reduction, projection, and
+hashing inside the deep behavior package.
+
+## 22. Required product language
+
+Use:
+
+- `Behavior Preview`;
+- `Scripted preview`;
+- `Expected outcome`;
+- `Typed component actions`;
+- `Plan checked`;
+- `Preview partially available`;
+- `Action unavailable in preview`;
+- `Editable code`;
+- `AI draft`;
+- `Human edited`;
+- `Linked to preview plan`;
+- `Preview link stale`;
+- `Not tested in Schematic`;
+- `Copy/download for external testing`.
+
+Avoid:
+
+- `Run firmware`;
+- `Compiled`;
+- `Uploaded`;
+- `Verified code`;
+- `Simulation passed`;
+- `Hardware works`;
+- `Code produced this outcome`;
+- `Exact MCU behavior`;
+- `Electrical simulation`;
+- `SDK tested`.
+
+Recommended results:
+
+- “Behavior Plan checked. This preview shows the requested outcome; no source
+  code ran.”
+- “Editable source added to Code. It has not been compiled, uploaded, run, or
+  physically tested by Schematic.”
+- “This action is unavailable for the selected component profile. No visual
+  state was changed.”
+- “The project changed after this plan was prepared. Prepare the preview again.”
+- “The code or plan changed after they were linked. The preview still follows
+  the Behavior Plan, not the source.”
+
+## 23. Legacy disposition
+
+| Legacy concern | Target disposition |
 | --- | --- |
-| Architecture/release truth | `README.md`, `ARCHITECTURE.md`, `docs/CHATGPT_SITE_RUNBOOK.md` |
-| Behavioral runtime | `frontend/src/simulation/runtime.ts` |
-| Protocol models | `frontend/src/simulation/protocolRuntime.ts` |
-| Capability claims | `frontend/src/simulation/modelContract.ts`, `frontend/src/simulation/capabilityRegistry.ts` |
-| Exact WASM harness | `frontend/src/simulation/portableHarness.ts`, `packages/firmware-harness/` |
-| Dormant toolchain | `packages/browser-toolchain/`, `packages/browser-toolchain/FEASIBILITY.md` |
-| Dormant AVR engine | `packages/avr-runtime/`, `packages/avr-runtime/FEASIBILITY.md` |
-| Canonical graph intent | `packages/hardware-graph/src/types.ts` |
-| Frontend project state | `frontend/src/store/useProjectStore.ts`, `frontend/src/store/projectPersistence.ts` |
-| Runtime orchestration today | `frontend/src/store/useSimulationStore.ts` |
-| WebMCP surface | `frontend/src/webmcp/tools.ts` |
-| Site API | `chatgpt-site/app/api/[[...path]]/route.ts`, `functions/api/_runtime.ts` |
-| Validation | `packages/validation/src/index.ts` |
-| Runtime tests | `frontend/src/__tests__/runtime.test.ts`, capability/protocol/WebMCP tests, `frontend/src/__tests__/api-runtime.test.ts` |
+| Fixed C/WASM button/LED harness | Keep only as historical/regression evidence until default runtime retirement; not target architecture |
+| TypeScript source interpreter | Remove from the default preview path after Behavior Plan parity |
+| Protocol runtime | Preserve only if another explicit product surface still owns it; do not couple it to Behavior Preview |
+| `useSimulationStore` engine/remote fields | Replace with preview status, logical cursor, snapshots, inputs, diagnostics, and timeline |
+| Loose `pinStates` visual lookup | Replace with typed component visual projections |
+| `simulation.run/stop/get_state` | Deprecate in favor of behavior tools |
+| `firmware.compile` and `/api/compile` | Remove from recommended workflow and later registration/routes |
+| `compiledArtifact` project field | Ignore/quarantine on migration; exclude from new canonical schema |
+| `browser-toolchain` and `avr-runtime` | Leave dormant or archive in a separate cleanup decision; do not integrate |
+| Native/remote engines | Out of scope |
+| Web Serial/flashing | Out of scope |
+| External SDK calls | Future separate RFC with explicit user authority |
 
-Use `rg` to confirm imports before declaring a package production-wired. The mere
-presence of code, tests, or a feasibility report is not evidence that the Site
-loads it.
+Do not delete working legacy code impulsively. Introduce the new path, migrate
+callers and data, prove release parity, then remove obsolete paths in focused
+commits.
 
-## 21. Required language in product surfaces
+## 24. Operational release caveat
 
-Preferred terms:
+GitHub push and ChatGPT Site deployment are separate operations. The repository
+currently persists a Sites project ID in `chatgpt-site/.openai/hosting.json`.
+If the selected ChatGPT workspace cannot access that opaque ID, do not replace
+it or create a duplicate Site silently. Switch to the owning workspace or obtain
+explicit authorization for a new binding. See `docs/CHATGPT_SITE_RUNBOOK.md`.
 
-- `graph validation passed`;
-- `compile preflight passed; compiler unavailable`;
-- `behavioral simulation completed`;
-- `instruction simulation completed with AVR Uno engine`;
-- `unsupported by selected engine`;
-- `verified fixture` or `verified artifact`, with the verification basis shown.
+This hosting caveat does not change the Behavior Preview architecture.
 
-Avoid unless demonstrably true:
+## 25. Final recommendation
 
-- `compiled successfully` for preflight;
-- `real-time` for synchronous batch execution;
-- `remote engine` as a fidelity claim;
-- `fully simulated`;
-- `electrically valid`;
-- `cycle accurate`;
-- `supports this part` when only its category was inferred;
-- `saved to cloud` for browser-local persistence.
+Build the smallest complete authoring loop first:
 
-## 22. Known operational release caveat
+```text
+exact graph
+  -> button/LED Behavior Plan
+  -> validated typed actions
+  -> deterministic visual preview
+  -> normal agent-written editable code in Monaco
+  -> copy/download for external hardware or SDK testing
+```
 
-At the time of this handoff, `chatgpt-site/.openai/hosting.json` contains a persisted
-Sites project ID. The canonical public URL still returned HTTP 200 on 2026-08-31,
-but the Sites connector in the active workspace returned `project not found` for
-that persisted ID. A reachable public deployment and permission to publish it are
-separate facts. This binding must be retrieved successfully in the active ChatGPT
-workspace before publishing. The connector error is not permission to silently
-replace the ID or create a duplicate Site. Confirm the owning workspace or
-explicitly authorize a new binding, then push the exact commit used for the build
-before saving/deploying a Site version.
+Then add display, buzzer, relay, servo, motor, and sensor profiles through the
+same registry and generic visual primitives.
 
-GitHub push and ChatGPT Site deployment are separate release actions. A GitHub push
-does not automatically prove that a new Site version is live.
-
-## 23. Final recommendation
-
-Make the system honest, deterministic, and narrow before making it broad. Preserve
-the current behavioral runtime as a fast fallback, centralize all claims and
-contracts, then deliver a complete Uno compiled button/LED path. Once that path is
-reproducible and observable from source edit through UI/WebMCP result, extend the
-scheduler, peripherals, and device registry in measured increments.
-
-That sequence turns the existing architectural groundwork into a single coherent
-TypeScript web simulation platform without discarding the working product or
-claiming fidelity the repository does not yet provide.
+Do not spend the next implementation cycle building a compiler or MCU emulator.
+The product value is helping people and agents design the system, understand the
+intended outcome, and iteratively prepare code for the environment where it will
+actually be built and tested.

@@ -112,7 +112,7 @@ work. They are not the ChatGPT Site production execution path:
 | `backend/app/` Python/FastAPI service                                           | Reference/local   | Optional local API and orchestration service. It is not called by the deployed ChatGPT Site.                                              |
 | `backend/app/engines/renode.py`, `ngspice.py`, `wasmtime.py`                    | Dormant/reference | Adapter sketches and local experiments; no Site subprocess or native engine is wired into production.                                     |
 | `vendor/velxio-simulation/` and `backend/app/velxio_reference/`                 | Reference/lineage | Vendored/reference material for the original hardware-workbench direction; not imported by the canonical Site runtime.                    |
-| `packages/avr-runtime/` and `packages/browser-toolchain/`                       | Dormant/reference | Toolchain/runtime packages retained for future compiler work; they do not make Site firmware compilation available.                       |
+| `packages/avr-runtime/` and `packages/browser-toolchain/`                       | Dormant/reference | Historical toolchain/runtime scaffolds; they are not part of the approved Behavior Preview roadmap and do not make Site compilation available. |
 | `backend/worker.py` (Cloudflare worker entrypoint) and `backend/wrangler.jsonc` | Reference/dormant | A separate worker entrypoint/configuration, not wired to the ChatGPT Site release path.                                                   |
 | QEMU, Verilator, FMI, Gazebo, RF, and full SPICE plans                          | Future/reference  | Architectural targets only. They are not capabilities of the current Site and must not be shown as live demo features.                    |
 
@@ -176,8 +176,9 @@ features.
 
 See [README.md](README.md) for local checks and
 [docs/CHATGPT_SITE_RUNBOOK.md](docs/CHATGPT_SITE_RUNBOOK.md) for publication and
-acceptance gates. The implementation-grade roadmap for consolidating compilation,
-MCU execution, graph buses, and device models into one TypeScript web runtime is
+acceptance gates. The implementation-grade roadmap for replacing the default
+runtime outcome flow with typed Behavior Plans, deterministic visual actions,
+and independently editable/exportable code is
 [docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md](docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md).
 
 ## License

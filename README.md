@@ -66,8 +66,13 @@ full analog/RF simulation, or a native simulator. `firmware.compile` on the
 Site performs target/source checks and returns a preflight/unavailable result;
 it must not be described as producing a firmware binary.
 
-For the complete implementation handoff, current simulation limitations, target
-TypeScript architecture, phased delivery plan, and acceptance gates, see
+The approved product direction does not add an in-browser compiler or MCU
+emulator. The roadmap replaces the default outcome workflow with typed Behavior Plans,
+deterministic component previews, and independently editable source that can be
+exported to real hardware or an existing SDK/toolchain for testing.
+
+For the complete implementation handoff, current/target boundaries, TypeScript
+contracts, phased migration, and acceptance gates, see
 [`docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md`](docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md).
 
 ## Run the ChatGPT Site locally
