@@ -1,171 +1,49 @@
-# Judge demo — Behavior Preview plus editable code
+# Judge demo — genuine WebMCP hardware build
 
-Target: the published ChatGPT Site at
-[schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site)
+Target: the published Schematic studio opened in a compatible browser with
+native WebMCP enabled. The page must be visible in the same tab the agent uses.
 
-This is a three-minute demo of the product's actual boundary. The model uses
-WebMCP to build a graph, declare a Behavior Plan, preview typed outcomes, and
-write ordinary source into Code. The preview is not firmware execution, and
-the source is not compiled or run by Schematic.
+This demo uses only the browser's Available Site Tools / WebMCP panel. Do not
+type commands into the page and do not call an app-owned callback global.
 
-Use the native WebMCP surface in the ChatGPT in-app browser. A local
-`window.__schematicTools` bridge is useful for tests but is not native-host
-evidence.
+## 0:00–0:30 — Prove native discovery
 
-## 0:00–0:20 — Discover the contract
+1. Open the studio and its WebMCP inspector.
+2. Show 12 tools registered through the top-level `document.modelContext`.
+3. Show that the page has no `window.__schematicTools`, no producer polyfill,
+   and no fabricated `navigator.modelContextTesting`.
 
-Ask the agent:
+## 0:30–1:20 — Build Meta Glasses
 
-> Inspect the Schematic WebMCP surface. Report the count, the five behavior
-> tools, the three code tools, and whether any compiler or legacy runtime tools
-> are registered.
+Ask the browser agent:
 
-Expected result:
+> Use `project.apply_blueprint` with `blueprintId` `meta-glasses`. Then inspect
+> the graph and auto-layout it. Do not click or type into the Schematic UI.
 
-- exactly 45 tools;
-- `behavior.get_capabilities`, `behavior.plan.write`, `behavior.preview`,
-  `behavior.invoke`, and `behavior.get_state`;
-- `code.write`, `code.read`, and `code.export`;
-- `firmware.write`/`firmware.read` only as source compatibility aliases; and
-- no `firmware.compile` or `simulation.*` registration.
+The visible canvas should update in the same tab. The activity panel should show
+native calls for `project.apply_blueprint`, `project.get_graph`, and
+`design.auto_layout`.
 
-The UI should show the WebMCP count and the activity panel. Native discovery
-must be confirmed by the host, not inferred from a compatibility shim.
+## 1:20–2:00 — Validate and inspect
 
-## 0:20–0:55 — Build a small graph
+Ask the agent to run `validation.check`, inspect the main controller with
+`component.inspect`, and list its ports with `component.list_ports`. Explain any
+remaining physical bring-up warnings without claiming firmware was executed.
 
-Use tools, not visual clicking, for the agent workflow:
+## 2:00–2:30 — Firmware/export handoff
 
-1. Call `component.search` for an ESP32 or other board, `pushbutton`, and `led`.
-2. Call `component.add` for one board, button, and LED. Keep the returned
-   instance IDs; do not invent IDs.
-3. Call `component.list_ports` for each instance.
-4. Call `connection.connect` with the exact returned endpoint IDs. If the graph
-   rejects a connection, show the structured repair diagnostic instead of
-   claiming that the wire exists.
-5. Call `validation.check` and leave graph diagnostics visible.
+Ask the agent to write an editable firmware draft with `firmware.write`, then
+download the handoff with `code.export`. Source authoring is not compilation or
+physical-device verification.
 
-The graph proves catalog identity, typed topology, and validation results. It
-does not prove electrical safety or that a physical board will work.
+## 2:30–3:00 — Persistence proof
 
-## 0:55–1:35 — Declare and preview the outcome
+1. Copy the stable `/studio/project/{id}` URL.
+2. Refresh and show that the same project returns.
+3. Open that URL in another browser authenticated as the same user and show the
+   server-synced workspace.
+4. In an unsupported browser, show the honest “WebMCP unavailable” state and
+   demonstrate that manual editing still works.
 
-Call `behavior.get_capabilities` and use the exact profile IDs, definition IDs,
-event IDs, and action IDs it returns. For instance IDs represented here as
-`<button-instance>`, `<led-instance>`, and `<definition-id>`, write this
-data-only plan:
-
-```json
-{
-  "schemaVersion": 1,
-  "id": "button-led-preview",
-  "projectId": "<active-project-id>",
-  "name": "Button turns LED on",
-  "intent": "Show the requested button-to-indicator outcome",
-  "revision": 0,
-  "rules": [
-    {
-      "id": "on-press",
-      "enabled": true,
-      "when": {
-        "type": "component.event",
-        "componentId": "<button-instance>",
-        "definitionId": "<button-definition-id>",
-        "eventId": "button.pressed",
-        "payload": { "pressed": true }
-      },
-      "then": [
-        {
-          "componentId": "<led-instance>",
-          "definitionId": "<led-definition-id>",
-          "actionId": "indicator.set",
-          "payload": { "kind": "literal", "value": { "on": true } }
-        }
-      ]
-    }
-  ]
-}
-```
-
-Call `behavior.plan.write`, then `behavior.preview` with the returned plan ID.
-Call `behavior.invoke` with:
-
-```json
-{
-  "componentId": "<button-instance>",
-  "definitionId": "<button-definition-id>",
-  "eventId": "button.pressed",
-  "payload": { "pressed": true }
-}
-```
-
-Call `behavior.get_state` and show the LED indicator projection, timeline, and
-snapshot hash. The expected explanation is:
-
-> Scripted preview: the declared typed action changed the visual LED state. No
-> source code ran; wiring, electrical behavior, and hardware were not verified.
-
-The same pattern can show `display.showText`, `buzzer.start`, `relay.set`,
-`servo.setAngle`, `motor.setSpeed`, or `sensor.setReading` when the selected
-catalog component has that exact profile. An unsupported action must fail
-explicitly without changing visual state.
-
-## 1:35–2:20 — Put normal code in the side panel
-
-Call `code.write` for the selected board. The content can be an ordinary
-multi-file Arduino/C++/Python response; it does not need to be reduced to the
-preview vocabulary:
-
-```json
-{
-  "targetComponentId": "<board-instance>",
-  "language": "arduino",
-  "files": [
-    {
-      "name": "sketch.ino",
-      "content": "void setup() {}\nvoid loop() {}\n"
-    }
-  ],
-  "origin": "ai-generated"
-}
-```
-
-Show the Code panel opening the editable document. Call `code.read` to show
-the revision, `contentSha256`, origin, preview-link status, and
-`inAppVerification: "not-performed"`. Edit the file manually, save it, and
-show that the source hash changes while the Behavior Preview snapshot remains
-plan-driven. A linked plan/code pair becomes `stale` after either side changes;
-the source is never silently overwritten.
-
-## 2:20–2:45 — Export the external handoff
-
-Call `code.export`. Show the JSON manifest containing:
-
-- project and behavior-relevant graph hashes;
-- target component, definition, and optional board FQBN;
-- source file contents and per-file SHA-256 values;
-- source hash, language, and declared dependencies;
-- preview-link provenance and graph diagnostics; and
-- explicit false claims for in-app build, execution, upload, and physical test.
-
-Say:
-
-> This is ready to carry to the user's external SDK, IDE, compiler, or board
-> workflow. Schematic has not built or tested it.
-
-## 2:45–3:00 — Close with limits
-
-Call `project.save` if needed, then summarize:
-
-- Behavior Plan is the source of truth for the visual outcome.
-- Code is an independently editable/exportable artifact.
-- Preview is deterministic typed projection, not source execution or electrical
-  simulation.
-- Plans and code persist in the verified user's local browser room; preview
-  sessions are ephemeral.
-- The product does not compile, upload, flash, or physically test in the Site.
-- `/api/compile` and `/api/simulation/*` are retired and must return 404 on the canonical ChatGPT Site route.
-
-Do not claim that a light turned on on real hardware, that generated firmware
-compiles, or that the graph is electrically correct. Those are external
-testing outcomes.
+Cloudflare deployments require the `SCHEMATIC_PROJECTS` KV binding. Localhost
+uses the same API contract backed by SQLite.

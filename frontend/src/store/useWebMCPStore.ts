@@ -2,8 +2,8 @@ import { create } from "zustand";
 import { getCurrentUserId } from "../auth/session.ts";
 
 export type ToolActivityStatus = "running" | "success" | "error";
-export type WebMCPRegistrationState = "checking" | "native" | "fallback" | "unavailable" | "error";
-export type WebMCPDiscoveryState = "verified" | "unverified" | "polyfill" | "unavailable";
+export type WebMCPRegistrationState = "checking" | "native" | "unavailable" | "error";
+export type WebMCPDiscoveryState = "verified" | "unverified" | "unavailable";
 
 export interface ToolActivity {
   id: string;

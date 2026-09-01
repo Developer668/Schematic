@@ -22,7 +22,7 @@ function LoadingScreen({ message = "Loading your workspace…" }: { message?: st
       <div className="flex max-w-sm flex-col items-center text-center">
         <span className="brand-mark mb-4 h-10 w-10 animate-pulse"><LogoMark /></span>
         <h1 className="text-sm font-semibold">{message}</h1>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">Projects stay on this device and are loaded before editing begins.</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">Your authenticated workspace is loaded before editing begins.</p>
       </div>
     </main>
   );
@@ -157,6 +157,14 @@ export default function App() {
           <Route path="/auth" element={<AuthGate />} />
           <Route
             path="/studio"
+            element={
+              <RequireAuth workspaceReady={workspaceReady}>
+                <StudioPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/studio/project/:projectId"
             element={
               <RequireAuth workspaceReady={workspaceReady}>
                 <StudioPage />

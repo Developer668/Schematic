@@ -60,24 +60,28 @@ describe("WebMCP tools", () => {
     delete (document as any).modelContext;
   });
 
-  it("registers the complete behavior/code tool surface without retired runtime names", () => {
+  it("exposes a focused native studio tool surface", () => {
     const names = getRegisteredToolNames();
     expect(names.length).toBe(WEBMCP_TOOL_COUNT);
-    expect(WEBMCP_TOOL_COUNT).toBe(45);
+    expect(WEBMCP_TOOL_COUNT).toBe(12);
     expect(names).toEqual(expect.arrayContaining([
-      "behavior.get_capabilities", "behavior.plan.write", "behavior.preview", "behavior.invoke",
-      "behavior.get_state", "code.write", "code.read", "code.export",
-      "project.get_graph", "component.search", "connection.connect", "validation.check",
+      "project.get_graph", "project.apply_blueprint", "component.search", "component.inspect",
+      "component.add", "component.list_ports", "connection.connect", "design.auto_layout",
+      "firmware.write", "validation.check", "code.export",
     ]));
     expect(names.some((name) => name.startsWith("simulation."))).toBe(false);
     expect(names).not.toContain("firmware.compile");
   });
 
-  it("project tools work via fallback window.__schematicTools", async () => {
-    const tools: any = (globalThis as any).window?.__schematicTools ?? (globalThis as any).__schematicTools;
-    if (!tools) await registerWebMCPTools();
-    const fallback = (globalThis as any).__schematicTools ?? (globalThis as any).window?.__schematicTools;
-    expect(fallback ?? {}).toBeDefined();
+  it("does not fabricate WebMCP APIs or callback globals", async () => {
+    delete (document as any).modelContext;
+    delete (navigator as any).modelContextTesting;
+    await registerWebMCPTools();
+    expect((document as any).modelContext).toBeUndefined();
+    expect((navigator as any).modelContextTesting).toBeUndefined();
+    expect((window as any).__schematicTools).toBeUndefined();
+    expect((window as any).__schematicWebMCP).toBeUndefined();
+    expect(useWebMCPStore.getState().registration.state).toBe("unavailable");
   });
 
   it("add_component via store works", () => {
@@ -325,8 +329,8 @@ describe("WebMCP tools", () => {
     (document as any).modelContext = { registerTool };
     await registerWebMCPTools();
 
-    expect(WEBMCP_TOOL_COUNT).toBe(45);
-    expect(registerTool).toHaveBeenCalledTimes(45);
+    expect(WEBMCP_TOOL_COUNT).toBe(12);
+    expect(registerTool).toHaveBeenCalledTimes(12);
     expect(registerTool).toHaveBeenCalledTimes(getRegisteredToolNames().length);
     const calls = registerTool.mock.calls as any[];
     expect(calls.map(([definition]) => definition.name)).toEqual(getRegisteredToolNames());
@@ -336,14 +340,9 @@ describe("WebMCP tools", () => {
       expect(options.signal).toBeInstanceOf(AbortSignal);
     }
     const definitions = new Map(calls.map(([definition]) => [definition.name, definition]));
-    const shoppingNames = getRegisteredToolNames().filter((name) => name.startsWith("shopping."));
-    expect(shoppingNames).toHaveLength(10);
-    for (const name of shoppingNames) expect(definitions.get(name).annotations?.untrustedContentHint).toBe(true);
-    expect(definitions.get("shopping.get_state").annotations?.readOnlyHint).toBe(true);
-    expect(definitions.get("shopping.quote").annotations?.readOnlyHint).toBe(true);
-    expect(definitions.get("project.delete").annotations?.destructiveHint).toBe(true);
-    expect(definitions.get("project.clear").annotations?.destructiveHint).toBe(true);
-    expect(definitions.get("behavior.plan.write").inputSchema.required).toEqual(["plan", "expectedRevision"]);
+    expect(definitions.get("project.get_graph").annotations?.readOnlyHint).toBe(true);
+    expect(definitions.get("component.search").annotations?.readOnlyHint).toBe(true);
+    expect(definitions.get("project.apply_blueprint")).toBeDefined();
   });
 
   it("does not expose an inbound postMessage mutation bridge", () => {
@@ -387,7 +386,7 @@ describe("WebMCP tools", () => {
     expect(useProjectStore.getState().project.components).toHaveLength(0);
   });
 
-  it("executes every registered tool, including the typed Behavior Plan and editable code flow", async () => {
+  it("keeps internal domain commands working behind the focused native surface", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ status: "ok" }) }) as Response);
     vi.stubGlobal("fetch", fetchMock);
 
@@ -474,6 +473,6 @@ describe("WebMCP tools", () => {
     await call("project.get_graph");
     await call("component.remove", { instanceId: sensorId, confirmInstanceId: sensorId });
 
-    expect([...invoked].sort()).toEqual([...getRegisteredToolNames()].sort());
+    expect([...getRegisteredToolNames()].every((name) => invoked.has(name))).toBe(true);
   });
 });

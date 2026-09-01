@@ -2,22 +2,23 @@
 
 Status: current default registry (repository checked 2026-08-31)
 
-The single default registry is
+The command catalog is
 [`frontend/src/webmcp/tools.ts`](../../frontend/src/webmcp/tools.ts). It spreads
 the eight definitions in
 [`frontend/src/webmcp/behaviorTools.ts`](../../frontend/src/webmcp/behaviorTools.ts)
-and exports `WEBMCP_TOOL_COUNT = tools.length`. The current registry contains
-exactly **45 tools**:
+and contains 45 reusable domain commands. The focused browser-facing registry
+contains exactly **12 native tools**:
 
 ```text
-10 project + 3 workspace + 5 component + 3 connection + 3 firmware
-+ 5 behavior + 3 code + 2 validation + 10 shopping + 1 design = 45
+project.get_graph, project.list, project.apply_blueprint, component.search,
+component.inspect, component.add, component.list_ports, connection.connect,
+design.auto_layout, firmware.write, validation.check, code.export
 ```
 
-The browser attempts native registration through the host's
-`document.modelContext`/`navigator.modelContext`. The ChatGPT in-app browser
-is the acceptance host. `window.__schematicTools` and local producer shims are
-test/compatibility bridges, not proof of native discovery.
+The browser attempts native registration only through the top-level page's
+`document.modelContext`. Unsupported browsers retain the manual editor and show
+an unavailable status. The app does not fabricate producer/consumer APIs and
+does not expose an internal callback executor on `window`.
 
 There is no `firmware.compile` registration and no `simulation.*` registration.
 The corresponding canonical ChatGPT Site API paths (`/api/compile` and
@@ -44,7 +45,10 @@ Every behavior result states that preview is a typed, scripted visual outcome;
 it is not source execution, compilation, electrical simulation, upload, or a
 physical test. Code results state `inAppVerification: "not-performed"`.
 
-## Inventory
+## Domain command inventory
+
+The inventory below documents the shared command layer. Only the focused list
+above is registered with the browser as WebMCP.
 
 All inputs are JSON objects. Optional properties are marked `?`.
 
@@ -253,7 +257,7 @@ npm --prefix chatgpt-site run verify
 
 The release agent must verify the published Site in the ChatGPT in-app browser:
 
-1. Native discovery reports 45 tools.
+1. Native discovery reports 12 tools.
 2. All eight Behavior/Code tools appear and no `firmware.compile` or
    `simulation.*` name appears.
 3. A button→LED plan previews and responds to `behavior.invoke`.
@@ -262,7 +266,7 @@ The release agent must verify the published Site in the ChatGPT in-app browser:
 6. Auth, local persistence, project switching, and shopping trust boundaries
    behave as documented.
 
-Local tests and compatibility bridges cannot establish publication status or
+Local unit tests cannot establish publication status or
 native host support. The canonical Site is
 [schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site),
 bound to Sites project `appgprj_6a9216cfb16881919e467839d41b29b8`; the release

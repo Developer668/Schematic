@@ -41,7 +41,7 @@ export function corsHeaders(request: Request) {
   return {
     ...(origin ? { "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true" } : {}),
     "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Vary": "Origin",
   };
 }

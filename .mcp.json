@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@1.8.0",
+        "--categoryExperimentalWebmcp",
+        "--browserUrl=http://127.0.0.1:9222",
+        "--no-usage-statistics"
+      ],
+      "directTools": ["navigate_page", "list_webmcp_tools", "execute_webmcp_tool"],
+      "approveTools": ["execute_webmcp_tool"]
+    }
+  }
+}

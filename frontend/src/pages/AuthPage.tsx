@@ -3,6 +3,7 @@ import LogoMark from "../components/LogoMark";
 import { authLoginUrl, getAuthMode } from "../auth/session";
 
 function authLabel() {
+  if (getAuthMode() === "browser") return "browser workspace";
   return getAuthMode() === "chatgpt-sites" ? "ChatGPT" : "workspace";
 }
 
@@ -27,7 +28,9 @@ export default function AuthPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Schematic studio</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">Continue to your workspace</h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Sign-in is handled by your {label} identity. Your projects, WebMCP actions, and preview sessions are scoped to that verified account.
+            {getAuthMode() === "browser"
+              ? "This public demo keeps projects in this browser. Native WebMCP tools are available when the page is opened by a compatible browser agent."
+              : <>Sign-in is handled by your {label} identity. Your projects, WebMCP actions, and preview sessions are scoped to that verified account.</>}
           </p>
           <a
             href={authLoginUrl("/studio")}
@@ -36,7 +39,7 @@ export default function AuthPage() {
             Continue with {label} →
           </a>
           <p className="mt-5 text-center text-xs leading-5 text-muted-foreground">
-            No Schematic password is stored here. Local development uses a private development session; hosted builds use the platform identity boundary.
+            No Schematic password is stored here. Vercel demo builds use a browser-local workspace; ChatGPT Sites and Cloudflare builds use their platform identity boundary.
           </p>
         </div>
       </section>

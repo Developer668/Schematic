@@ -102,4 +102,21 @@ describe("browser auth session lifecycle", () => {
     await expect(auth.getAuthSession()).resolves.toMatchObject({ subject: "new-user", token: "new-token" });
     expect(dispatchEvent).toHaveBeenCalledTimes(1);
   });
+
+  it("uses a stable browser-local workspace for Vercel demo builds", async () => {
+    vi.stubEnv("VITE_AUTH_MODE", "browser");
+    window.localStorage.clear();
+    vi.resetModules();
+    auth = await import("../auth/session.ts");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await auth.getAuthSession();
+    const second = await auth.getAuthSession();
+
+    expect(first).toMatchObject({ authenticated: true, environment: "browser" });
+    expect(second?.subject).toBe(first?.subject);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(auth.authLoginUrl("/studio/project/webmcp-proof")).toBe("/studio/project/webmcp-proof");
+  });
 });

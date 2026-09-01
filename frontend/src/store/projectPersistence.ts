@@ -25,6 +25,7 @@ import {
   getPersistenceGate,
   type PersistenceContextToken,
 } from "./persistenceGate.ts";
+import { loadRemoteWorkspace, saveRemoteWorkspace } from "./remoteProjectPersistence.ts";
 
 const ROOM_ID = "workspace";
 const SAVE_DELAY_MS = 500;
@@ -43,6 +44,8 @@ interface PersistenceContext {
   /** Ignore the synchronous room snapshot published by reloadForCurrentUser. */
   ignoreStoreUntilHydrated: boolean;
   revision: number | null;
+  remoteRevision: number | null;
+  remoteQueue: Promise<void>;
   error: string | null;
 }
 
@@ -67,6 +70,16 @@ function currentWorkspace(): Workspace {
     activeProjectId: state.activeProjectId,
     projects: state.projects,
   };
+}
+
+function queueRemoteSave(context: PersistenceContext, workspace: Workspace = currentWorkspace()): Promise<void> {
+  const snapshot = structuredClone(workspace);
+  context.remoteQueue = context.remoteQueue.then(async () => {
+    if (activeContext !== context) return;
+    const stored = await saveRemoteWorkspace(snapshot, context.remoteRevision);
+    if (activeContext === context && stored) context.remoteRevision = stored.revision;
+  });
+  return context.remoteQueue;
 }
 
 function parsedTimestamp(value: unknown): number | null {
@@ -171,9 +184,12 @@ function scheduleSave(context: PersistenceContext) {
     ...(getCurrentUserId() ? { updatedBy: getCurrentUserId()! } : {}),
   });
   emitPersistenceStatus();
-  void save.then((result) => {
+  void save.then(async (result) => {
     if (activeContext !== context) return;
-    if (result.ok) context.revision = result.value.metadata.revision;
+    if (result.ok) {
+      context.revision = result.value.metadata.revision;
+      await queueRemoteSave(context);
+    }
     else context.error = result.error.message;
     emitPersistenceStatus();
   });
@@ -190,6 +206,7 @@ async function flushContext(context: PersistenceContext): Promise<StoredWorkspac
     }
     emitPersistenceStatus();
   }
+  if (result?.ok) await queueRemoteSave(context);
   return result?.ok ? result.value : null;
 }
 
@@ -227,6 +244,8 @@ function makeContext(userId: string | null, token: PersistenceContextToken, igno
     pendingBeforeHydration: false,
     ignoreStoreUntilHydrated,
     revision: null,
+    remoteRevision: null,
+    remoteQueue: Promise.resolve(),
     error: null,
   };
 }
@@ -270,7 +289,28 @@ async function hydrateForCurrentRoom(isCurrent: () => boolean = () => true): Pro
     emitPersistenceStatus();
     return;
   }
-  if (loaded.value) {
+  const remote = await loadRemoteWorkspace();
+  if (!isCurrent() || generation !== hydrationGeneration || activeContext !== context) return;
+  if (remote) context.remoteRevision = remote.revision;
+
+  const localDurableUpdatedAt = loaded.value
+    ? Math.max(
+      latestProjectUpdate(loaded.value) ?? 0,
+      parsedTimestamp(loaded.value.metadata.updatedAt) ?? 0,
+    )
+    : 0;
+  const remoteUpdatedAt = remote ? parsedTimestamp(remote.updatedAt) ?? 0 : 0;
+
+  if (remote && (!loaded.value || remoteUpdatedAt > localDurableUpdatedAt)) {
+    workspace = remote.workspace;
+    const cached = await context.repository.saveWorkspace(remote.workspace, {
+      ...(loaded.value ? { expectedRevision: loaded.value.metadata.revision } : {}),
+      source: "migration",
+      ...(getCurrentUserId() ? { updatedBy: getCurrentUserId()! } : {}),
+    });
+    if (!isCurrent() || generation !== hydrationGeneration || activeContext !== context) return;
+    if (cached.ok) context.revision = cached.value.metadata.revision;
+  } else if (loaded.value) {
     context.revision = loaded.value.metadata.revision;
     const indexedDbProjectUpdatedAt = latestProjectUpdate(loaded.value);
     const indexedDbMetadataUpdatedAt = parsedTimestamp(loaded.value.metadata.updatedAt);
@@ -316,6 +356,7 @@ async function hydrateForCurrentRoom(isCurrent: () => boolean = () => true): Pro
   completePersistenceRoom(context.token, context.error);
   emitPersistenceStatus();
   if (context.pendingBeforeHydration || !workspace) scheduleSave(context);
+  else if (!remote) void queueRemoteSave(context, workspace);
 }
 
 /** Start the browser-local repository and keep it in sync with the Zustand graph. */
@@ -489,6 +530,7 @@ export function getProjectPersistenceStatus() {
     hydrated,
     pending,
     revision: activeContext?.revision ?? null,
+    remoteRevision: activeContext?.remoteRevision ?? null,
     error,
     state: !hydrated ? "loading" as const : pending ? "saving" as const : error ? "error" as const : "saved" as const,
   };

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth as auth_router, compile as compile_router, components as comp_router, parts as parts_router, simulation as sim_router
+from app.api.routes import auth as auth_router, compile as compile_router, components as comp_router, parts as parts_router, projects as projects_router, simulation as sim_router
 from app.auth.session import validate_auth_config
 from app.core.config import settings
 
@@ -56,6 +56,7 @@ app.include_router(compile_router.router, prefix="/api/compile", tags=["compilat
 app.include_router(sim_router.router, prefix="/api/simulation", tags=["simulation"])
 app.include_router(comp_router.router, prefix="/api/components", tags=["components"])
 app.include_router(parts_router.router, prefix="/api/parts", tags=["parts"])
+app.include_router(projects_router.router, prefix="/api/projects", tags=["projects"])
 
 def _binary(*names: str) -> str:
     return "available" if any(shutil.which(name) for name in names) else "unavailable"

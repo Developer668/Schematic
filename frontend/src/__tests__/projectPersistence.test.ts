@@ -32,6 +32,11 @@ vi.mock("../auth/session.ts", () => ({
   waitForAuth: authGate.waitForAuth,
 }));
 
+vi.mock("../store/remoteProjectPersistence.ts", () => ({
+  loadRemoteWorkspace: vi.fn(async () => null),
+  saveRemoteWorkspace: vi.fn(async () => null),
+}));
+
 import {
   flushProjectPersistence,
   getProjectPersistenceStatus,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export type AuthEnvironment = "local" | "cloudflare-access" | "chatgpt-sites" | "unknown";
+export type AuthEnvironment = "local" | "browser" | "cloudflare-access" | "chatgpt-sites" | "unknown";
 
 export interface AuthSession {
   authenticated: true;
@@ -31,6 +31,28 @@ let sessionEpoch = 0;
 
 function isLocalHost() {
   return typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+}
+
+function isBrowserWorkspaceMode() {
+  return String(import.meta.env.VITE_AUTH_MODE ?? "").trim().toLowerCase() === "browser"
+    || import.meta.env.MODE === "vercel";
+}
+
+function browserWorkspaceSession(): AuthSession | null {
+  if (typeof window === "undefined" || !isBrowserWorkspaceMode()) return null;
+  const storageKey = "schematic-browser-workspace-id";
+  let subject = window.localStorage.getItem(storageKey)?.trim();
+  if (!subject) {
+    subject = `browser-${crypto.randomUUID()}`;
+    window.localStorage.setItem(storageKey, subject);
+  }
+  return {
+    authenticated: true,
+    subject,
+    userId: subject,
+    fullName: "Browser workspace",
+    environment: "browser",
+  };
 }
 
 function configuredBackend() {
@@ -89,7 +111,7 @@ function normalizeSession(value: unknown): AuthSession | null {
     userId: subject,
     ...(data.email ? { email: String(data.email) } : {}),
     ...(data.fullName ? { fullName: String(data.fullName) } : {}),
-    environment: ["local", "cloudflare-access", "chatgpt-sites", "unknown"].includes(environment) ? environment : "unknown",
+    environment: ["local", "browser", "cloudflare-access", "chatgpt-sites", "unknown"].includes(environment) ? environment : "unknown",
     ...(data.token ? { token: String(data.token) } : {}),
     ...(typeof data.expiresIn === "number" ? { expiresIn: data.expiresIn } : {}),
   };
@@ -140,7 +162,10 @@ function startSessionRequest(): SessionRequest {
   const promise = (async () => {
     let resolvedSession: AuthSession | null;
     let resolvedExpiresAt = 0;
-    try {
+    const browserSession = browserWorkspaceSession();
+    if (browserSession) {
+      resolvedSession = browserSession;
+    } else try {
       // Deliberately do not pass a caller AbortSignal here. This request is
       // shared by all consumers and must finish so it can safely update the
       // cache even when its first waiter has gone away.
@@ -210,13 +235,13 @@ export function waitForAuth(): Promise<AuthSession | null> {
 }
 
 export function useAuth() {
-  const [session, setSession] = useState<AuthSession | null>(() => cachedSession ?? localDevelopmentSession());
+  const [session, setSession] = useState<AuthSession | null>(() => cachedSession ?? browserWorkspaceSession() ?? localDevelopmentSession());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
     const sync = () => {
-      if (active) setSession(cachedSession ?? localDevelopmentSession());
+      if (active) setSession(cachedSession ?? browserWorkspaceSession() ?? localDevelopmentSession());
     };
     void getAuthSession().then((value) => {
       if (!active) return;
@@ -239,11 +264,12 @@ export async function getAuthHeaders(force = false, signal?: AbortSignal): Promi
 }
 
 export function getCurrentUserId(): string | null {
-  return cachedSession?.subject ?? localDevelopmentSession()?.subject ?? null;
+  return cachedSession?.subject ?? browserWorkspaceSession()?.subject ?? localDevelopmentSession()?.subject ?? null;
 }
 
 export function getAuthMode(): AuthEnvironment {
   const configured = String(import.meta.env.VITE_AUTH_MODE ?? "").trim().toLowerCase();
+  if (configured === "browser" || import.meta.env.MODE === "vercel") return "browser";
   if (configured === "chatgpt-sites") return "chatgpt-sites";
   if (configured === "cloudflare-access") return "cloudflare-access";
   if (cachedSession?.environment) return cachedSession.environment;
@@ -254,6 +280,7 @@ export function getAuthMode(): AuthEnvironment {
 
 export function authLoginUrl(returnTo = "/studio") {
   const safeReturn = returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/studio";
+  if (getAuthMode() === "browser") return safeReturn;
   if (getAuthMode() === "chatgpt-sites") return `/signin-with-chatgpt?return_to=${encodeURIComponent(safeReturn)}`;
   if (getAuthMode() === "cloudflare-access") return `/cdn-cgi/access/login?redirect_url=${encodeURIComponent(safeReturn)}`;
   return safeReturn;
@@ -261,6 +288,7 @@ export function authLoginUrl(returnTo = "/studio") {
 
 export function authLogoutUrl(returnTo = "/") {
   const safeReturn = returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
+  if (getAuthMode() === "browser") return safeReturn;
   if (getAuthMode() === "chatgpt-sites") return `/signout-with-chatgpt?return_to=${encodeURIComponent(safeReturn)}`;
   if (getAuthMode() === "cloudflare-access") return `/cdn-cgi/access/logout?returnTo=${encodeURIComponent(safeReturn)}`;
   return safeReturn;
@@ -276,6 +304,9 @@ export function signOut() {
   sessionRequest = null;
   authReadyPromise = null;
   cachedSessionExpiresAt = 0;
+  if (isBrowserWorkspaceMode() && typeof window !== "undefined") {
+    window.localStorage.removeItem("schematic-browser-workspace-id");
+  }
   announceSession();
   if (typeof window !== "undefined") window.location.assign(authLogoutUrl());
 }

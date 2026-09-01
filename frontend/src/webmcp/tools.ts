@@ -114,7 +114,7 @@ async function persistProjectMutation(action: string, projectId: string) {
     return {
       failure: toolFailure(
         "PROJECT_PERSISTENCE_FAILED",
-        `${action} was applied to the current tab and fallback snapshot, but the device-local project repository could not be updated: ${status.error}`,
+        `${action} was applied to the current tab, but the local project cache could not be updated: ${status.error}`,
         { projectId, locallyApplied: true, backend: status.backend },
       ),
     };
@@ -122,6 +122,8 @@ async function persistProjectMutation(action: string, projectId: string) {
   return {
     persistence: stored ? "flushed" : status.hydrated ? "already-current" : "local-snapshot-only",
     revision: stored?.metadata.revision ?? status.revision,
+    serverSynced: status.remoteRevision !== null,
+    remoteRevision: status.remoteRevision,
   };
 }
 
@@ -702,20 +704,20 @@ const tools: ToolDef[] = [
   },
   {
     name: "project.save",
-    description: "Persist the active project collection to this browser and broadcast it to same-origin tabs",
+    description: "Persist the active project collection to authenticated storage and the local offline cache",
     inputSchema: { type: "object", properties: {} },
     execute: async () => {
       const saved = useProjectStore.getState().saveProject();
       const stored = await flushProjectPersistence();
       const status = getProjectPersistenceStatus();
       if (status.error) {
-        return toolFailure("PROJECT_SAVE_FAILED", `The device-local project repository could not be saved: ${status.error}`, { projectId: saved.projectId, backend: status.backend });
+        return toolFailure("PROJECT_SAVE_FAILED", `The local project cache could not be saved: ${status.error}`, { projectId: saved.projectId, backend: status.backend });
       }
       const persistence = stored ? "flushed" : status.hydrated ? "already-current" : "local-snapshot-only";
       const message = persistence === "local-snapshot-only"
         ? `Saved a device-local fallback snapshot for ${saved.projectId}; the IndexedDB repository is not active in this context.`
-        : `Saved ${saved.projectId} to the device-local project repository at ${saved.savedAt}.`;
-      return { content: [{ type: "text", text: message }], data: { ...saved, persistence, revision: stored?.metadata.revision ?? status.revision } };
+        : `Saved ${saved.projectId} to the local cache${status.remoteRevision ? " and authenticated server storage" : ""} at ${saved.savedAt}.`;
+      return { content: [{ type: "text", text: message }], data: { ...saved, persistence, revision: stored?.metadata.revision ?? status.revision, serverSynced: status.remoteRevision !== null, remoteRevision: status.remoteRevision } };
     },
   },
   {
@@ -1419,8 +1421,26 @@ const tools: ToolDef[] = [
   },
 ];
 
-/** Single source of truth for the tool count shown in the product UI. */
-export const WEBMCP_TOOL_COUNT = tools.length;
+/** Focused browser-facing surface; other definitions remain internal commands. */
+const EXPOSED_WEBMCP_TOOL_NAMES = new Set([
+  "project.get_graph",
+  "project.list",
+  "project.apply_blueprint",
+  "component.search",
+  "component.inspect",
+  "component.add",
+  "component.list_ports",
+  "connection.connect",
+  "design.auto_layout",
+  "firmware.write",
+  "validation.check",
+  "code.export",
+]);
+
+const exposedTools = tools.filter((tool) => EXPOSED_WEBMCP_TOOL_NAMES.has(tool.name));
+
+/** Single source of truth for the native tool count shown in the product UI. */
+export const WEBMCP_TOOL_COUNT = exposedTools.length;
 
 let controllers: AbortController[] = [];
 let registrationGeneration = 0;
@@ -1483,58 +1503,6 @@ async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> 
   }
 }
 
-/** Chrome WebMCP Bridge reads navigator.modelContextTesting (consumer API). */
-function installModelContextTestingPolyfill() {
-  const nav = navigator as any;
-  if (nav.modelContextTesting?.listTools && nav.modelContextTesting?.executeTool) return;
-  Object.defineProperty(nav, "modelContextTesting", {
-    configurable: true,
-    value: {
-      listTools() {
-        return tools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          inputSchema: JSON.stringify(t.inputSchema ?? { type: "object" }),
-        }));
-      },
-      async executeTool(toolName: string, inputArgsJson: string) {
-        const tool = tools.find((candidate) => candidate.name === toolName);
-        if (!tool) throw new Error(`Unknown WebMCP tool: ${toolName}`);
-        const args = inputArgsJson ? JSON.parse(inputArgsJson) : {};
-        const result = await executeToolWithActivity(tool, args);
-        return typeof result === "string" ? result : JSON.stringify(result ?? null);
-      },
-      registerToolsChangedCallback(callback: () => void) {
-        callback();
-      },
-    },
-  });
-}
-
-function installModelContextProducerPolyfill() {
-  const doc = document as any;
-  const nav = navigator as any;
-  if (typeof doc.modelContext?.registerTool === "function" || typeof nav.modelContext?.registerTool === "function") return;
-  const registry = new Map<string, ToolDef>();
-  const mc = {
-    async registerTool(tool: ToolDef, options?: { signal?: AbortSignal }) {
-      registry.set(tool.name, tool);
-      options?.signal?.addEventListener("abort", () => registry.delete(tool.name));
-    },
-    async getTools() {
-      return [...registry.values()];
-    },
-    async executeTool(tool: string | { name: string }, args: Record<string, unknown> = {}) {
-      const name = typeof tool === "string" ? tool : tool.name;
-      const found = registry.get(name);
-      if (!found) throw new Error(`Unknown WebMCP tool: ${name}`);
-      return executeToolWithActivity(found, args);
-    },
-  };
-  Object.defineProperty(doc, "modelContext", { configurable: true, value: mc });
-  Object.defineProperty(nav, "modelContext", { configurable: true, value: mc });
-}
-
 export async function registerWebMCPTools() {
   // React StrictMode and hot reload can invoke startup twice. Abort the old
   // lease before creating a new one so a native registry never accumulates
@@ -1548,29 +1516,16 @@ export async function registerWebMCPTools() {
   await waitForProjectPersistence();
   if (generation !== registrationGeneration) return;
   useWebMCPStore.getState().setRegistration({ state: "checking", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: undefined });
-  const existingModelContext: any = (document as any).modelContext ?? (navigator as any).modelContext;
-  const hasNativeModelContext = typeof existingModelContext?.registerTool === "function";
-  installModelContextProducerPolyfill();
-  installModelContextTestingPolyfill();
-  const mc: any = (document as any).modelContext ?? (navigator as any).modelContext;
-  // Test/degraded-runtime fallback only. Native agents must use the
-  // document.modelContext registration below; this same-origin object is not a
-  // cross-origin mutation bridge.
-  (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(t, args, executionSignal(context))]));
-  (window as any).__schematicWebMCP = {
-    version: "schematic-webmcp.v1",
-    declaredToolNames: getRegisteredToolNames(),
-    getRegistration: () => useWebMCPStore.getState().registration,
-    listTools: () => getRegisteredToolNames(),
-  };
+  // WebMCP is a browser capability. Never fabricate producer or consumer APIs.
+  const mc: any = (document as any).modelContext;
   if (!mc || typeof mc.registerTool !== "function") {
     useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: "The browser did not expose document.modelContext." });
-    console.warn("[WebMCP] modelContext not available — run in the supported in-app browser, or use the test/degraded-runtime fallback");
+    console.warn("[WebMCP] document.modelContext is unavailable; manual editing remains available.");
     return;
   }
   let registeredCount = 0;
   let registrationErrors = 0;
-  for (const t of tools) {
+  for (const t of exposedTools) {
     if (generation !== registrationGeneration) return;
     const ctrl = new AbortController();
     controllers.push(ctrl);
@@ -1578,7 +1533,7 @@ export async function registerWebMCPTools() {
       await mc.registerTool(
         {
           name: t.name,
-          description: t.description + " — Scoped to your verified account and its local project room. Agent may place hardware on your behalf within your room only.",
+          description: `${t.description} — Operates on the project visible in this authenticated studio tab.`,
           inputSchema: t.inputSchema,
           annotations: t.annotations,
           execute: (args: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(t, args, executionSignal(context)),
@@ -1597,28 +1552,25 @@ export async function registerWebMCPTools() {
     mc.ontoolchange = () => console.log("[WebMCP] toolset changed");
   }
   let discoveredCount = 0;
-  let discovery: "verified" | "unverified" | "polyfill" = hasNativeModelContext ? "unverified" : "polyfill";
+  let discovery: "verified" | "unverified" = "unverified";
   if (typeof mc.getTools === "function") {
     try {
       const discovered = await mc.getTools();
       discoveredCount = Array.isArray(discovered) ? discovered.filter((tool: any) => typeof tool?.name === "string").length : 0;
-      if (hasNativeModelContext && discoveredCount === registeredCount && registeredCount === WEBMCP_TOOL_COUNT) discovery = "verified";
+      if (discoveredCount === registeredCount && registeredCount === WEBMCP_TOOL_COUNT) discovery = "verified";
     } catch (error) {
       console.warn("[WebMCP] native tool discovery check failed:", error);
     }
-  } else if (!hasNativeModelContext) {
-    discoveredCount = registeredCount;
   }
   useWebMCPStore.getState().setRegistration({
-    state: registrationErrors > 0 ? "error" : hasNativeModelContext ? "native" : "fallback",
+    state: registrationErrors > 0 ? "error" : "native",
     registeredCount,
     declaredCount: WEBMCP_TOOL_COUNT,
     discoveredCount,
     discovery,
     ...(registrationErrors > 0 ? { error: `${registrationErrors} tool registration${registrationErrors === 1 ? "" : "s"} failed.` } : { error: undefined }),
   });
-  (window as any).__schematicWebMCP.getRegistration = () => useWebMCPStore.getState().registration;
-  console.log(`[WebMCP] ready — ${WEBMCP_TOOL_COUNT} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
+  console.log(`[WebMCP] ready — ${registeredCount}/${WEBMCP_TOOL_COUNT} native studio tools registered`);
 }
 
 export function unregisterWebMCPTools() {
@@ -1628,10 +1580,10 @@ export function unregisterWebMCPTools() {
 }
 
 export function getRegisteredToolNames() {
-  return tools.map((t) => t.name);
+  return exposedTools.map((t) => t.name);
 }
 
-/** Invoke the exact same callback registered with document.modelContext. */
+/** @internal Deterministic domain-command adapter for unit tests; never exposed on window. */
 export async function invokeWebMCPTool(name: string, args: Record<string, any> = {}, signal?: AbortSignal) {
   const tool = tools.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`Unknown WebMCP tool: ${name}`);

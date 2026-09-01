@@ -45,13 +45,11 @@ export default function SettingsPage() {
   const apiBoundaryLabel = apiBaseUrl.startsWith("/") ? "same-origin API" : "configured API";
   const webmcpStatus = webmcpRegistration.state === "native"
     ? webmcpRegistration.discovery === "verified" ? "Native WebMCP verified" : "Native WebMCP registered · discovery unverified"
-    : webmcpRegistration.state === "fallback"
-      ? "Local compatibility bridge"
-      : webmcpRegistration.state === "error"
-        ? "Registration incomplete"
-        : webmcpRegistration.state === "unavailable"
-          ? "WebMCP unavailable"
-          : "Checking WebMCP…";
+    : webmcpRegistration.state === "error"
+      ? "Registration incomplete"
+      : webmcpRegistration.state === "unavailable"
+        ? "WebMCP unavailable · manual editor ready"
+        : "Checking WebMCP…";
   const webmcpCount = webmcpRegistration.state === "checking" ? `${toolCount} declared` : `${webmcpRegistration.registeredCount}/${webmcpRegistration.declaredCount || toolCount} registered${webmcpRegistration.discoveredCount ? ` · ${webmcpRegistration.discoveredCount} discovered` : ""}`;
 
   const checkApi = useCallback(async () => {
@@ -153,7 +151,7 @@ export default function SettingsPage() {
           <div className="flex-1">
             <h1 className="text-lg font-bold tracking-tight">Workspace Settings</h1>
             <p className="text-sm text-muted-foreground mt-1 leading-snug">
-              Tune appearance, canvas, and connectivity. Projects are saved in browser <code className="bg-muted px-1 rounded">IndexedDB</code> with localStorage compatibility migration; the app keeps editing, validation, and source export local even when its optional API boundary is offline.
+              Tune appearance, canvas, and connectivity. Projects use authenticated server storage with an <code className="bg-muted px-1 rounded">IndexedDB</code> offline cache; editing, validation, and source export remain available if the API boundary is temporarily offline.
             </p>
             <div className="flex flex-wrap gap-2 mt-3">
               <span className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1.5 ${apiStatus === "ok" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" : apiStatus === "offline" ? "bg-amber-500/10 text-amber-600 border-amber-500/20" : "bg-muted text-muted-foreground border-border"}`}>
@@ -292,7 +290,7 @@ export default function SettingsPage() {
                     <div className="text-xs font-medium flex items-center gap-1"><Shield size={12} /> WebMCP</div>
                     <div className="text-[11px] text-muted-foreground">{webmcpCount} tools · {webmcpStatus}</div>
                   </div>
-                  <span className={`text-[11px] px-2 py-1 rounded-full ${webmcpRegistration.state === "native" && webmcpRegistration.discovery === "verified" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : webmcpRegistration.state === "error" || webmcpRegistration.state === "unavailable" || webmcpRegistration.state === "native" ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-primary text-primary-foreground"}`}>{webmcpRegistration.state === "native" && webmcpRegistration.discovery === "verified" ? "Connected" : webmcpRegistration.state === "native" ? "Review" : webmcpRegistration.state === "fallback" ? "Fallback" : webmcpRegistration.state === "checking" ? "Checking" : "Review"}</span>
+                  <span className={`text-[11px] px-2 py-1 rounded-full ${webmcpRegistration.state === "native" && webmcpRegistration.discovery === "verified" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : webmcpRegistration.state === "error" || webmcpRegistration.state === "unavailable" || webmcpRegistration.state === "native" ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-primary text-primary-foreground"}`}>{webmcpRegistration.state === "native" && webmcpRegistration.discovery === "verified" ? "Connected" : webmcpRegistration.state === "native" ? "Review" : webmcpRegistration.state === "checking" ? "Checking" : "Review"}</span>
                 </div>
               </div>
 
@@ -389,7 +387,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="text-center text-[11px] text-muted-foreground py-4">
-          Projects are stored on this device and scoped to your signed-in workspace.
+          Projects are scoped to your signed-in workspace, synced through the API, and cached on this device.
         </div>
         </div>
       </main>

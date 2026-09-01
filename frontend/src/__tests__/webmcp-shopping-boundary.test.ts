@@ -106,17 +106,14 @@ describe("WebMCP shopping trust boundary", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps the registry at exactly 45 tools and preserves instance-port wiring", async () => {
-    expect(WEBMCP_TOOL_COUNT).toBe(45);
-    expect(getRegisteredToolNames()).toHaveLength(45);
+  it("keeps the focused registry and preserves instance-port wiring", async () => {
+    expect(WEBMCP_TOOL_COUNT).toBe(12);
+    expect(getRegisteredToolNames()).toHaveLength(12);
     expect(getRegisteredToolNames()).toEqual(expect.arrayContaining([
-      "behavior.get_capabilities",
-      "behavior.plan.write",
-      "behavior.preview",
-      "behavior.invoke",
-      "behavior.get_state",
-      "code.write",
-      "code.read",
+      "project.apply_blueprint",
+      "component.add",
+      "component.list_ports",
+      "connection.connect",
       "code.export",
     ]));
     expect(getRegisteredToolNames().some((name) => name.startsWith("simulation."))).toBe(false);

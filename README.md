@@ -178,10 +178,21 @@ canonical ChatGPT Site route.
 
 ## Persistence, limits, and migration
 
-Projects are stored locally in IndexedDB with localStorage compatibility and
-verified-user room keying. This is device-local persistence, not cloud backup or
-cross-device synchronization. Preview sessions, timers, reducers, and active
+Projects are cached locally in IndexedDB and synchronized through the
+authenticated `/api/projects/workspace` boundary. Local development persists to
+SQLite; Cloudflare Pages persists to the `SCHEMATIC_PROJECTS` KV binding. Each
+active project also has a stable `/studio/project/{id}` URL, so authenticated
+browsers resolve the same project. Preview sessions, timers, reducers, and active
 snapshots are ephemeral; plans and code documents are durable JSON data.
+
+For Cloudflare Pages, create a KV namespace and bind it to the Pages project as
+`SCHEMATIC_PROJECTS` before deployment. If the binding or API is unavailable,
+the manual editor continues with its local cache and reports that sync is pending.
+
+Run the complete local stack with `pnpm dev:full`; the studio is served at
+`http://localhost:3000` and the authenticated development API at port `8001`.
+For a native browser acceptance test, follow
+[`docs/LOCAL_WEBMCP_TEST.md`](docs/LOCAL_WEBMCP_TEST.md).
 
 Current safety limits include 100 plans/project, 200 rules/plan, 20 actions/rule,
 2,000 cues/plan, 100 code documents/project, 128 files/document, 1 MiB/file,

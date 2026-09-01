@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback, useDeferredValue } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import HardwareCanvas from "../components/canvas/HardwareCanvas.tsx";
 import RightPanel from "../components/layout/RightPanel.tsx";
 import BottomDock from "../components/layout/BottomDock.tsx";
@@ -47,7 +47,7 @@ function UserRoomBadge() {
   }
   return (
     <div className="flex items-center gap-1.5">
-      <span className="hidden items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300 sm:inline-flex" title={`Room ${roomId} — stored on your device, isolated per user. WebMCP mutates only this room.`}>
+      <span className="hidden items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300 sm:inline-flex" title={`Room ${roomId} — cached locally and synced to authenticated storage. WebMCP mutates only this room.`}>
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
         Room {shortRoom} • {session.email || "local"}
       </span>
@@ -59,6 +59,8 @@ function UserRoomBadge() {
 }
 
 export default function StudioPage() {
+  const navigate = useNavigate();
+  const { projectId: routeProjectId } = useParams();
   const { results, search, setQuery: setCatalogQuery, setCategory, category } = useComponentCatalogStore();
   const { addComponent, project, projects, activeProjectId, clear, createProject, duplicateProject, switchProject, deleteProject, renameProject } = useProjectStore();
   const previewStatus = useBehaviorPreviewStore((state) => state.status);
@@ -77,6 +79,16 @@ export default function StudioPage() {
   const setBottomCollapsed = useWorkspaceStore((state) => state.setBottomCollapsed);
   const setBottomHeight = useWorkspaceStore((state) => state.setBottomHeight);
   const setRightPanelWidth = useWorkspaceStore((state) => state.setRightPanelWidth);
+
+  useEffect(() => {
+    if (routeProjectId && routeProjectId !== activeProjectId && projects.some((candidate) => candidate.id === routeProjectId)) {
+      switchProject(routeProjectId);
+      return;
+    }
+    if (activeProjectId && routeProjectId !== activeProjectId) {
+      navigate(`/studio/project/${encodeURIComponent(activeProjectId)}`, { replace: true });
+    }
+  }, [activeProjectId, navigate, projects, routeProjectId, switchProject]);
 
   const [query, setQuery] = useState("");
   const [activeCat, setActiveCat] = useState<string | null>(category);
@@ -351,10 +363,10 @@ export default function StudioPage() {
               className={`status-pill hidden sm:inline-flex ${persistenceStatus.state === "error" ? "!border-red-500/35 !bg-red-500/10 !text-red-600 dark:!text-red-300" : ""}`}
               role="status"
               aria-live="polite"
-              title={persistenceStatus.error ?? "Projects are stored on this device"}
+              title={persistenceStatus.error ?? (persistenceStatus.remoteRevision ? "Saved locally and synced to authenticated storage" : "Saved locally; authenticated sync is pending or unavailable")}
             >
               {persistenceStatus.state === "error" ? <AlertTriangle size={10} /> : <Save size={10} />}
-              {persistenceStatus.state === "loading" ? "Loading…" : persistenceStatus.state === "saving" ? "Saving…" : persistenceStatus.state === "error" ? "Save failed" : "Saved on this device"}
+              {persistenceStatus.state === "loading" ? "Loading…" : persistenceStatus.state === "saving" ? "Saving…" : persistenceStatus.state === "error" ? "Save failed" : persistenceStatus.remoteRevision ? "Saved + synced" : "Saved locally"}
             </span>
             {showProjectMenu && (
               <div role="menu" aria-label="Projects" className="absolute left-0 top-full z-[70] mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-border bg-card shadow-xl">
@@ -700,7 +712,7 @@ export default function StudioPage() {
       <footer className="flex h-5 items-center gap-2 border-t border-border bg-muted/40 px-2.5 text-[10px] font-mono tabular-nums text-muted-foreground shrink-0">
         <span>{project.components.length}c · {project.connections.length}w</span>
         <span className="hidden sm:inline">· {toolNames.length} tools</span>
-        <span className="hidden md:inline">· room {getCurrentUserId()?.slice(0, 8) || "global"} • device-local</span>
+        <span className="hidden md:inline">· room {getCurrentUserId()?.slice(0, 8) || "global"} • {persistenceStatus.remoteRevision ? "server-synced" : "local cache"}</span>
         <span className="hidden lg:inline">· WebMCP scoped to your room • <span className="text-emerald-600 dark:text-emerald-400">agent can place on your behalf</span></span>
         <span className="ml-auto">{running ? "previewing" : previewStatus}</span>
       </footer>

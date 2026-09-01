@@ -458,18 +458,14 @@ describe("project migration and WebMCP surface", () => {
     expect(normalizeProject(raw).codeDocuments).toHaveLength(MAX_CODE_DOCUMENTS_PER_PROJECT);
   });
 
-  it("keeps registration and direct command/tool results in parity", async () => {
+  it("keeps the focused registration backed by the same domain commands", async () => {
     const names = getRegisteredToolNames();
     expect(WEBMCP_TOOL_COUNT).toBe(names.length);
     expect(names).toEqual(expect.arrayContaining([
-      "behavior.get_capabilities",
-      "behavior.plan.write",
-      "behavior.preview",
-      "behavior.invoke",
-      "behavior.get_state",
-      "code.write",
-      "code.read",
       "code.export",
+      "project.apply_blueprint",
+      "firmware.write",
+      "validation.check",
     ]));
     expect(names.some((name) => name.startsWith("simulation."))).toBe(false);
     expect(names).not.toContain("firmware.compile");

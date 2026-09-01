@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
 import { useWebMCPStore } from "../../store/useWebMCPStore.ts";
@@ -69,79 +69,25 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
   );
 }
 
-// ---- WebMCP CLI ----
+// Read-only inspector. Native calls come from the browser agent through
+// document.modelContext; this panel intentionally has no internal executor.
 function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
-  const [history, setHistory] = useState<{ cmd: string; out: string; isError?: boolean }[]>([
-    { cmd: "help", out: "WebMCP CLI — type a tool name and JSON args. Examples:\n  component.search {\"query\":\"esp32\"}\n  component.add {\"componentId\":\"esp32-devkit-v1\"}\n  component.list_ports {\"componentId\":\"esp32-devkit-v1-1\"}\n  connection.connect {\"source\":{\"componentId\":\"board-1\",\"portId\":\"GPIO18\"},\"target\":{\"componentId\":\"button-1\",\"portId\":\"A\"}}\n  shopping.search {\"query\":\"ESP32-S3\"}\n  project.get_graph\n  validation.check\n\nTools: " + toolNames.join(", ") },
-  ]);
-  const [input, setInput] = useState("");
-  const [filter, setFilter] = useState("");
   const activities = useWebMCPStore((state) => state.activities);
+  const registration = useWebMCPStore((state) => state.registration);
   const clearActivities = useWebMCPStore((state) => state.clearActivities);
   const endRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history, activities]);
-
-  const filteredTools = toolNames.filter((t) => !filter || t.toLowerCase().includes(filter.toLowerCase()));
-
-  const run = async () => {
-    const raw = input.trim();
-    if (!raw) return;
-    if (raw === "clear") { setHistory([]); clearActivities(); setInput(""); return; }
-    if (raw === "help" || raw === "list" || raw === "tools") {
-      setHistory((h) => [...h, { cmd: raw, out: toolNames.join("\n") }]);
-      setInput("");
-      return;
-    }
-    // parse: first token is tool name, rest is JSON
-    const firstSpace = raw.indexOf(" ");
-    let name = raw;
-    let args: any = {};
-    if (firstSpace !== -1) {
-      name = raw.slice(0, firstSpace).trim();
-      const rest = raw.slice(firstSpace + 1).trim();
-      if (rest) {
-        try { args = JSON.parse(rest); }
-        catch {
-          // try to parse as key=value pairs? fallback to single arg
-          setHistory((h) => [...h, { cmd: raw, out: `Invalid JSON args: ${rest}\nUse JSON object, e.g. {"query":"esp32"}`, isError: true }]);
-          setInput("");
-          return;
-        }
-      }
-    }
-    // allow short alias without dot? keep as is
-    const tools: any = (window as any).__schematicTools;
-    const fn = tools?.[name];
-    if (!fn) {
-      const suggestion = toolNames.find((t) => t.includes(name) || name.includes(t.split(".").pop()!));
-      setHistory((h) => [...h, { cmd: raw, out: `Unknown tool "${name}"${suggestion ? `. Did you mean "${suggestion}"?` : ""}\nType "help" to list tools.`, isError: true }]);
-      setInput("");
-      return;
-    }
-    try {
-      const result = await fn(args);
-      const output = result?.content?.filter?.((item: any) => item.type === "text").map?.((item: any) => item.text).join("\n") || (result?.data ? JSON.stringify(result.data, null, 2) : "Tool completed");
-      setHistory((h) => [...h, { cmd: raw, out: output, isError: Boolean(result?.isError) }]);
-    } catch (error) {
-      setHistory((h) => [...h, { cmd: raw, out: `Tool failed: ${(error as Error).message}`, isError: true }]);
-    }
-    setInput("");
-  };
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [activities]);
 
   return (
     <div className="h-full flex flex-col font-mono text-xs">
         <div className="flex-1 overflow-auto p-2 space-y-1.5 bg-[#0a0a0a] text-zinc-100" role="log" aria-live="polite" tabIndex={0} aria-label="WebMCP activity log">
-        {history.map((h, i) => (
-          <div key={i} className="space-y-1">
-            <div className="flex gap-2">
-              <span className="text-emerald-400 shrink-0">$</span>
-              <span className="text-zinc-100 break-all">{h.cmd}</span>
-            </div>
-            <pre className={`ml-4 whitespace-pre-wrap break-words text-[11px] leading-relaxed ${h.isError ? "text-red-300" : "text-zinc-300"}`}>{h.out}</pre>
-          </div>
-        ))}
+        <div className="rounded border border-zinc-800 p-2 text-zinc-300">
+          <div className="text-zinc-100">Native WebMCP: {registration.state}</div>
+          <div className="mt-1 text-[11px] text-zinc-400">{registration.registeredCount}/{registration.declaredCount} tools registered · discovery {registration.discovery}</div>
+          {registration.error && <div className="mt-1 text-amber-300">{registration.error} Manual editing remains available.</div>}
+          <div className="mt-2 text-[11px] text-zinc-500">Invoke through the browser's Available Site Tools or Chrome DevTools WebMCP panel. This page has no shortcut executor.</div>
+          <div className="mt-2 break-words text-[10px] text-zinc-500">{toolNames.join(" · ")}</div>
+        </div>
         {[...activities].reverse().map((activity) => (
           <div key={activity.id} className="space-y-1.5 border-t border-zinc-800 pt-1.5">
             <div className="flex items-center gap-2">
@@ -157,41 +103,12 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
         <div ref={endRef} />
       </div>
 
-      {/* suggestions */}
-      {filter && filteredTools.length > 0 && filteredTools.length < toolNames.length && (
-        <div className="border-t border-zinc-800 bg-zinc-900 px-2 py-1.5 flex flex-wrap gap-1 max-h-20 overflow-auto">
-          {filteredTools.slice(0, 8).map((t) => (
-            <button type="button" key={t} onClick={() => { setInput(t + " "); setFilter(""); inputRef.current?.focus(); }} className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300">
-              {t}
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="border-t border-zinc-800 bg-zinc-900 flex items-center gap-2 px-2 py-1.5">
-        <span className="text-emerald-400 text-xs">$</span>
-        <input
-          ref={inputRef}
-          value={input}
-          aria-label="WebMCP command"
-          onChange={(e) => { setInput(e.target.value); const tok = e.target.value.split(" ")[0]; setFilter(tok); }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void run();
-            if (e.key === "Tab") {
-              e.preventDefault();
-              const match = filteredTools[0];
-              if (match) { setInput(match + " "); setFilter(""); }
-            }
-            if (e.key === "Escape") setFilter("");
-          }}
-          placeholder='Type tool — e.g. component.search {"query":"esp32"} — Tab to autocomplete, Enter to run'
-          className="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
-        />
-        <button type="button" onClick={() => void run()} className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200">Run</button>
-        <button type="button" onClick={() => { setHistory([]); clearActivities(); }} className="text-xs px-2 py-1 rounded border border-zinc-700 hover:bg-zinc-800 text-zinc-400" aria-label="Clear WebMCP activity" title="Clear WebMCP activity"><Trash2 size={11} /></button>
+        <span className="text-zinc-400">Activity is produced only by browser-native tool calls.</span>
+        <button type="button" onClick={clearActivities} className="ml-auto text-xs px-2 py-1 rounded border border-zinc-700 hover:bg-zinc-800 text-zinc-400" aria-label="Clear WebMCP activity" title="Clear WebMCP activity"><Trash2 size={11} /></button>
       </div>
       <div className="px-2 py-1 border-t border-zinc-800 bg-zinc-900 text-[11px] text-zinc-400 flex items-center gap-3">
-        <span>Enter: run · Tab: autocomplete · clear: reset</span>
+        <span>Top-level document.modelContext registration</span>
         <span className="ml-auto">{toolNames.length} tools</span>
       </div>
     </div>
