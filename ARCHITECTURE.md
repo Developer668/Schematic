@@ -1,9 +1,9 @@
 # Schematic architecture — Behavior Preview release path
 
 Status: current implementation handoff (repository checked 2026-09-01)
-Release-candidate repository gates passed; the formal Sol turn hit its usage
-limit before sign-off, so live-host checks must still be recorded against the
-exact deployed revision.
+Release-candidate repository gates passed and the current-account Site revision
+is published; the formal Sol turn hit its usage limit before sign-off, so live
+native-WebMCP/browser acceptance remains a separately recorded check.
 
 Schematic's canonical release is the authenticated ChatGPT Site:
 
@@ -20,9 +20,9 @@ Canonical Site URL:
 
 Sites project ID: `appgprj_6a9216cfb16881919e467839d41b29b8`
 
-The repository records that binding. A release agent must tie publication to a
-pushed commit and record the returned Site version/deployment status; this
-document does not infer publication from a local build.
+The repository records that binding. Publication is tied to the pushed release
+commit and Site version in `docs/CHATGPT_SITE_PROGRESS.md`; a local build alone
+is never treated as publication or hardware verification.
 
 ## The source of truth
 

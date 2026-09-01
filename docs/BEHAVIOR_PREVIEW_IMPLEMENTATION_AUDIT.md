@@ -135,14 +135,15 @@ also require the final clean-checkout test and browser evidence.
 | Accessibility and responsive UX | 4/5 | Semantic labels, live status text, disabled pre-preview controls, expanded hit areas, and responsive panels are covered in the UI implementation; device/browser inspection remains a live acceptance item. |
 | Performance and release hygiene | 4/5 | Monaco is lazy-loaded and Site verification/build passed; the shared frontend bundle remains large (Monaco worker assets and a ~1.1 MB main chunk), so further measured splitting is a follow-up. |
 
-Final release-candidate verdict: **repository gates passed; publish and live
-host acceptance required before declaring the Site revision live**. The
+Final release-candidate verdict: **repository gates passed and the current
+account Site revision was published successfully**. Live HTTP smoke checks
+returned 200 for `/`, `/api/health`, `/api/docs`, and `/capabilities`, and 404
+for `/api/compile` and `/api/simulation/state`. Native WebMCP discovery and
+interactive button→LED acceptance still require an in-app browser session;
+the deployment itself does not claim those checks or any hardware result. The
 declared scope remains compiler-free: preview is a typed visual outcome, and
 Code is ordinary editable source for a later external SDK, compiler, IDE, or
-hardware workflow.
-The declared scope remains compiler-free: preview is a typed visual outcome,
-and Code is ordinary editable source for a later external SDK, compiler, IDE,
-or hardware workflow. Unsupported catalog parts must remain explicit; coverage
+hardware workflow. Unsupported catalog parts remain explicit; coverage
 expansion requires exact profiles and conformance fixtures.
 
 ## Evidence record to complete on the release commit
@@ -162,6 +163,8 @@ The release candidate was checked on 2026-09-01 with `pnpm run verify`:
 workspace typecheck/lint passed; frontend reported 173 tests across 31 files;
 the Behavior package reported 28 tests; all workspace builds passed; Site
 lint/typecheck/tests/build and the static compiler-free asset scan passed; and
-`git diff --check` passed. These are repository observations, not proof that
-source compiles or that physical hardware works. Record the exact Git commit,
-Site version, deployment status, and live browser results after publication.
+`git diff --check` passed. The source was pushed at commit
+`134c28dbd9fc58376b68f87b87ff3c4eb3c85318`; Site version 6 was saved from that
+commit and deployment `appgdep_6a96798637ac819183c18605d5c4fa6d` reached
+`succeeded` at 2026-09-01T07:06:57Z. These are repository/deployment
+observations, not proof that source compiles or that physical hardware works.

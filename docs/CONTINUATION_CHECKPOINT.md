@@ -26,7 +26,12 @@ Ship Schematic as a web workspace where:
 - Site metadata: `.openai/hosting.json`
 - GitHub issue tracking this release: `https://github.com/Developer668/Schematic/issues/1`
 
-No release commit, GitHub push, issue close, Site source push, Site version save, or deployment has happened yet.
+Release completed after the account switch: GitHub commit
+`134c28dbd9fc58376b68f87b87ff3c4eb3c85318` is pushed to `main`; the current
+account Site source is pushed, Site version 6 is saved, and deployment
+`appgdep_6a96798637ac819183c18605d5c4fa6d` succeeded. GitHub issue #1 still
+needs its final close/comment update. Native in-app WebMCP/browser acceptance
+is not asserted by the HTTP smoke checks.
 
 ## Implemented in the current worktree
 

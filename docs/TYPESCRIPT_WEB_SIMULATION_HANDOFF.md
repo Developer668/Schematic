@@ -4,10 +4,10 @@ Status: implementation handoff
 Audience: agents and engineers extending Schematic's TypeScript web workspace
 Product direction approved: 2026-08-31
 Repository truth last checked: 2026-09-01
-Release-candidate repository gates passed. Sol's final turn reached the usage
-limit before formal sign-off; do not infer Site publication or live-host
-acceptance from this handoff. Record those results against the exact deployed
-commit/version.
+Release-candidate repository gates passed and the current-account Site revision
+is published. Sol's final turn reached the usage limit before formal sign-off;
+native WebMCP/browser acceptance is still a separately recorded check against
+the exact deployed commit/version.
 
 This is the implementation handoff for the landed compiler-free
 Behavior-Preview/editable-Code path. Earlier runtime/compiler notes are retained
@@ -1559,11 +1559,15 @@ commits.
 GitHub push and ChatGPT Site deployment are separate operations. The repository
 currently persists Sites project ID
 `appgprj_6a9216cfb16881919e467839d41b29b8` in
-`chatgpt-site/.openai/hosting.json`; the canonical URL is
+`chatgpt-site/.openai/hosting.json`; the published canonical URL is
 <https://schematic-hardware-workbench.decipherer71951502.chatgpt.site>.
-If the selected ChatGPT workspace cannot access that opaque ID, do not replace
-it or create a duplicate Site silently. Switch to the owning workspace or obtain
-explicit authorization for a new binding. See `docs/CHATGPT_SITE_RUNBOOK.md`.
+The release was pushed at commit `134c28dbd9fc58376b68f87b87ff3c4eb3c85318`,
+saved as Site version 6, and deployed successfully as
+`appgdep_6a96798637ac819183c18605d5c4fa6d` at 2026-09-01T07:06:57Z. If a
+future selected ChatGPT workspace cannot access that opaque ID, do not replace
+it or create a duplicate Site silently. Switch to the owning workspace or
+obtain explicit authorization for a new binding. See
+`docs/CHATGPT_SITE_RUNBOOK.md`.
 
 This hosting caveat does not change the Behavior Preview architecture.
 
@@ -1589,10 +1593,10 @@ built and tested.
 
 ## 26. Implementation evidence and release handoff
 
-The implementation/audit work is present in the release candidate. Sol's final
-turn reached the account usage limit before a formal sign-off; the root release
-audit therefore records the automated evidence explicitly and keeps live Site
-acceptance as a separate required step.
+The implementation/audit work is present in the published release candidate.
+Sol's final turn reached the account usage limit before a formal sign-off; the
+root release audit records the automated evidence explicitly and keeps native
+WebMCP/browser acceptance as a separate check.
 
 The focused suites are intended to cover the 45-tool registry and absence of
 `firmware.compile`/`simulation.*`, graph and shopping boundaries, the complete
@@ -1612,4 +1616,7 @@ For a later release, rerun the current commit through the focused checks,
 Verify the canonical URL, native 45-tool discovery, authentication,
 persistence/recovery behavior, preview, code handoff, confirmation guards, and
 retired-route 404s in the ChatGPT in-app browser. Record commands, observed
-outputs, commit, deployed revision, and publication status separately.
+outputs, commit, deployed revision, and publication status separately. The
+deployment smoke check returned 200 for `/`, `/api/health`, `/api/docs`, and
+`/capabilities`, and 404 for `/api/compile` and `/api/simulation/state`; it did
+not execute source or prove hardware behavior.

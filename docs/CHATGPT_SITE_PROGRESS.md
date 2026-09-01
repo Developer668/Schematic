@@ -1,9 +1,9 @@
 # ChatGPT Site release checklist
 
 Status: Behavior Preview/editable-code implementation documented 2026-09-01;
-repository-wide release gates passed. The formal Sol turn reached the account
-usage limit before sign-off; publication of the release candidate is still
-pending and must be verified in the ChatGPT host.
+repository-wide release gates passed and the current-account Site revision is
+published. The formal Sol turn reached the account usage limit before sign-off;
+the remaining live acceptance items are explicitly listed below.
 
 ## Canonical release target
 
@@ -101,17 +101,17 @@ reference workspaces; that is separate from the Site runtime dependency graph.
 
 ## Pre-publish checklist
 
-- [ ] Confirm Node.js 22.13+, pnpm 9+, frozen lockfiles, and clean intended
+- [x] Confirm Node.js 22.13+, pnpm 9+, frozen lockfiles, and clean intended
       source revision.
-- [ ] Confirm server-only `SCHEMATIC_SESSION_SECRET` is strong and
+- [x] Confirm server-only `SCHEMATIC_SESSION_SECRET` is strong and
       `SCHEMATIC_AUTH_MODE=chatgpt-sites` is enabled.
-- [ ] Pass focused frontend checks, behavior boundary gate, Site verification,
+- [x] Pass focused frontend checks, behavior boundary gate, Site verification,
       capacity/import/confirmation boundary checks, and `git diff --check`.
-- [ ] Inspect the active Site import closure; it must not pull firmware harness,
+- [x] Inspect the active Site import closure; it must not pull firmware harness,
       browser toolchain, AVR runtime, source interpreter, or legacy remote
       runtime modules.
-- [ ] Build the Site with `npm --prefix chatgpt-site run build`.
-- [ ] Publish only to Sites project
+- [x] Build the Site with `npm --prefix chatgpt-site run build`.
+- [x] Publish only to Sites project
       `appgprj_6a9216cfb16881919e467839d41b29b8`; do not create a duplicate
       binding or change the canonical URL.
 
@@ -148,7 +148,7 @@ reference workspaces; that is separate from the Site runtime dependency graph.
 - [ ] Verify destructive tools reject missing or mismatched exact confirmation
       ids without mutating state; verify blueprint replacement requires the
       explicit replacement flag and active project id.
-- [ ] `GET /api/health` and `/api/docs` succeed; `/api/compile` and
+- [x] `GET /api/health` and `/api/docs` succeed; `/api/compile` and
       `/api/simulation/*` return 404.
 - [ ] Run `/capabilities`; record browser probe results separately from product
       behavior. It does not prove source build or hardware support.
@@ -156,6 +156,16 @@ reference workspaces; that is separate from the Site runtime dependency graph.
       operation exists.
 
 ## Evidence to record after publication
+
+Published evidence: GitHub commit
+`134c28dbd9fc58376b68f87b87ff3c4eb3c85318`; Sites version 6; deployment
+`appgdep_6a96798637ac819183c18605d5c4fa6d`; deployment status `succeeded` at
+2026-09-01T07:06:57Z; live URL
+`https://schematic-hardware-workbench.decipherer71951502.chatgpt.site`.
+Unauthenticated HTTP smoke checks returned 200 for `/`, `/api/health`,
+`/api/docs`, and `/capabilities`, and 404 for `/api/compile` and
+`/api/simulation/state`. These checks do not establish native WebMCP discovery,
+source execution, compilation, or physical hardware behavior.
 
 Record the commit, deployed Site version, publication timestamp, project ID,
 native tool count/host, live-route results, and the behavior/code fixture

@@ -230,12 +230,11 @@ Source code is never loaded as a reducer, callback, or script.
 - Release procedure: [`docs/CHATGPT_SITE_RUNBOOK.md`](docs/CHATGPT_SITE_RUNBOOK.md)
 
 The repository records the canonical project binding. Repository-wide release
-gates passed on 2026-09-01; publication still has to be tied to the exact
-release commit and checked in the ChatGPT in-app browser for native WebMCP
-discovery, health/auth behavior, persistence, and the button→LED preview.
-Those live checks are deployment evidence, not claims that source compiles or
-hardware works. See the implementation audit and Site runbook for the exact
-release record.
+gates passed on 2026-09-01 and the current-account Site revision is published
+from the pushed release commit. Native WebMCP discovery and interactive
+button→LED acceptance still belong to the ChatGPT in-app browser checklist;
+the deployment does not claim that source compiles or hardware works. See the
+implementation audit and Site runbook for the exact release record.
 
 ## Further reading
 
