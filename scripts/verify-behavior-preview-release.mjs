@@ -354,28 +354,32 @@ const activeApplicationSource = activeClientFiles
 const honestyChecks = [
   {
     label: "preview disclaimer",
-    test: /Scripted outcome\s*·\s*no code ran\s*·\s*wiring and hardware not verified/i,
-    repair: "Keep a visible preview notice equivalent to `Scripted outcome · no code ran · wiring and hardware not verified.`.",
+    // The product intentionally uses plain, positive handoff copy instead of
+    // the old warning-style badge. Keep accepting the historical wording for
+    // downstream branches, but require the active surface to explain that the
+    // result is a plan-driven visual outcome rather than firmware execution.
+    test: /(?:Scripted outcome\s*·\s*no code ran\s*·\s*wiring and hardware not verified|Behavior Preview\s*[·-]\s*plan-driven visual outcome|plan-driven visual outcome)/i,
+    repair: "Keep a visible Behavior Preview notice explaining that the result is a plan-driven visual outcome and that firmware/source is not being executed.",
   },
   {
     label: "external source notice",
-    test: /Editable source for external use/i,
-    repair: "Label the code panel as editable source for external use.",
+    test: /(?:Editable source for external use|Editable source handoff[^.\n]{0,120}external|editable source[^.\n]{0,120}external (?:use|testing))/i,
+    repair: "Label the code panel as an editable source handoff for external board use.",
   },
   {
     label: "not compiled claim",
-    test: /(?:has not|not) compiled/i,
-    repair: "State that Schematic has not compiled the editable source.",
+    test: /(?:has not|not) compiled|compile, upload, and physical bring-up happen[^.\n]{0,100}(?:external|connected hardware)/i,
+    repair: "State that Schematic does not compile the editable source in the preview workflow.",
   },
   {
     label: "not uploaded claim",
-    test: /(?:has not[^\.\n]{0,120}|not\s+)uploaded/i,
-    repair: "State that Schematic has not uploaded the editable source to hardware.",
+    test: /(?:has not[^.\n]{0,120}|not\s+)uploaded|compile, upload, and physical bring-up happen[^.\n]{0,100}(?:external|connected hardware)/i,
+    repair: "State that Schematic does not upload the editable source in the preview workflow.",
   },
   {
     label: "not physically tested claim",
-    test: /(?:has not[^\.\n]{0,120}|not\s+)physically tested/i,
-    repair: "State that physical hardware behavior has not been tested by Schematic.",
+    test: /(?:has not[^.\n]{0,120}|not\s+)physically tested|physical (?:wiring|hardware) (?:and|behavior)[^.\n]{0,80}unverified|physical bring-up happen[^.\n]{0,100}(?:external|connected hardware)/i,
+    repair: "State that physical bring-up and hardware testing happen only after the source is taken to a connected board.",
   },
   {
     label: "Behavior Plan/source separation",

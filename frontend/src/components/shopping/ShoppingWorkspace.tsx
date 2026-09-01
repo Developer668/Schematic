@@ -73,56 +73,56 @@ const phaseMeta: Record<
 > = {
   idle: {
     label: "Ready to source",
-    title: "Waiting for the WebMCP agent",
-    copy: "Stage an exact part request, then let an authenticated agent verify the catalog identity and retailer offers.",
+    title: "Ready for a sourcing request",
+    copy: "Start with an exact part or board. An authenticated agent can review the catalog ID and retailer offers.",
     tone: "idle",
   },
   searching: {
-    label: "Searching public sources",
-    title: "Searching public sources",
-    copy: "The provider lookup is running. Cancel before anything is published to the verified cart.",
+    label: "Checking sources",
+    title: "Checking public sources",
+    copy: "The provider lookup is running. Cancel before anything is published to the cart.",
     tone: "active",
   },
   candidates: {
-    label: "Public candidates",
-    title: "Public discovery candidates",
-    copy: "These provider records are untrusted. They cannot enter the cart until an authenticated WebMCP agent verifies them.",
+    label: "Needs review",
+    title: "Candidates need review",
+    copy: "Public records are ready for review. An authenticated agent must check each record and publish a canonical ID claim before cart actions.",
     tone: "active",
   },
   verification: {
-    label: "Agent verification required",
-    title: "Agent verification required",
-    copy: "The lookup handoff is ready. Call shopping.search with authenticated publication metadata to publish exact listings.",
+    label: "Ready for agent",
+    title: "Ready for agent review",
+    copy: "Send this handoff to an authenticated WebMCP agent to review candidates and publish records with canonical ID claims.",
     tone: "active",
   },
   "rate-limited": {
-    label: "Rate limited",
-    title: "Provider rate limited",
-    copy: "The provider asked us to slow down. Wait briefly, then retry; no listing was added to the cart.",
+    label: "Try again shortly",
+    title: "Provider needs a moment",
+    copy: "The provider asked us to slow down. Retry after the suggested wait; your cart is unchanged.",
     tone: "error",
   },
   partial: {
-    label: "Partially verified",
-    title: "Partially verified",
-    copy: "Some publication records were rejected. Only authenticated exact listings remain available for cart actions.",
+    label: "Published / partial",
+    title: "Some listings need review",
+    copy: "A few publication records were rejected. Accepted agent-published records remain available for cart actions.",
     tone: "ready",
   },
   verified: {
-    label: "Verified listings",
-    title: "Verified listings",
-    copy: "Authenticated agent publication completed. Choose an offer, confirm quantity, and add a listing to the cart.",
+    label: "Agent-published",
+    title: "Agent-published listings ready",
+    copy: "Published records claim a canonical catalog ID. Choose an offer and quantity before adding to the cart.",
     tone: "ready",
   },
   failed: {
-    label: "Lookup failed",
-    title: "Lookup failed",
-    copy: "No verified listing was published. Review the guidance and retry the explicit lookup.",
+    label: "Could not complete",
+    title: "Couldn’t complete lookup",
+    copy: "No agent-published listing was received. Check the connection and retry the request.",
     tone: "error",
   },
   cancelled: {
     label: "Cancelled",
     title: "Lookup cancelled",
-    copy: "The lookup was cancelled. Nothing from this request entered the cart.",
+    copy: "No listing was published. Submit the request again when you are ready.",
     tone: "idle",
   },
 };
@@ -322,12 +322,12 @@ function SourcingProgress({
   projectPartCount: number;
 }) {
   const active = progressLevel(phase);
-  const steps = ["Request", "Compare", "Verify"];
+  const steps = ["Request", "Compare", "Publish"];
   const title =
     phase === "verified" || phase === "partial"
-      ? `${resultCount} verified design part${resultCount === 1 ? "" : "s"} ready to compare`
+      ? `${resultCount} agent-published design part${resultCount === 1 ? "" : "s"} ready to compare`
       : phase === "candidates"
-        ? `${candidateCount} public candidate${candidateCount === 1 ? "" : "s"} awaiting agent verification`
+        ? `${candidateCount} public candidate${candidateCount === 1 ? "" : "s"} awaiting agent review`
         : phase === "searching"
           ? "Checking configured public sources"
           : `${projectPartCount} design part${projectPartCount === 1 ? "" : "s"} queued for supplier lookup`;
@@ -353,8 +353,7 @@ function SourcingProgress({
         </div>
         <p className="shopping-request-title">{title}</p>
         <p className="shopping-request-copy">
-          The sourcing agent preserves the exact graph identity and returns
-          public candidates separately from authenticated listings.
+          {phaseMeta[phase].copy}
         </p>
       </div>
       <div className="shopping-request-steps" aria-label="Sourcing progress">
@@ -392,7 +391,10 @@ function LookupStatus({
   onRetry: () => void;
   onStageDesign: () => void;
 }) {
-  if (phase === "idle") return null;
+  // Published listings already carry their concise status in the result zone;
+  // keep this panel for transitions and actionable states so status copy does
+  // not repeat directly above the results.
+  if (phase === "idle" || phase === "verified" || (phase === "partial" && !message)) return null;
   const meta = phaseMeta[phase];
   const retryable =
     phase === "candidates" ||
@@ -411,7 +413,7 @@ function LookupStatus({
           <LoaderCircle size={15} className="shopping-spin" />
         ) : phase === "cancelled" ? (
           <Ban size={15} />
-        ) : phase === "verified" || phase === "partial" ? (
+        ) : phase === "partial" ? (
           <BadgeCheck size={15} />
         ) : (
           <CircleAlert size={15} />
@@ -420,7 +422,7 @@ function LookupStatus({
       <div className="min-w-0 flex-1">
         <div className="kicker">Lookup state</div>
         <h3>{meta.title}</h3>
-        <p>{message || meta.copy}</p>
+        {message && <p>{message}</p>}
       </div>
       <div className="shopping-state-actions">
         {phase === "searching" && (
@@ -571,7 +573,7 @@ function ResultCard({
   return (
     <article
       className="shopping-verified-card"
-      aria-label={`Verified listing ${result.title}`}
+      aria-label={`Agent-published listing ${result.title}`}
       data-testid={`verified-result-${result.id}`}
     >
       <div className="shopping-result-head">
@@ -582,7 +584,7 @@ function ResultCard({
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <h3 className="truncate text-xs font-semibold">{result.title}</h3>
             <span className="shopping-verified-badge">
-              <BadgeCheck size={10} /> Exact catalog match
+              <BadgeCheck size={10} /> Canonical catalog ID claimed
             </span>
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
@@ -634,7 +636,7 @@ function ResultCard({
             className="shopping-add-button"
             title={
               result.exactMatch
-                ? "Add exact catalog match"
+                ? "Add agent-published record"
                 : "Review the part number before adding this listing"
             }
           >
@@ -647,7 +649,7 @@ function ResultCard({
       )}
       <div className="shopping-offers-block">
         <div className="shopping-offers-head">
-          <span className="kicker">Verified sourced offers</span>
+          <span className="kicker">Agent-published offers</span>
           <span className="font-mono text-[9px] tabular-nums text-muted-foreground">
             {Math.min(result.offers.length, 3)} of 3 shown
           </span>
@@ -678,7 +680,7 @@ function ResultCard({
       {alternatives.length > 0 && (
         <div className="shopping-alternatives">
           <span className="text-[10px] font-medium text-muted-foreground">
-            Verified agent alternatives
+            Agent-published alternatives
           </span>
           {alternatives.map((alternative) => (
             <button
@@ -748,7 +750,7 @@ function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
         <span className="shopping-no-cart-badge">Cart locked</span>
       </div>
       <div className="shopping-discovery-identity">
-        <span className="kicker">Reported catalog identity</span>
+        <span className="kicker">Reported catalog ID</span>
         <code>{candidate.catalogId || "No canonical catalog ID supplied"}</code>
       </div>
       {candidate.matchNote && (
@@ -756,9 +758,9 @@ function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
       )}
       <p className="shopping-discovery-warning">
         <ShieldCheck size={12} /> Provider data is public discovery only. An
-        authenticated WebMCP agent must verify this identity and its recent
-        HTTPS offers through <code>shopping.search</code> before any cart
-        action.
+        authenticated WebMCP agent must check this candidate and publish a
+        record claiming a canonical catalog ID plus recent HTTPS offers through
+        <code>shopping.search</code> before any cart action.
       </p>
       {candidate.offers.length > 0 ? (
         <div className="shopping-discovery-offers">
@@ -775,7 +777,7 @@ function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
       ) : (
         <p className="shopping-discovery-empty">
           No retailer offer was supplied. Keep this candidate out of the cart
-          until an agent publishes a verified listing.
+          until an agent publishes a listing with a claimed canonical catalog ID.
         </p>
       )}
     </article>
@@ -841,7 +843,7 @@ function CartSummary({
         <div className="mt-4">
           {quote.lines.length === 0 ? (
             <p className="border-y border-dashed border-border px-2 py-6 text-center text-[10px] text-muted-foreground">
-              Add verified listings to start the build cart.
+              Add agent-published listings to start the build cart.
             </p>
           ) : (
             <div className="divide-y divide-border border-y border-border">
@@ -983,11 +985,11 @@ function AgentEmptyState({
             {phase === "idle" ? "Ready when you are" : "Parts lookup"}
           </div>
           <h2 className="mt-1 text-sm font-semibold">
-            {phase === "idle" ? "Waiting for the WebMCP agent" : meta.title}
+            {phase === "idle" ? "Ready for a sourcing request" : meta.title}
           </h2>
           <p className="mt-1 max-w-[62ch] text-[10px] leading-relaxed text-muted-foreground">
             {phase === "idle"
-              ? "Agent publication required. This desk stays empty until a connected, authenticated agent finds and publishes exact catalog matches with sourced retailer offers."
+              ? "Start with an exact part or board. A connected agent can review the catalog ID and publish offers for review before they enter the cart."
               : meta.copy}
           </p>
         </div>
@@ -1033,8 +1035,8 @@ function AgentEmptyState({
           <div className="shopping-empty-flow-item">
             <span>01</span>
             <div>
-              <p>Resolve identity</p>
-              <small>Match every request to a real catalog part number.</small>
+              <p>Claim a catalog ID</p>
+              <small>Associate the request with a canonical part identity.</small>
             </div>
           </div>
           <div className="shopping-empty-flow-item">
@@ -1042,7 +1044,7 @@ function AgentEmptyState({
             <div>
               <p>Compare offers</p>
               <small>
-                Keep public discovery separate until an agent verifies it.
+                Keep public discovery separate until an agent reviews it.
               </small>
             </div>
           </div>
@@ -1051,7 +1053,7 @@ function AgentEmptyState({
             <div>
               <p>Build the cart</p>
               <small>
-                Choose quantities only after the exact match is verified.
+                Choose quantities after the listing claims a canonical catalog ID.
               </small>
             </div>
           </div>
@@ -1087,7 +1089,7 @@ function AgentEmptyState({
           {query || "Enter a part or board above"}
         </code>
         <span className="sr-only">
-          Return verified listings through shopping.search.
+          Return agent-published listings through shopping.search.
         </span>
       </div>
     </div>
@@ -1187,7 +1189,7 @@ export default function ShoppingWorkspace({
     if (!requiredIds.length) {
       shopping.resetCart();
       setMessage(
-        "Add components to the project, then ask the agent to source the required parts.",
+        "Add components to the project, then ask the agent to publish the required part records.",
       );
       return;
     }
@@ -1198,7 +1200,7 @@ export default function ShoppingWorkspace({
       )
     ) {
       setMessage(
-        "Connect an authenticated WebMCP agent and ask it to publish the required part listings before resetting the cart.",
+        "Connect an authenticated WebMCP agent and ask it to publish records for the required parts before resetting the cart.",
       );
       return;
     }
@@ -1226,7 +1228,6 @@ export default function ShoppingWorkspace({
     setDiscoveryCandidates([]);
     setMessage("");
     setPhase("searching");
-    shopping.clearResults();
     shopping.setQuery(trimmed);
     shopping.setHandoff(requestHandoff);
     shopping.setRequestStatus("searching");
@@ -1270,7 +1271,7 @@ export default function ShoppingWorkspace({
         );
         setMessage(
           outcome.error ??
-            "Agent verification required. Public candidates are ready for exact catalog and retailer verification.",
+            "Public candidates are ready for review. An authenticated agent can check them and publish records with claimed canonical IDs.",
         );
         return;
       }
@@ -1288,7 +1289,7 @@ export default function ShoppingWorkspace({
         setPhase("verification");
         setMessage(
           outcome.error ??
-            "The provider handoff is ready. Return verified listings through shopping.search.",
+            "The provider handoff is ready. Return agent-published listings through shopping.search.",
         );
         return;
       }
@@ -1296,7 +1297,7 @@ export default function ShoppingWorkspace({
       setPhase("failed");
       setMessage(
         outcome.error ??
-          "The lookup could not be completed. Retry the explicit request.",
+            "No agent-published listing was received. Retry the request.",
       );
     } catch (error) {
       if (
@@ -1308,8 +1309,8 @@ export default function ShoppingWorkspace({
       setPhase("failed");
       setMessage(
         error instanceof Error && error.message
-          ? `The lookup could not be completed: ${error.message}`
-          : "The lookup could not be completed. Check the connection and retry.",
+          ? `Couldn’t complete lookup: ${error.message}`
+          : "Couldn’t complete lookup. Check the connection and retry.",
       );
     } finally {
       if (activeRequest.current?.sequence === sequence)
@@ -1397,9 +1398,8 @@ export default function ShoppingWorkspace({
               </span>
             </div>
             <p className="mt-1 max-w-[70ch] text-[10px] leading-relaxed text-muted-foreground">
-              Discover public supplier candidates, verify exact catalog
-              identities with an agent, then move confirmed offers into one
-              build cart.
+              Search exact parts or source the current design. An authenticated
+              agent reviews listings before they can enter the build cart.
             </p>
           </div>
           <div className="shopping-header-stats hidden shrink-0 sm:flex">
@@ -1413,7 +1413,7 @@ export default function ShoppingWorkspace({
               <span className="shopping-stat-value">
                 {shopping.results.length}
               </span>
-              <span className="shopping-stat-label">verified</span>
+              <span className="shopping-stat-label">published</span>
             </div>
             <div>
               <span className="shopping-stat-value">
@@ -1450,17 +1450,20 @@ export default function ShoppingWorkspace({
               />
               <input
                 id="shopping-agent-request"
+                type="search"
                 value={query}
                 maxLength={240}
                 onChange={(event) => shopping.setQuery(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                     event.preventDefault();
                     submitLookup();
                   }
                 }}
                 placeholder="Exact part, board, or manufacturer"
                 aria-label="Search exact parts"
+                aria-keyshortcuts="Enter"
+                aria-describedby="shopping-search-help"
                 className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-16 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-foreground/30 focus:ring-2 focus:ring-ring/10"
               />
               <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
@@ -1490,7 +1493,7 @@ export default function ShoppingWorkspace({
             </button>
           </div>
           <div className="shopping-form-foot">
-            <span className="shopping-form-note">
+            <span id="shopping-search-help" className="shopping-form-note">
               Quantity is attached to this handoff; no lookup runs while you
               type.
             </span>
@@ -1531,13 +1534,12 @@ export default function ShoppingWorkspace({
           />
           <span>
             <strong className="font-semibold text-foreground">
-              Verified before checkout.
+              Safe by default.
             </strong>{" "}
-            Public candidates never receive cart controls. A listing needs the
-            exact catalog identity, part number, provider, recent timestamp,
-            secure retailer URL, currency, and offer price before it can enter
-            the cart. Confirm stock, shipping, and final pricing with the
-            retailer.
+            Public candidates stay review-only. Agent-published records include
+            a claimed catalog identity, source, timestamp, secure retailer URL,
+            and pricing; confirm the part identity, stock, shipping, and final
+            checkout details with the retailer.
           </span>
         </div>
       </div>
@@ -1564,19 +1566,18 @@ export default function ShoppingWorkspace({
           ) : (
             <section
               className="shopping-verified-zone"
-              aria-label="Verified listings"
+              aria-label="Agent-published listings"
               data-testid="verified-listings"
             >
               <div className="shopping-zone-head">
                 <div>
                   <div className="kicker">
                     {effectivePhase === "partial"
-                      ? "Verified listings / partial publication"
-                      : "Verified listings"}
+                      ? "Agent-published / partial publication"
+                      : "Agent-published listings"}
                   </div>
                   <p className="mt-1 text-[10px] text-muted-foreground">
-                    {shopping.results.length} exact catalog match
-                    {shopping.results.length === 1 ? "" : "es"} · {offerCount}{" "}
+                    {shopping.results.length} canonical catalog ID claim{shopping.results.length === 1 ? "" : "s"} · {offerCount}{" "}
                     sourced offer{offerCount === 1 ? "" : "s"}
                   </p>
                 </div>

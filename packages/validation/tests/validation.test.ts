@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyProject, type HardwareDefinitionLookup, type HardwarePort, type HardwareProject } from "@schematic/hardware-graph";
-import { validateFirmwareFiles, validateProject } from "../src";
+import { validateConnection, validateFirmwareFiles, validateProject } from "../src";
 
 const definitions: Record<string, { ports: HardwarePort[] }> = {
   board: {
@@ -131,5 +131,42 @@ describe("validation graph integration", () => {
       expect.objectContaining({ code: "FIRMWARE_MISSING_SETUP" }),
       expect.objectContaining({ code: "FIRMWARE_MISSING_LOOP" }),
     ]));
+  });
+
+  it("preflights a candidate wire and scopes returned issues to that edge", () => {
+    const candidate = wire("candidate", ["mcu", "VCC"], ["sensor", "GND"], "power");
+    const result = validateConnection(project({ mcu: "board", sensor: "target" }, []), candidate, lookup);
+
+    expect(result.valid).toBe(false);
+    expect(result.connectionId).toBe("candidate");
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "DOMAIN_MISMATCH", affectedConnections: ["candidate"] }),
+    ]));
+    // A candidate preflight must not make unrelated project-wide warnings
+    // (such as an incomplete ground net) look like edge-local failures.
+    expect(result.issues.every((issue) => issue.affectedConnections?.includes("candidate"))).toBe(true);
+  });
+
+  it("preserves candidate-scoped warnings without rejecting the wire", () => {
+    const candidate = wire("controller-link", ["mcu", "SDA"], ["other", "SDA"], "i2c");
+    const result = validateConnection(project({ mcu: "board", other: "board" }, []), candidate, lookup);
+
+    expect(result.valid).toBe(true);
+    expect(result.issues).toEqual([
+      expect.objectContaining({ code: "I2C_CONTROLLER_TO_CONTROLLER", affectedConnections: ["controller-link"] }),
+    ]);
+  });
+
+  it("attributes an I2C address collision to the candidate bus wire", () => {
+    const candidate = wire("candidate-sda", ["mcu", "SDA"], ["b", "SDA"], "i2c");
+    const result = validateConnection(project({ mcu: "board", a: "target", b: "target" }, [
+      wire("sda-a", ["mcu", "SDA"], ["a", "SDA"], "i2c"),
+      wire("scl-a", ["mcu", "SCL"], ["a", "SCL"], "i2c"),
+      wire("scl-b", ["mcu", "SCL"], ["b", "SCL"], "i2c"),
+    ]), candidate, lookup);
+
+    const collision = result.issues.find((issue) => issue.code === "I2C_ADDRESS_COLLISION");
+    expect(result.valid).toBe(false);
+    expect(collision?.affectedConnections).toContain("candidate-sda");
   });
 });

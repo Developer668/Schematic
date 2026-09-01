@@ -239,7 +239,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-xs font-medium">Compact component library</div>
-                    <div className="text-[11px] text-muted-foreground">Show more parts at once</div>
+                    <div className="text-[11px] text-muted-foreground">Fit more parts in the panel</div>
                   </div>
                   <button type="button" aria-label="Toggle compact component library" aria-pressed={libraryDensity === "compact"} onClick={() => setLibraryDensity(libraryDensity === "compact" ? "comfortable" : "compact")} className={`w-10 h-6 rounded-full p-0.5 transition-colors ${libraryDensity === "compact" ? "bg-primary" : "bg-muted border border-border"}`}>
                     <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${libraryDensity === "compact" ? "translate-x-4" : "translate-x-0"}`} />

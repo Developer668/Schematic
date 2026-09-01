@@ -670,7 +670,7 @@ export default function MonacoWorkspace() {
           <button type="button" onClick={() => void copyCode()} className="w-7 h-7 rounded hover:bg-muted flex items-center justify-center text-muted-foreground" title={copied ? "Copied" : "Copy source"} aria-label={copied ? "Source copied" : "Copy source"}>{copied ? <span className="text-[10px] text-emerald-500">✓</span> : <Copy size={11} />}</button>
         </div>
         <div className="flex-1 min-h-[160px] relative"><Editor height="100%" beforeMount={configureEditorTheme} theme={isDark ? "schematic-dark" : "light"} language="cpp" value={DEFAULT_SKETCH} options={{ ...EDITOR_OPTIONS, readOnly: true }} /></div>
-        <div className="px-2 py-2 border-t border-border bg-muted/20 text-[11px] leading-snug text-muted-foreground">Select a programmable board to open its editable source document. This panel never compiles or runs source.</div>
+        <div className="px-2 py-2 border-t border-border bg-muted/20 text-[11px] leading-snug text-muted-foreground">Select a programmable board to open its editable source handoff. Behavior Preview demonstrates the typed plan; test this source when your board is connected.</div>
       </div>
     );
   }
@@ -693,7 +693,7 @@ export default function MonacoWorkspace() {
           {documentForBoard?.revision !== undefined && <span className="font-mono text-[9px] text-muted-foreground">rev {documentForBoard.revision}</span>}
           {previewSnapshotHash && <span className="font-mono text-[9px] text-muted-foreground">plan {previewSnapshotHash.slice(0, 8)}</span>}
         </div>
-        <p className="code-authoring-notice">Editable source for external use. Schematic has not compiled, uploaded, run, or physically tested this code. Behavior Preview follows the Behavior Plan.</p>
+        <p className="code-authoring-notice">Editable source handoff for your board. Behavior Preview follows the Behavior Plan; compile, upload, and physical bring-up happen when you move to hardware.</p>
       </div>
 
       {conflict && <div className="border-b border-amber-500/30 bg-amber-500/10 px-2 py-2 text-[11px] leading-snug" role="alert" data-testid="code-source-conflict">
@@ -718,7 +718,7 @@ export default function MonacoWorkspace() {
       <div className="flex-1 min-h-[120px] relative"><Editor height="100%" beforeMount={configureEditorTheme} theme={isDark ? "schematic-dark" : "light"} language={languageFor(documentForBoard, binding?.targetConfig?.editorLanguage)} value={code} onChange={(value) => handleCodeChange(value ?? "")} options={EDITOR_OPTIONS} /></div>
       <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground">
         <span className="flex min-w-0 items-center gap-1.5 truncate"><FileDown size={10} /> {currentFile?.name ?? "sketch.ino"} · {code.length.toLocaleString()} chars</span>
-        <span className="shrink-0">Not tested in Schematic</span>
+        <span className="shrink-0">Editable source · external bring-up</span>
       </div>
     </div>
   );

@@ -37,6 +37,53 @@ describe("ComponentVisualOverlay", () => {
     expect(onEvent).toHaveBeenCalledWith("button.pressed", { pressed: true });
   });
 
+  it("exposes deterministic typed action controls for modeled component outcomes", () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const onAction = vi.fn();
+    act(() => root?.render(<ComponentVisualOverlay
+      componentId="outcomes-1"
+      onAction={onAction}
+      projection={{
+        accessibleSummary: "Modeled outcomes.",
+        primitives: [
+          { kind: "indicator", key: "indicator", on: true, color: "#22c55e", intensity: 1 },
+          { kind: "switch", key: "relay", position: "closed" },
+          { kind: "text-display", key: "display", lines: ["Hello"] },
+          { kind: "numeric-readout", key: "sensor", value: 42, unit: "°C" },
+          { kind: "rotation", key: "actuator", degrees: 90 },
+          { kind: "activity", key: "buzzer", state: "active" },
+          { kind: "activity", key: "motor", state: "idle" },
+          { kind: "button", key: "button", pressed: false },
+        ],
+      }}
+    />));
+
+    const controls = Array.from(host.querySelectorAll<HTMLButtonElement>("button"));
+    expect(controls.map((control) => control.getAttribute("aria-label"))).toEqual([
+      "Turn indicator off",
+      "Open relay",
+      "Clear display",
+      "Increase sensor reading",
+      "Set actuator angle to 135 degrees",
+      "Stop buzzer",
+      "Start motor",
+      "Preview button; press",
+    ]);
+    act(() => controls.forEach((control) => control.click()));
+    expect(onAction.mock.calls).toEqual([
+      ["indicator.set", { kind: "literal", value: { on: false } }],
+      ["relay.set", { kind: "literal", value: { on: false } }],
+      ["display.clear", { kind: "literal", value: {} }],
+      ["sensor.setReading", { kind: "literal", value: { value: 43 } }],
+      ["servo.setAngle", { kind: "literal", value: { degrees: 135 } }],
+      ["buzzer.stop", { kind: "literal", value: {} }],
+      ["motor.setSpeed", { kind: "literal", value: { rpm: 500 } }],
+      ["button.setPressed", { kind: "literal", value: { pressed: true } }],
+    ]);
+  });
+
   it("never forwards an untrusted indicator value into CSS", () => {
     host = document.createElement("div");
     document.body.appendChild(host);

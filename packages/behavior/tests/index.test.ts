@@ -545,6 +545,42 @@ describe("@schematic/behavior public boundary", () => {
     expect(snapshot.events.some((event) => event.eventId === "button.pressed" && event.outcome === "accepted")).toBe(true);
   });
 
+  it("contains malformed profile emissions without crashing the session", async () => {
+    const malformedProfile: BehaviorProfile<{ value: number }> = {
+      manifest: {
+        id: "malformed-emitter",
+        version: 1,
+        implementationId: "malformed-emitter:v1:test",
+        actions: [{
+          id: "malformed.set",
+          label: "Set",
+          description: "test",
+          payloadSchema: payloadSchema("test/malformed-emitter/v1", { type: "object", properties: {}, additionalProperties: false }),
+          control: { kind: "trigger" },
+        }],
+        events: [],
+      },
+      parseState: (value) => value && typeof value === "object" && "value" in value && typeof value.value === "number" ? { value: value.value } : { value: 0 },
+      initialState: () => ({ value: 0 }),
+      reduce: () => [{ state: { value: 1 }, emittedEvents: { eventId: "not-an-array" } as unknown as readonly ComponentEventRequest[] }],
+      projectVisual: (state) => ({ primitives: [{ kind: "numeric-readout", key: "value", value: state.value }], accessibleSummary: `Value ${state.value}.` }),
+    };
+    const malformedProject = project();
+    malformedProject.components = [{ id: "malformed-1", definitionId: "malformed-emitter", position: { x: 0, y: 0 }, rotation: 0, properties: {} }];
+    const malformedSystem = createBehaviorSystem({
+      definitions: { "malformed-emitter": { behaviorBinding: { profileId: "malformed-emitter", profileVersion: 1 } } },
+      registry: createBehaviorRegistry([malformedProfile]),
+    });
+    const preparation = await malformedSystem.prepare(malformedProject, { schemaVersion: 1, id: "malformed-plan", projectId: malformedProject.id, name: "Malformed emitter", revision: 1, rules: [] });
+    expect(preparation.status).toBe("ready");
+    if (preparation.status !== "ready") return;
+
+    const outcome = malformedSystem.open(malformedProject, preparation.prepared).dispatch(malformedProject, action("malformed-1", "malformed-emitter", "malformed.set", {}));
+    expect(outcome.status).toBe("rejected");
+    expect(outcome.diagnostics.map((issue) => issue.code)).toContain("INVALID_EMITTED_EVENT");
+    expect(outcome.snapshot.components["malformed-1"].primitives[0]).toMatchObject({ kind: "numeric-readout", value: 1 });
+  });
+
   it("blocks ambiguous or unknown project component identities during preparation", async () => {
     const duplicateProject = project();
     duplicateProject.components.push({ ...duplicateProject.components[0] });

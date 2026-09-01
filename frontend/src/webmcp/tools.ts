@@ -3,7 +3,7 @@
  * Per HardwareWebMCP.md: don't expose 100 tiny tools, expose powerful semantic ones.
  * Human click and AI call share same underlying Zustand functions.
  */
-import { layoutComponentPositions, MAX_PROJECTS_PER_WORKSPACE, MAX_WORKSPACE_SERIALIZED_BYTES, WorkspaceCapacityError, useProjectStore, type HardwareGraph } from "../store/useProjectStore.ts";
+import { layoutComponentPositions, MAX_PROJECTS_PER_WORKSPACE, MAX_WORKSPACE_SERIALIZED_BYTES, ConnectionValidationError, WorkspaceCapacityError, useProjectStore, type HardwareGraph } from "../store/useProjectStore.ts";
 import { useSelectionStore } from "../store/useSelectionStore.ts";
 import { useWorkspaceStore, type BottomPanel } from "../store/useWorkspaceStore.ts";
 import { useValidationStore, validateProject } from "../store/useValidationStore.ts";
@@ -19,6 +19,7 @@ import {
 import { PersistenceNotReadyError, type PersistenceContextToken } from "../store/persistenceGate.ts";
 import { getCatalogComponent, searchCatalog } from "../data/catalog.ts";
 import { isBoardDefinition } from "../data/hardware.ts";
+import { explainIssue } from "@schematic/validation";
 import { apiUrl, getAuthHeaders, getAuthSession, waitForAuth } from "../auth/session.ts";
 import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.json";
 import { behaviorToolDefinitions } from "./behaviorTools.ts";
@@ -141,25 +142,30 @@ function connectionFailure(error: unknown, requested: { source: { componentId: s
   const message = error instanceof Error ? error.message : String(error);
   const source = connectionEndpointDetails(project, requested.source.componentId, requested.source.portId);
   const target = connectionEndpointDetails(project, requested.target.componentId, requested.target.portId);
-  const code = message.includes("existing component ports")
+  const graphIssue = error instanceof ConnectionValidationError ? error.issues[0] : undefined;
+  const graphCode = graphIssue?.code;
+  const code = graphCode === "MISSING_ENDPOINT" || message.includes("existing component ports")
     ? "ENDPOINT_NOT_FOUND"
-    : message.includes("itself")
+    : graphCode === "SELF_CONNECTION" || message.includes("itself")
       ? "SELF_CONNECTION"
-      : message.includes("already connected")
+      : graphCode === "DUPLICATE_CONNECTION" || message.includes("already connected")
         ? "DUPLICATE_CONNECTION"
-        : message.includes("Incompatible domains")
+        : graphCode === "DOMAIN_MISMATCH" || graphCode === "CONNECTION_DOMAIN_MISMATCH" || message.includes("Incompatible domains")
           ? "INCOMPATIBLE_DOMAINS"
-          : "CONNECTION_REJECTED";
-  const hint = code === "ENDPOINT_NOT_FOUND"
-    ? "Use the instance id returned by component.add and a port id returned by component.list_ports."
-    : code === "INCOMPATIBLE_DOMAINS"
-      ? "The graph keeps typed electrical domains strict; choose compatible ports or add the required interface/level-shifter component."
-      : code === "DUPLICATE_CONNECTION"
-        ? "Read connection.get_connections before retrying; the wire may already exist even if the canvas did not refresh."
-        : undefined;
+          : graphCode ?? "CONNECTION_REJECTED";
+  const hint = graphIssue
+    ? explainIssue(graphIssue as unknown as Parameters<typeof explainIssue>[0])
+    : code === "ENDPOINT_NOT_FOUND"
+      ? "Use the instance id returned by component.add and a port id returned by component.list_ports."
+      : code === "INCOMPATIBLE_DOMAINS"
+        ? "The graph keeps typed electrical domains strict; choose compatible ports or add the required interface/level-shifter component."
+        : code === "DUPLICATE_CONNECTION"
+          ? "Read connection.get_connections before retrying; the wire may already exist even if the canvas did not refresh."
+          : undefined;
   return toolFailure(code, `Connection failed [${code}]: ${message}${hint ? ` ${hint}` : ""}`, {
     requested,
     endpoints: { source, target },
+    ...(error instanceof ConnectionValidationError ? { diagnostics: error.issues } : {}),
     ...(hint ? { hint } : {}),
   });
 }
@@ -1098,7 +1104,7 @@ const tools: ToolDef[] = [
   },
   {
     name: "shopping.search",
-    description: "Discover electronics parts through bounded no-key public sources when listings are omitted, then publish exact listings into the Parts desk after verifying them. Public candidates never become offers automatically; return the schematic.parts.lookup.v1 handoff to a browsing agent when publication is unavailable.",
+    description: "Discover electronics parts through bounded no-key public sources when listings are omitted, then publish agent-attributed listings into the Parts desk after checking them. Public candidates never become offers automatically; return the schematic.parts.lookup.v1 handoff to a browsing agent when publication is unavailable.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1108,7 +1114,7 @@ const tools: ToolDef[] = [
           type: "array",
           minItems: 1,
           maxItems: 24,
-          description: "Agent-found listings only; every item must identify one canonical catalog part and its exact sourced offers.",
+          description: "Agent-found listings only; every item must identify one canonical catalog part and its reported offers.",
           items: {
             type: "object",
             required: ["id", "catalogId", "title", "partNumber", "requestedQuantity", "exactMatch", "offers", "updatedAt"],
@@ -1118,8 +1124,8 @@ const tools: ToolDef[] = [
               title: { type: "string" },
               partNumber: { type: "string", description: "Manufacturer or distributor part number" },
               requestedQuantity: { type: "integer", minimum: 1 },
-              exactMatch: { const: true },
-              updatedAt: { type: "string", format: "date-time", description: "Recent time at which the agent refreshed this catalog match." },
+              exactMatch: { const: true, description: "Agent's exact-match claim; the boundary does not independently verify real-world identity." },
+              updatedAt: { type: "string", format: "date-time", description: "Recent time at which the agent refreshed this claimed catalog record." },
               offers: {
                 type: "array",
                 minItems: 1,
@@ -1135,13 +1141,13 @@ const tools: ToolDef[] = [
                   },
                 },
               },
-              alternatives: { type: "array", maxItems: 3, description: "Optional context-aware alternatives; publish each alternative as its own exact listing too." },
+              alternatives: { type: "array", maxItems: 3, description: "Optional context-aware alternatives; publish each alternative as its own canonical catalog-ID claim too." },
             },
           },
         },
         publication: { type: "object", description: "Sourcing provenance supplied by the agent. Authentication and agent identity come from the verified WebMCP session, not from these fields. publishedAt must be recent.", properties: { provider: { type: "string", minLength: 1 }, publishedAt: { type: "string", format: "date-time" } }, required: ["provider", "publishedAt"] },
       },
-      description: "Omit listings/publication to run bounded public discovery and receive a handoff request. Include both to publish verified results.",
+      description: "Omit listings/publication to run bounded public discovery and receive a handoff request. Include both to publish agent-attributed results.",
     },
     annotations: { untrustedContentHint: true },
     execute: async ({ query = "", quantity = 1, listings, publication, __trustedAuth }, { signal, persistenceContext } = {}) => {
@@ -1195,18 +1201,18 @@ const tools: ToolDef[] = [
         shopping.setQuery(searchQuery);
         shopping.setHandoff(handoff);
         if (discovery) shopping.setDiscovery(discovery);
-        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff, discovery: shopping.discovery ?? discovery, providerFallback };
+        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: shopping.results, cart: shopping.cart, unchanged: shopping.results.length > 0 || shopping.cart.length > 0, requiresWebMCPAgent: true, handoff, discovery: shopping.discovery ?? discovery, providerFallback };
         const hasCandidates = (Array.isArray(providerFallback.candidates) && providerFallback.candidates.length > 0)
           || (Array.isArray(providerFallback.results) && providerFallback.results.length > 0);
         const message = hasCandidates
-          ? "Public candidates are ready. Verify canonical catalog IDs, exact part numbers, timestamps, and HTTPS retailer offers, then call shopping.search again with listings and publication."
+          ? "Public candidates are ready. Check canonical catalog IDs, part numbers, timestamps, and HTTPS retailer offers, then call shopping.search again with listings and publication. These remain agent-published claims; confirm identity and live availability with the retailer."
           : "Parts shopping requires a connected, authenticated WebMCP agent to publish listings. Public discovery was checked and the handoff JSON is ready for another browsing agent.";
         return shoppingError("AGENT_PUBLICATION_REQUIRED", message, data);
       }
       if (!trustedAuth?.authenticated || !trustedAuth.subject) {
         shopping.setResults([]);
         shopping.setHandoff(handoff);
-        return shoppingError("AUTH_REQUIRED", "Listing publication was rejected because no trusted WebMCP session was present. Caller-supplied authentication fields are ignored; resume the handoff from a trusted WebMCP session.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff, discovery: shopping.discovery });
+        return shoppingError("AUTH_REQUIRED", "Listing publication was rejected because no trusted WebMCP session was present. Caller-supplied authentication fields are ignored; resume the handoff from a trusted WebMCP session.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: shopping.results, cart: shopping.cart, unchanged: true, requiresWebMCPAgent: true, handoff, discovery: shopping.discovery });
       }
       const requestedPublication = publication && typeof publication === "object" ? publication as Record<string, unknown> : {};
       const provider = String(requestedPublication.provider ?? "").trim();
@@ -1214,7 +1220,7 @@ const tools: ToolDef[] = [
       if (!provider || !publishedAt) {
         shopping.setResults([]);
         shopping.setHandoff(handoff);
-        return shoppingError("PUBLICATION_METADATA_REQUIRED", "Each WebMCP publication must include the parts provider and the time the agent sourced the listings.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: [], requiresWebMCPAgent: true, handoff, discovery: shopping.discovery });
+        return shoppingError("PUBLICATION_METADATA_REQUIRED", "Each WebMCP publication must include the parts provider and the time the agent sourced the listings.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: shopping.results, cart: shopping.cart, unchanged: true, requiresWebMCPAgent: true, handoff, discovery: shopping.discovery });
       }
       const publicationIssues = shoppingPublicationIssues(listings, publication);
       if (publicationIssues.length > 0) {
@@ -1225,7 +1231,9 @@ const tools: ToolDef[] = [
           query: searchQuery,
           source: "webmcp-agent-required",
           liveOffers: false,
-          results: [],
+          results: shopping.results,
+          cart: shopping.cart,
+          unchanged: true,
           requiresWebMCPAgent: true,
           handoff,
           discovery: shopping.discovery,
@@ -1288,7 +1296,7 @@ const tools: ToolDef[] = [
   },
   {
     name: "shopping.cart_add",
-    description: "Add an exact shopping result to the build cart",
+    description: "Add an agent-published shopping result to the build cart",
     inputSchema: { type: "object", properties: { resultId: { type: "string", maxLength: 160 }, quantity: { type: "integer", minimum: 1, maximum: 999 } }, required: ["resultId"] },
     annotations: { untrustedContentHint: true },
     execute: async ({ resultId, quantity }) => {
@@ -1298,7 +1306,7 @@ const tools: ToolDef[] = [
       const id = String(resultId);
       const result = useShoppingStore.getState().results.find((item) => item.id === id);
       if (!result) return { content: [{ type: "text", text: `Unknown shopping result ${id}; search for the part first` }], isError: true };
-      if (!result.exactMatch) return { content: [{ type: "text", text: `${result.title} is not an exact catalog match; verify the part number before adding it to the cart` }], isError: true };
+      if (!result.exactMatch) return { content: [{ type: "text", text: `${result.title} does not carry an agent-published exact-match claim; review the part number before adding it to the cart` }], isError: true };
       useShoppingStore.getState().addToCart(id, Number(quantity) || 1);
       return { content: [{ type: "text", text: JSON.stringify(useShoppingStore.getState().getQuote(), null, 2) }], data: useShoppingStore.getState().getQuote() };
     },

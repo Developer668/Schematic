@@ -42,11 +42,11 @@ port, name, or text inference never grants behavior support.
 
 Every preview surface states:
 
-> Scripted outcome · no code ran · wiring and hardware not verified.
+> Behavior Preview · plan-driven visual outcome. Editable firmware and physical wiring are separate bring-up steps.
 
-Every code surface states that source is editable and intended for later
-external use, and that Schematic has not compiled, uploaded, run, or physically
-tested it.
+Every code surface states that source is an editable handoff for later external
+use; compile, upload, and physical bring-up happen when the handoff reaches a
+connected board.
 
 ## Consequences
 

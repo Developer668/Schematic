@@ -3,10 +3,12 @@ import Inspector from "../inspector/Inspector.tsx";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
 import { getCatalogComponent } from "../../data/catalog.ts";
-import { Code2, Eye, FolderKanban, Trash2, ShoppingCart } from "lucide-react";
+import { Code2, Eye, FolderKanban, Trash2, ShoppingCart, CheckCircle2, CircleAlert, CircleDashed } from "lucide-react";
 import ComponentArtwork from "../ComponentArtwork.tsx";
 import ShoppingWorkspace from "../shopping/ShoppingWorkspace.tsx";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
+import { useValidationStore } from "../../store/useValidationStore.ts";
+import { useGraphFocusStore } from "../../store/useGraphFocusStore.ts";
 import DestructiveConfirmButton from "../DestructiveConfirmButton.tsx";
 
 const MonacoWorkspace = lazy(() => import("../editor/MonacoWorkspace.tsx"));
@@ -16,6 +18,8 @@ export default function RightPanel() {
   const setTab = useWorkspaceStore((state) => state.setRightPanelTab);
   const project = useProjectStore((s) => s.project);
   const activeId = useSelectionStore((s) => s.activeComponentId);
+  const validationValid = useValidationStore((s) => s.valid);
+  const validationIssues = useValidationStore((s) => s.issues);
   const active = project.components.find((c) => c.id === activeId);
 
   return (
@@ -94,9 +98,18 @@ export default function RightPanel() {
             <div className="overflow-hidden rounded border border-border">
               <div className="border-b border-border bg-muted/30 px-2 py-1.5 kicker">Wires</div>
               <div className="max-h-[110px] overflow-auto divide-y divide-border">
-                {project.connections.length===0 ? <div className="p-3 text-center text-xs text-muted-foreground">No wires</div> : project.connections.map(w=>(
-                  <div key={w.id} className="flex items-center gap-1.5 px-2 py-1.5 font-mono text-xs"><span className="h-1.5 w-1.5 rounded-full bg-foreground shrink-0" />{w.source.componentId}.{w.source.portId} → {w.target.componentId}.{w.target.portId}</div>
-                ))}
+                {project.connections.length===0 ? <div className="p-3 text-center text-xs text-muted-foreground">No wires</div> : project.connections.map((w) => {
+                  const wireIssues = validationIssues.filter((issue) => issue.affectedConnections?.includes(w.id));
+                  const hasError = wireIssues.some((issue) => issue.severity === "error");
+                  const hasWarning = wireIssues.some((issue) => issue.severity === "warning");
+                  const status = hasError ? "Needs a fix" : hasWarning ? "Review" : validationValid === true ? "Checked" : "Run graph checks";
+                  const StatusIcon = hasError ? CircleAlert : hasWarning ? CircleAlert : validationValid === true ? CheckCircle2 : CircleDashed;
+                  return <button type="button" key={w.id} onClick={() => { useGraphFocusStore.getState().setActiveConnection(w.id); useSelectionStore.getState().setActive(w.source.componentId); }} className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left font-mono text-xs hover:bg-muted" aria-label={`Select wire ${w.id}; ${status}`} title={`${status}: ${w.source.componentId}.${w.source.portId} → ${w.target.componentId}.${w.target.portId}`}>
+                    <StatusIcon size={11} className={hasError ? "text-red-600 dark:text-red-400" : hasWarning ? "text-amber-600 dark:text-amber-400" : validationValid === true ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"} aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate">{w.source.componentId}.{w.source.portId} → {w.target.componentId}.{w.target.portId}</span>
+                    <span className="sr-only">{status}</span>
+                  </button>;
+                })}
               </div>
             </div>
 

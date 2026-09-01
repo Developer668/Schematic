@@ -367,13 +367,16 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     persist(get());
   },
   setResults() {
-    set({ results: [], cart: [], lastSearchAt: null, requestStatus: "failed", discovery: null, publicationError: "Parts shopping needs a connected, authenticated WebMCP agent before listings can be shown. The lookup request is ready to hand off." });
+    // A discovery/publication attempt is not a destructive replacement. Keep
+    // the last accepted listings and cart usable while the next handoff is
+    // pending or rejected; only a successful publication replaces results.
+    set({ requestStatus: "failed", discovery: null, publicationError: "Parts shopping needs a connected, authenticated WebMCP agent before listings can be shown. The lookup request is ready to hand off." });
     persist(get());
   },
   publishAgentResults(rawResults, publication) {
     const results = Array.isArray(rawResults) && rawResults.length <= MAX_SHOPPING_RESULTS && jsonBytes(rawResults) <= 128 * 1024 ? rawResults : [];
     if (!validPublication(publication)) {
-      set({ results: [], cart: [], lastSearchAt: null, requestStatus: "failed", publicationError: "Listing publication rejected: the WebMCP agent authentication or provider provenance is missing or invalid." });
+      set({ requestStatus: "failed", publicationError: "Listing publication rejected: the WebMCP agent authentication or provider provenance is missing or invalid." });
       persist(get());
       return { accepted: false, rejected: results.length, message: get().publicationError ?? undefined };
     }
@@ -385,7 +388,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     const rejected = results.length - normalized.length;
     if (normalized.length === 0) {
       const message = "Listing publication rejected: every listing needs a canonical catalogId, exactMatch=true, part number, an HTTPS retailer URL, a recent timestamp, currency, and provider provenance.";
-      set({ results: [], cart: [], lastSearchAt: null, requestStatus: "failed", publicationError: message });
+      set({ requestStatus: "failed", publicationError: message });
       persist(get());
       return { accepted: false, rejected, message };
     }

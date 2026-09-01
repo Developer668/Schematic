@@ -211,6 +211,50 @@ function cancelled(request: PartsSearchRequest): PartsSearchOutcome {
   return { request, requestId: request.requestId, status: "cancelled", discovery: null, error: "Parts search was cancelled." };
 }
 
+function withRequestIdentity(outcome: PartsSearchOutcome, request: PartsSearchRequest): PartsSearchOutcome {
+  return { ...outcome, request, requestId: request.requestId };
+}
+
+function shareSearchOutcome(
+  outcomePromise: Promise<PartsSearchOutcome>,
+  request: PartsSearchRequest,
+  signal?: AbortSignal,
+) {
+  if (signal?.aborted) return Promise.resolve(cancelled(request));
+  if (!signal) return outcomePromise.then((outcome) => withRequestIdentity(outcome, request));
+  return new Promise<PartsSearchOutcome>((resolve) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve(cancelled(request));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void outcomePromise.then(
+      (outcome) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve(withRequestIdentity(outcome, request));
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve({
+          request,
+          requestId: request.requestId,
+          status: "failed",
+          discovery: null,
+          error: error instanceof Error ? error.message : "Parts search failed.",
+        });
+      },
+    );
+    if (signal.aborted) onAbort();
+  });
+}
+
 function requestUrl(path: string, request: PartsSearchRequest) {
   const base = apiUrl(path);
   const separator = base.includes("?") ? "&" : "?";
@@ -302,15 +346,24 @@ export function createPartsSearchCoordinator(options: PartsSearchClientOptions =
       const invalid: PartsSearchRequest = { requestId: requestIdFactory(), query: "", quantity: 1, requiredCatalogIds: [], requestedAt: new Date(now()).toISOString() };
       return Promise.resolve<PartsSearchOutcome>({ request: invalid, requestId: invalid.requestId, status: "failed", discovery: null, error: "Enter an exact part, board, or manufacturer before searching." });
     }
+    if (submitOptions.signal?.aborted) return Promise.resolve(cancelled(request));
     const key = searchKey(request);
     const existing = !submitOptions.force ? inFlight.get(key) : undefined;
     if (existing && !existing.controller.signal.aborted) {
       active = existing;
-      return existing.promise;
+      // Provider work is shared, but each caller owns its handoff identity and
+      // may stop waiting without aborting another caller's request.
+      return shareSearchOutcome(existing.promise, request, submitOptions.signal);
     }
     if (!submitOptions.force) {
       const cached = cache.get(key);
-      if (cached && cached.expiresAt > now()) return Promise.resolve(cached.outcome);
+      if (cached && cached.expiresAt > now()) {
+        if (submitOptions.signal?.aborted) return Promise.resolve(cancelled(request));
+        // A cache hit reuses provider data, but the request envelope belongs to
+        // this handoff. Keep the current request id/timestamp for cancellation,
+        // persistence, and stale-result guards in the UI.
+        return Promise.resolve(withRequestIdentity(cached.outcome, request));
+      }
       if (cached) cache.delete(key);
     }
     if (active && (active.key !== key || submitOptions.force)) {

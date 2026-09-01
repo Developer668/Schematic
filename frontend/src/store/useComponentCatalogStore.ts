@@ -6,6 +6,7 @@ interface CatalogState {
   category: string | null;
   domain: string | null;
   results: CatalogComponent[];
+  setQuery: (q: string) => void;
   search: (q: string) => void;
   setCategory: (c: string | null) => void;
   setDomain: (d: string | null) => void;
@@ -16,6 +17,9 @@ export const useComponentCatalogStore = create<CatalogState>((set, get) => ({
   category: null,
   domain: null,
   results: catalog,
+  setQuery(q) {
+    set({ query: q });
+  },
   search(q) {
     const { category, domain } = get();
     set({ query: q, results: searchCatalog(q, { category: category ?? undefined, domain: domain ?? undefined }) });

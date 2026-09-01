@@ -11,6 +11,9 @@ describe("explicit Behavior Preview catalog bindings", () => {
     expect(getCatalogComponent("relay")?.behavior).toEqual({ profileId: "relay", profileVersion: 1 });
     expect(getCatalogComponent("servo")?.behavior).toEqual({ profileId: "rotary-actuator", profileVersion: 1 });
     expect(getCatalogComponent("stepper-motor")?.behavior).toEqual({ profileId: "motor", profileVersion: 1, variant: "stepper" });
+    expect(getCatalogComponent("fan-5v-30mm")?.behavior).toEqual({ profileId: "motor", profileVersion: 1, variant: "fan" });
+    expect(getCatalogComponent("vibration-motor-1027")?.behavior).toEqual({ profileId: "motor", profileVersion: 1, variant: "vibration" });
+    expect(getCatalogComponent("active-buzzer")?.behavior).toEqual({ profileId: "buzzer", profileVersion: 1 });
     expect(getCatalogComponent("ntc-temperature-sensor")?.behavior).toEqual({ profileId: "numeric-sensor", profileVersion: 1, variant: "temperature" });
     expect(getCatalogComponent("resistor")?.behavior).toBeUndefined();
   });
@@ -23,6 +26,6 @@ describe("explicit Behavior Preview catalog bindings", () => {
     const resistor = capabilitiesForCatalogComponent({ id: "r-1", definitionId: "resistor" });
     expect(resistor.actions).toHaveLength(0);
     expect(resistor.events).toHaveLength(0);
-    expect(resistor.limitations.join(" ")).toContain("no registered scripted preview behavior");
+    expect(resistor.limitations.join(" ")).toContain("not mapped for this exact catalog part yet");
   });
 });

@@ -89,4 +89,61 @@ describe("validation", () => {
     expect(secondState.issues).toEqual(firstState.issues);
     expect(useProjectStore.getState().project).toEqual(before);
   });
+
+  it("invalidates a checked verdict only when the semantic graph changes", () => {
+    const projects = useProjectStore.getState();
+    projects.clear();
+    const board = useProjectStore.getState().addComponent("esp32-devkit-v1");
+    const led = useProjectStore.getState().addComponent("led");
+    const markChecked = () => useValidationStore.getState().setResult({ valid: true, issues: [] });
+
+    markChecked();
+    useProjectStore.getState().moveComponent(board.id, { x: 640, y: 240 });
+    expect(useValidationStore.getState().valid).toBe(true);
+
+    useProjectStore.getState().updateFirmware(board.id, [{ name: "sketch.ino", content: "void setup() {}\nvoid loop() {}" }]);
+    expect(useValidationStore.getState().valid).toBe(true);
+
+    useProjectStore.getState().updateComponentProps(led.id, { previewLabel: "status" });
+    expect(useValidationStore.getState()).toMatchObject({ valid: null, issues: [], checkedAt: null });
+
+    markChecked();
+    const connection = useProjectStore.getState().connectPorts(
+      { componentId: board.id, portId: "GPIO18" },
+      { componentId: led.id, portId: "IN" },
+    );
+    expect(useValidationStore.getState().valid).toBe(true);
+    expect(useValidationStore.getState().issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(["MISSING_GROUND", "INSUFFICIENT_POWER"]));
+
+    markChecked();
+    useProjectStore.getState().disconnectPorts(connection.id);
+    expect(useValidationStore.getState().valid).toBe(true);
+    expect(useValidationStore.getState().issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(["MISSING_GROUND", "INSUFFICIENT_POWER"]));
+
+    markChecked();
+    useProjectStore.getState().removeComponent(led.id);
+    expect(useValidationStore.getState()).toMatchObject({ valid: null, issues: [], checkedAt: null });
+
+    markChecked();
+    useProjectStore.getState().addComponent("led");
+    expect(useValidationStore.getState()).toMatchObject({ valid: null, issues: [], checkedAt: null });
+  });
+
+  it("lodges rejected connection diagnostics without claiming a whole-graph verdict", () => {
+    useProjectStore.getState().clear();
+    useValidationStore.getState().clear();
+    const board = useProjectStore.getState().addComponent("esp32-devkit-v1");
+    const led = useProjectStore.getState().addComponent("led");
+
+    expect(() => useProjectStore.getState().connectPorts(
+      { componentId: board.id, portId: "GND" },
+      { componentId: led.id, portId: "IN" },
+    )).toThrow();
+    expect(useProjectStore.getState().project.connections).toHaveLength(0);
+    expect(useValidationStore.getState().valid).toBeNull();
+    expect(useValidationStore.getState().checkedAt).toBeNull();
+    expect(useValidationStore.getState().issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "DOMAIN_MISMATCH", affectedComponents: expect.arrayContaining([board.id, led.id]) }),
+    ]));
+  });
 });

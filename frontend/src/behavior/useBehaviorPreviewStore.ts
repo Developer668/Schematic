@@ -6,7 +6,12 @@ import type {
   PreviewStatus,
 } from "./previewTypes.ts";
 
-export const PREVIEW_DISCLAIMER = "Scripted outcome · no code ran · wiring and hardware not verified.";
+/**
+ * Keep the boundary visible without making the preview feel like a dead end:
+ * the canvas demonstrates the declared Behavior Plan, while source and
+ * physical bring-up remain separate handoff steps.
+ */
+export const PREVIEW_DISCLAIMER = "Behavior Preview · plan-driven visual outcome. Editable firmware and physical wiring are separate bring-up steps.";
 
 export function isPreviewRunning(status: PreviewStatus | string) {
   return status === "playing" || status === "partial";

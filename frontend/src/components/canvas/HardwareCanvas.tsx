@@ -21,9 +21,11 @@ import HardwareNode from "./HardwareNode.tsx";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { getCatalogComponent } from "../../data/hardware.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
+import { useGraphFocusStore } from "../../store/useGraphFocusStore.ts";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
-import { Maximize2, Grid3X3, EyeOff, Map, AlertCircle, Cpu, Search, ArrowRight } from "lucide-react";
+import { Maximize2, Grid3X3, EyeOff, Map, AlertCircle, Cpu, Search, ArrowRight, Trash2, Check } from "lucide-react";
 import { componentArtworkHref } from "../../data/componentArtwork.ts";
+import DestructiveConfirmButton from "../DestructiveConfirmButton.tsx";
 
 const nodeTypes = { hardware: HardwareNode };
 
@@ -86,7 +88,15 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
   const showGrid = useWorkspaceStore((state) => state.showGrid);
   const setShowGrid = useWorkspaceStore((state) => state.setShowGrid);
   const snapToGrid = useWorkspaceStore((state) => state.snapToGrid);
-  const { nodes: initialNodes, edges: initialEdges } = useMemo(() => projectToFlow(project), [project]);
+  const activeConnectionId = useGraphFocusStore((state) => state.activeConnectionId);
+  const setActiveConnection = useGraphFocusStore((state) => state.setActiveConnection);
+  const { nodes: initialNodes, edges: initialEdges } = useMemo(() => {
+    const flow = projectToFlow(project);
+    return {
+      ...flow,
+      edges: flow.edges.map<Edge>((edge) => ({ ...edge, selected: edge.id === activeConnectionId })),
+    };
+  }, [activeConnectionId, project]);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -95,6 +105,10 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
   const [dragPreview, setDragPreview] = useState<{ html: string; title: string; x: number; y: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<ReactFlowInstance | null>(null);
+  const activeConnection = useMemo(
+    () => project.connections.find((connection) => connection.id === activeConnectionId) ?? null,
+    [activeConnectionId, project.connections],
+  );
 
   const onSafeNodesChange = useCallback((changes: NodeChange[]) => {
     // React Flow can emit a remove change for keyboard/context-menu deletion.
@@ -125,6 +139,10 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
     setNodes(initialNodes);
     setEdges(initialEdges);
   }, [initialNodes, initialEdges, setNodes, setEdges]);
+
+  useEffect(() => {
+    if (activeConnectionId && !activeConnection) setActiveConnection(null);
+  }, [activeConnection, activeConnectionId, setActiveConnection]);
 
   const onConnect = useCallback(
     (params: FlowConnection) => {
@@ -157,14 +175,22 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
 
   const onNodeClick = useCallback(
     (_: unknown, node: Node) => {
+      setActiveConnection(null);
       useSelectionStore.getState().setActive(node.id);
     },
-    [],
+    [setActiveConnection],
   );
 
   const onPaneClick = useCallback(() => {
+    setActiveConnection(null);
     useSelectionStore.getState().clear();
-  }, []);
+  }, [setActiveConnection]);
+
+  const onEdgeClick = useCallback((_: unknown, edge: Edge) => {
+    setActiveConnection(edge.id);
+    const connection = useProjectStore.getState().project.connections.find((item) => item.id === edge.id);
+    useSelectionStore.getState().setActive(connection?.source.componentId ?? null);
+  }, [setActiveConnection]);
 
   // Drag & drop from left palette — image/board preview in world
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -227,6 +253,7 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
         onEdgesChange={onSafeEdgesChange}
         onConnect={onConnect}
         onNodeClick={onNodeClick}
+        onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
         onInit={(instance) => { flowRef.current = instance; }}
@@ -315,7 +342,7 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
             </div>
             <p className="kicker">New hardware project</p>
             <h2 id="empty-canvas-title" className="mt-2 text-xl font-semibold tracking-[-0.035em]">Place the first component.</h2>
-            <p className="mt-2 max-w-md text-xs leading-5 text-muted-foreground">Start with a controller, then add devices and connect compatible ports. Run on-demand static graph checks as you build; physical wiring, hardware behavior, and editable source remain unverified.</p>
+            <p className="mt-2 max-w-md text-xs leading-5 text-muted-foreground">Start with a controller, then add devices and connect compatible ports. Graph checks catch modeled connection problems, while Behavior Preview demonstrates the plan-driven outcome.</p>
             <div className="mt-5 flex flex-col gap-2 sm:flex-row">
               <button type="button" onClick={() => useProjectStore.getState().addComponent("esp32-devkit-v1")} className="run-button h-9 flex-1 px-4">
                 <Cpu size={13} /> Add an ESP32 board
@@ -353,6 +380,27 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
         </div>
       )}
       {connectionError && <div className="canvas-error" role="alert"><AlertCircle size={13} />{connectionError}</div>}
+      {activeConnection && (
+        <div className="absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-2 rounded-md border border-border bg-card px-2.5 py-2 shadow-lg" role="toolbar" aria-label={`Wire ${activeConnection.id} actions`}>
+          <div className="min-w-0 text-[10px] leading-tight">
+            <div className="truncate font-mono font-medium">{activeConnection.id}</div>
+            <div className="truncate text-muted-foreground">{activeConnection.source.componentId}:{activeConnection.source.portId} → {activeConnection.target.componentId}:{activeConnection.target.portId} · {activeConnection.domain}</div>
+          </div>
+          <DestructiveConfirmButton
+            targetKey={activeConnection.id}
+            onConfirm={() => {
+              useProjectStore.getState().disconnectPorts(activeConnection.id);
+              setActiveConnection(null);
+            }}
+            className="canvas-wire-delete inline-flex h-7 shrink-0 items-center gap-1 rounded border border-red-300 px-2 text-[10px] font-medium text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/30"
+            aria-label={`Delete wire ${activeConnection.id}`}
+            confirmAriaLabel={`Confirm delete wire ${activeConnection.id}`}
+            title={`Arm deletion of wire ${activeConnection.id}`}
+            confirmTitle={`Click again to permanently delete wire ${activeConnection.id}`}
+            confirmChildren={<><Check size={11} /> Confirm</>}
+          ><Trash2 size={11} /> Delete wire</DestructiveConfirmButton>
+        </div>
+      )}
     </div>
   );
 }

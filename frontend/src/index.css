@@ -175,12 +175,19 @@ body.landing-body { overflow: auto; }
 .component-list { display: grid; gap: 4px; }
 .component-list-item { display: flex; width: 100%; align-items: center; gap: 9px; border: 1px solid transparent; border-radius: 6px; padding: 7px; text-align: left; transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease; }
 .component-list-item:hover { border-color: hsl(var(--border)); background: hsl(var(--muted) / 0.6); transform: translateX(1px); }
+.component-list-item:focus-visible { border-color: hsl(var(--accent) / .55); background: hsl(var(--accent) / .06); }
+.component-list-item:active { transform: translateY(1px); }
 .component-preview { position: relative; width: 58px; height: 48px; display: grid; place-items: center; overflow: hidden; isolation: isolate; border-radius: 4px; background: hsl(var(--muted) / 0.18); border: 1px solid hsl(var(--border) / 0.5); }
 .component-add { display: grid; width: 22px; height: 22px; flex: none; place-items: center; align-self: center; border: 1px solid hsl(var(--border)); border-radius: 5px; color: hsl(var(--muted-foreground)); background: hsl(var(--card)); font-size: 12px; opacity: 0; transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease; }
 .component-list-item:hover .component-add, .component-list-item:focus-visible .component-add { opacity: 1; color: hsl(var(--accent)); border-color: hsl(var(--accent) / 0.45); }
 .component-list.is-compact { gap: 1px; }
 .component-list.is-compact .component-list-item { padding: 4px 6px; }
 .component-list.is-compact .component-preview { width: 44px; height: 38px; }
+.component-list-progress { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 1px 0; border-top: 1px solid hsl(var(--border) / .7); padding: 8px 5px 3px; color: hsl(var(--muted-foreground)); font: 600 9px/1.2 'Geist Mono', ui-monospace, monospace; }
+.component-list-progress span:last-child { font-weight: 500; opacity: .78; }
+.component-library-guidance { max-width: 30ch; }
+.component-preview-status { width: 6px; height: 6px; flex: none; margin-left: 2px; border: 1px solid hsl(var(--muted-foreground) / .55); border-radius: 50%; background: transparent; }
+.component-preview-status.is-mapped { border-color: hsl(152 70% 38% / .72); background: hsl(152 70% 38% / .72); }
 
 .component-artwork { position: relative; z-index: 1; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; object-position: center; filter: drop-shadow(0 2px 4px hsl(240 20% 4% / .14)); user-select: none; pointer-events: none; display: block; }
 .component-artwork-inline { display: grid; place-items: center; overflow: hidden; width: 100%; height: 100%; }
@@ -210,6 +217,7 @@ body.landing-body { overflow: auto; }
 .hardware-part-artwork img, .hardware-part-artwork .component-artwork, .hardware-part-artwork .component-artwork-inline { width: 100%; height: 100%; max-height: 100%; object-fit: contain; object-position: center; }
 .component-visual-overlay { position: absolute; z-index: 3; inset: 4px 14px; display: grid; place-items: center; pointer-events: none; overflow: visible; }
 .component-visual-primitives { display: flex; max-width: 86%; align-items: center; justify-content: center; gap: 5px; flex-wrap: wrap; pointer-events: none; }
+.component-visual-control { pointer-events: auto; cursor: pointer; appearance: none; }
 .component-visual-indicator { width: 19px; height: 19px; border: 2px solid color-mix(in srgb, var(--indicator-color, #71717a) 48%, #52525b); border-radius: 999px; background-color: color-mix(in srgb, var(--indicator-color, #71717a) 22%, #18181b); opacity: .68; transition: opacity 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
 .component-visual-indicator.is-on { opacity: calc(.68 + (var(--indicator-intensity, 1) * .32)); background-color: var(--indicator-color, #22c55e); border-color: color-mix(in srgb, var(--indicator-color, #22c55e) 72%, white); box-shadow: 0 0 calc(8px + (var(--indicator-intensity, 1) * 16px)) color-mix(in srgb, var(--indicator-color, #22c55e) 72%, transparent), inset 0 0 4px rgb(255 255 255 / .62); transform: scale(1.06); }
 .component-visual-button { pointer-events: auto; border: 1px solid hsl(var(--accent) / .45); border-radius: 999px; padding: 3px 7px; color: hsl(var(--accent)); background: hsl(var(--card) / .94); box-shadow: 0 2px 8px hsl(240 20% 4% / .18); font: 700 7px/1 ui-monospace, monospace; letter-spacing: .08em; cursor: pointer; transition: color 120ms ease, background 120ms ease, transform 120ms ease; }
@@ -218,8 +226,10 @@ body.landing-body { overflow: auto; }
 .component-visual-switch { display: inline-flex; align-items: center; gap: 4px; border: 1px solid hsl(var(--border)); border-radius: 999px; padding: 3px 5px; color: hsl(var(--muted-foreground)); background: hsl(var(--card) / .94); font: 700 7px/1 ui-monospace, monospace; text-transform: uppercase; }
 .component-visual-switch i { width: 13px; height: 7px; border-radius: 999px; background: hsl(var(--muted)); box-shadow: inset 0 0 0 1px hsl(var(--border)); }
 .component-visual-display { display: flex; min-width: 74px; max-width: 92%; flex-direction: column; gap: 1px; overflow: hidden; border: 1px solid #263244; border-radius: 2px; padding: 4px 5px; color: #bfdbfe; background: #05070a; box-shadow: 0 2px 9px rgb(0 0 0 / .3); font: 600 7px/1.3 ui-monospace, monospace; text-align: left; }
+.component-visual-display.component-visual-control:hover { border-color: #4f80b8; background: #0a101a; }
 .component-visual-display span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .component-visual-number { display: inline-flex; align-items: baseline; gap: 2px; border: 1px solid hsl(var(--accent) / .25); border-radius: 4px; padding: 4px 6px; color: hsl(var(--foreground)); background: hsl(var(--card) / .94); box-shadow: 0 2px 8px hsl(240 20% 4% / .16); font: 700 11px/1 ui-monospace, monospace; }
+.component-visual-number.component-visual-control:hover, .component-visual-switch.component-visual-control:hover, .component-visual-rotation.component-visual-control:hover, .component-visual-activity.component-visual-control:hover { border-color: hsl(var(--accent)); }
 .component-visual-number small { color: hsl(var(--muted-foreground)); font-size: 7px; }
 .component-visual-rotation { display: grid; width: 25px; height: 25px; place-items: center; border: 1px solid hsl(var(--border)); border-radius: 999px; background: hsl(var(--card) / .9); }
 .component-visual-rotation i { display: block; width: 2px; height: 9px; border-radius: 2px; background: hsl(var(--accent)); transform: rotate(var(--rotation, 0deg)) translateY(-3px); transform-origin: 50% 8px; }
@@ -509,6 +519,7 @@ html.light .react-flow__pane {
 /* Keep compact engineering controls usable on touch screens without changing desktop density. */
 @media (pointer: coarse) {
   .workbench .workspace-icon-button { width: 40px; height: 40px; }
+  .workbench .library-toggle-button { width: 40px; height: 40px; }
   .workbench .secondary-button, .workbench .run-button { min-height: 40px; height: 40px; }
   .workbench .component-list-item { min-height: 48px; }
   .workbench .component-list-item .component-add { width: 28px; height: 28px; opacity: 1; }
@@ -526,7 +537,7 @@ html.light .react-flow__pane {
 ::selection { background: hsl(var(--foreground)); color: hsl(var(--background)) }
 /* Parts desk — an explicit industrial handoff with a hard boundary between public discovery and verified cart data. */
 .shopping-workspace { --shopping-accent: hsl(var(--accent)); --shopping-line: hsl(var(--border)); isolation: isolate; }
-.shopping-header { background: linear-gradient(135deg, hsl(var(--muted) / .24), hsl(var(--card) / .98) 58%, hsl(var(--accent) / .035)); }
+.shopping-header { background: hsl(var(--muted) / .12); }
 .shopping-agent-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid hsl(var(--accent) / .2); border-radius: 999px; padding: 4px 8px; color: hsl(var(--accent)); background: hsl(var(--accent) / .08); font: 700 9px/1 ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; }
 .shopping-agent-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--accent)); box-shadow: 0 0 0 3px hsl(var(--accent) / .12); }
 .shopping-header-stats { align-items: stretch; gap: 0; border: 1px solid var(--shopping-line); border-radius: 4px; overflow: hidden; background: hsl(var(--card) / .72); }
@@ -566,10 +577,10 @@ html.light .react-flow__pane {
 .shopping-request-step.is-active .shopping-step-dot { border-color: hsl(var(--accent) / .45); color: hsl(var(--accent)); background: hsl(var(--accent) / .1); }
 .shopping-step-line { height: 1px; flex: 1; margin: 0 2px; background: var(--shopping-line); }
 .shopping-request-step.is-active .shopping-step-line { background: hsl(var(--accent) / .35); }
-.shopping-state-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; margin-top: 8px; border: 1px solid var(--shopping-line); border-left: 3px solid hsl(var(--accent) / .6); border-radius: 4px; padding: 9px 10px; background: hsl(var(--card) / .76); }
-.shopping-state-panel.is-searching, .shopping-state-panel.is-candidates, .shopping-state-panel.is-verification { border-left-color: hsl(38 92% 50% / .8); }
-.shopping-state-panel.is-rate-limited, .shopping-state-panel.is-failed { border-left-color: hsl(0 72% 52% / .8); }
-.shopping-state-panel.is-verified, .shopping-state-panel.is-partial { border-left-color: hsl(152 70% 38% / .8); }
+.shopping-state-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; margin-top: 8px; border: 1px solid var(--shopping-line); border-radius: 4px; padding: 9px 10px; background: hsl(var(--card) / .76); }
+.shopping-state-panel.is-searching, .shopping-state-panel.is-candidates, .shopping-state-panel.is-verification { border-color: hsl(38 92% 50% / .35); }
+.shopping-state-panel.is-rate-limited, .shopping-state-panel.is-failed { border-color: hsl(0 72% 52% / .35); }
+.shopping-state-panel.is-verified, .shopping-state-panel.is-partial { border-color: hsl(152 70% 38% / .32); }
 .shopping-state-panel h3 { margin-top: 3px; color: hsl(var(--foreground)); font-size: 11px; font-weight: 700; }
 .shopping-state-panel p { margin-top: 3px; max-width: 78ch; color: hsl(var(--muted-foreground)); font-size: 10px; line-height: 1.45; }
 .shopping-state-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
@@ -688,7 +699,8 @@ button.shopping-offer-radio { cursor: pointer; }
 @media (pointer: coarse) {
   .workspace-icon-button,
   .node-toolbar-delete,
-  .inspector-delete { min-width: 36px; min-height: 36px; }
+  .inspector-delete,
+  .canvas-wire-delete { min-width: 36px; min-height: 36px; }
   .secondary-button,
   .run-button,
   .bottom-dock-tab,
@@ -697,6 +709,14 @@ button.shopping-offer-radio { cursor: pointer; }
   .behavior-control-toggle,
   .code-file-tab,
   .component-visual-button { min-height: 36px; }
+  .shopping-workspace .shopping-request-button,
+  .shopping-workspace .shopping-quantity-field,
+  .shopping-workspace .shopping-primary-action,
+  .shopping-workspace .shopping-secondary-action,
+  .shopping-workspace .shopping-design-button { min-height: 40px; }
+  .shopping-workspace .shopping-offer-radio { width: 36px; height: 36px; }
+  .shopping-workspace .shopping-cart-quantity { height: 40px; }
+  .shopping-workspace .shopping-cart-quantity button { width: 35px; height: 39px; }
 }
 
 /* monaco */

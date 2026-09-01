@@ -50,7 +50,7 @@ describe("shared hardware resolvers", () => {
   it("exposes only exact typed-preview bindings on the active catalog", () => {
     expect(getCatalogComponent("led")?.behavior).toEqual({ profileId: "digital-indicator", profileVersion: 1 });
     expect(getCatalogComponent("ds3231")?.behavior).toBeUndefined();
-    expect(getCatalogComponent("ssd1306")?.behavior).toBeUndefined();
+    expect(getCatalogComponent("ssd1306")?.behavior).toEqual({ profileId: "text-display", profileVersion: 1 });
     expect(getCatalogComponent("led")).not.toHaveProperty("model");
   });
 

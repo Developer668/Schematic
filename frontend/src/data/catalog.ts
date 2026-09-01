@@ -69,10 +69,45 @@ const EXPLICIT_BEHAVIOR_BINDINGS: Readonly<Record<string, CatalogBehaviorBinding
   pushbutton: { profileId: "momentary-input", profileVersion: 1 },
   led: { profileId: "digital-indicator", profileVersion: 1 },
   lcd1602: { profileId: "text-display", profileVersion: 1 },
+  // Text-display bindings are intentionally explicit: these common modules
+  // share the same user-facing outcome (bounded text on a screen), while the
+  // exact catalog identity still remains the source of truth for wiring and
+  // procurement.
+  "lcd1602-i2c": { profileId: "text-display", profileVersion: 1 },
+  lcd2004: { profileId: "text-display", profileVersion: 1 },
+  "lcd2004-i2c": { profileId: "text-display", profileVersion: 1 },
+  "ssd1306": { profileId: "text-display", profileVersion: 1 },
+  "ssd1306-i2c-4pin": { profileId: "text-display", profileVersion: 1 },
+  "oled-0-91": { profileId: "text-display", profileVersion: 1 },
+  "ssd1306-128x32": { profileId: "text-display", profileVersion: 1 },
+  "ssd1306-0-96-blue": { profileId: "text-display", profileVersion: 1 },
+  "sh1106-oled-1-3": { profileId: "text-display", profileVersion: 1 },
+  "sh1107-oled": { profileId: "text-display", profileVersion: 1 },
+  "oled-1-3-sh1106-2": { profileId: "text-display", profileVersion: 1 },
+  "lcd-128x64-oled": { profileId: "text-display", profileVersion: 1 },
+  "lcd-1602-blue": { profileId: "text-display", profileVersion: 1 },
+  "lcd-2004-blue": { profileId: "text-display", profileVersion: 1 },
+  "char-lcd-20x4": { profileId: "text-display", profileVersion: 1 },
+  "char-lcd-40x2": { profileId: "text-display", profileVersion: 1 },
   buzzer: { profileId: "buzzer", profileVersion: 1 },
+  // These exact parts share the same bounded audible outcome. The preview is
+  // conceptual; the catalog identity still controls real wiring/procurement.
+  "active-buzzer": { profileId: "buzzer", profileVersion: 1 },
+  "buzzer-5v-active": { profileId: "buzzer", profileVersion: 1 },
+  "buzzer-active-3v": { profileId: "buzzer", profileVersion: 1 },
+  "buzzer-passive": { profileId: "buzzer", profileVersion: 1 },
   relay: { profileId: "relay", profileVersion: 1 },
+  "relay-1ch": { profileId: "relay", profileVersion: 1 },
   servo: { profileId: "rotary-actuator", profileVersion: 1 },
+  "mg996r-servo": { profileId: "rotary-actuator", profileVersion: 1 },
+  "servo-9g-sg90": { profileId: "rotary-actuator", profileVersion: 1 },
+  "servo-mg90s": { profileId: "rotary-actuator", profileVersion: 1 },
+  "servo-ds3218": { profileId: "rotary-actuator", profileVersion: 1 },
+  "servo-jx6221": { profileId: "rotary-actuator", profileVersion: 1 },
   "stepper-motor": { profileId: "motor", profileVersion: 1, variant: "stepper" },
+  "nema17-stepper": { profileId: "motor", profileVersion: 1, variant: "stepper" },
+  "fan-5v-30mm": { profileId: "motor", profileVersion: 1, variant: "fan" },
+  "vibration-motor-1027": { profileId: "motor", profileVersion: 1, variant: "vibration" },
   "ntc-temperature-sensor": { profileId: "numeric-sensor", profileVersion: 1, variant: "temperature" },
 };
 
@@ -770,12 +805,37 @@ export function getCatalogComponent(id: string | undefined) {
 export const categories: CatalogCategory[] = [...new Set(catalog.map((c) => c.category))].sort();
 
 export function searchCatalog(query: string, filters?: { category?: string; domain?: string }): CatalogComponent[] {
-  const q = query.trim().toLowerCase();
-  return catalog.filter((c) => {
-    if (filters?.category && c.category !== filters.category) return false;
-    if (filters?.domain && !c.ports.some((p) => p.domain === filters.domain)) return false;
-    if (!q) return true;
-    const hay = [c.id, c.title, c.tagName, c.manufacturer, c.description, ...(c.tags ?? [])].filter(Boolean).join(" ").toLowerCase();
-    return hay.includes(q);
-  });
+  const normalize = (value: string) => value
+    .toLocaleLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, " ")
+    .trim();
+  const normalizedQuery = normalize(query);
+  const queryTokens = normalizedQuery ? normalizedQuery.split(/\s+/) : [];
+  const compactQuery = queryTokens.join("");
+
+  return catalog.flatMap((c, index) => {
+    if (filters?.category && c.category !== filters.category) return [];
+    if (filters?.domain && !c.ports.some((p) => p.domain === filters.domain)) return [];
+    if (!queryTokens.length) return [{ component: c, index, score: 0 }];
+
+    const fields = [c.id, c.title, c.tagName, c.manufacturer, c.description, ...(c.tags ?? [])]
+      .filter((value): value is string => Boolean(value))
+      .map(normalize);
+    const hay = fields.join(" ");
+    const compactHay = hay.replace(/\s+/g, "");
+    if (!queryTokens.every((token) => hay.includes(token)) && !compactHay.includes(compactQuery)) return [];
+
+    const id = normalize(c.id);
+    const title = normalize(c.title);
+    let score = 0;
+    if (id === normalizedQuery || id.replace(/\s+/g, "") === compactQuery) score += 100;
+    if (title === normalizedQuery || title.replace(/\s+/g, "") === compactQuery) score += 80;
+    if (id.startsWith(normalizedQuery) || id.replace(/\s+/g, "").startsWith(compactQuery)) score += 40;
+    if (title.startsWith(normalizedQuery) || title.replace(/\s+/g, "").startsWith(compactQuery)) score += 30;
+    score += queryTokens.reduce((total, token) => total + (id.includes(token) ? 8 : 0) + (title.includes(token) ? 5 : 0), 0);
+    return [{ component: c, index, score }];
+  })
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ component }) => component);
 }

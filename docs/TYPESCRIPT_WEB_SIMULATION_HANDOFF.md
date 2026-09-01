@@ -924,13 +924,14 @@ Recommended badges:
 - `Imported`
 - `Linked to preview plan`
 - `Preview link stale`
-- `Not tested in Schematic`
+- `External bring-up pending`
 - `Exported`
 
 Persistent Code-panel notice:
 
-> Editable source for external use. Schematic has not compiled, uploaded, run,
-> or physically tested this code. Behavior Preview follows the Behavior Plan.
+> Editable source handoff for external board testing. Behavior Preview follows
+> the Behavior Plan; compile, upload, and physical bring-up happen on connected
+> hardware.
 
 Remove `Compiled` and `Uploaded` from the in-app lifecycle. External workflows
 may report their own results in a future integration, but that is a separate
@@ -943,11 +944,12 @@ provenance domain and not part of this roadmap.
 - Rename `Run` to `Preview behavior`.
 - Rename `Stop` to `Pause preview` when playback is active.
 - Provide `Reset preview`.
-- Show a persistent `Scripted outcome · no code ran · wiring and hardware not
-  verified` badge while a preview session is present.
+- Show a persistent `Behavior Preview · plan-driven visual outcome` notice while
+  a preview session is present, with a short explanation that editable firmware
+  and physical wiring are separate bring-up steps.
 - Show plan errors separately from graph issues.
-- Use the same two-axis warning in preview empty, ready, partial, and completed
-  result states so no attractive visual state becomes an implicit hardware claim.
+- Keep the plan-driven outcome and graph Problems as separate, visible surfaces
+  so a successful visual state never becomes an implicit hardware claim.
 
 ### 11.2 Canvas
 
@@ -1052,7 +1054,8 @@ WebMCP callbacks must be thin adapters over shared application commands.
 - writes normal editable files with exact-hash conflict protection;
 - may link the written revision to a plan hash;
 - selects the target board and opens Code;
-- response always says it was not compiled, uploaded, run, or tested.
+- response identifies the document as an editable handoff; compile, upload, and
+  physical testing remain external connected-board steps.
 
 `code.read`
 
@@ -1384,8 +1387,8 @@ The new direction is complete when:
 - button, LED, display, buzzer, relay, servo, motor, and sensor profiles work
   through generic visual primitives;
 - a preview is deterministic, seekable, resettable, and bounded;
-- the canvas clearly labels it as scripted behavior rather than firmware
-  execution;
+- the canvas clearly labels it as a plan-driven visual outcome rather than
+  firmware execution;
 - graph diagnostics remain independently visible;
 - agents can write normal multi-file source to the Code panel;
 - people can edit source over many turns without plan-driven overwrites;
@@ -1494,18 +1497,14 @@ hashing inside the deep behavior package.
 Use:
 
 - `Behavior Preview`;
-- `Scripted preview`;
-- `Expected outcome`;
+- `Plan-driven visual outcome`;
 - `Typed component actions`;
-- `Plan checked`;
-- `Preview partially available`;
-- `Action unavailable in preview`;
-- `Editable code`;
+- `Graph checks`;
+- `Editable source handoff`;
 - `AI draft`;
 - `Human edited`;
 - `Linked to preview plan`;
 - `Preview link stale`;
-- `Not tested in Schematic`;
 - `Copy/download for external testing`.
 
 Avoid:
@@ -1523,12 +1522,12 @@ Avoid:
 
 Recommended results:
 
-- “Behavior Plan checked. This preview shows the requested outcome; no source
-  code ran.”
-- “Editable source added to Code. It has not been compiled, uploaded, run, or
-  physically tested by Schematic.”
-- “This action is unavailable for the selected component profile. No visual
-  state was changed.”
+- “Behavior Plan checked. This preview shows the requested plan-driven outcome;
+  source stays an editable handoff.”
+- “Editable source added to Code. Compile, upload, and physical bring-up happen
+  when you move the handoff to connected hardware.”
+- “This action is not mapped for the selected catalog part yet. Placement,
+  graph checks, and source export remain available.”
 - “The project changed after this plan was prepared. Prepare the preview again.”
 - “The code or plan changed after they were linked. The preview still follows
   the Behavior Plan, not the source.”

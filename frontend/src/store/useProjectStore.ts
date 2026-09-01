@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import { sha256 } from "@schematic/behavior/canonicalize";
+import { validateConnection as validateGraphConnection } from "@schematic/validation";
 import { defaultProperties, componentPort, getCatalogComponent, isBoardDefinition, orientConnectionEndpoints, resolveFirmwareBinding, boardTargetFor } from "../data/hardware.ts";
 import { useSelectionStore } from "./useSelectionStore.ts";
-import { useValidationStore } from "./useValidationStore.ts";
+import { useGraphFocusStore } from "./useGraphFocusStore.ts";
+import { useValidationStore, validateProject, type ValidationIssue } from "./useValidationStore.ts";
 import { useBehaviorPreviewStore } from "../behavior/useBehaviorPreviewStore.ts";
 import { assertPersistenceMutationReady, getPersistenceGate, markExpectedPersistenceFallback } from "./persistenceGate.ts";
 import {
@@ -126,6 +128,17 @@ export class WorkspaceCapacityError extends Error {
   }
 }
 
+/** Structured graph diagnostics raised while a new wire is being verified. */
+export class ConnectionValidationError extends Error {
+  readonly issues: readonly ValidationIssue[];
+
+  constructor(issues: readonly ValidationIssue[]) {
+    super(issues[0]?.message ?? "The connection conflicts with graph rules.");
+    this.name = "ConnectionValidationError";
+    this.issues = issues;
+  }
+}
+
 export function getWorkspaceRecoveryError() {
   return workspaceRecoveryError;
 }
@@ -189,6 +202,24 @@ function makeId(prefix: string) {
 }
 
 function now() { return new Date().toISOString(); }
+
+function connectionAttemptIssue(
+  code: string,
+  message: string,
+  source: { componentId: string; portId: string },
+  target: { componentId: string; portId: string },
+): ValidationIssue {
+  const scope = [source.componentId, source.portId, target.componentId, target.portId]
+    .map((value) => encodeURIComponent(value).slice(0, 40))
+    .join("-");
+  return {
+    id: `connection-attempt-${code}-${scope}`.slice(0, 160),
+    severity: "error",
+    code,
+    message,
+    affectedComponents: [...new Set([source.componentId, target.componentId])].slice(0, 2),
+  };
+}
 
 function cloneBoundedProjectJson(value: unknown, budget: { nodes: number }, depth = 0): unknown {
   budget.nodes += 1;
@@ -587,6 +618,7 @@ export function reloadForCurrentUser() {
 
 function resetProjectRuntime() {
   useSelectionStore.getState().clear();
+  useGraphFocusStore.getState().clear();
   // Preview state is ephemeral and must be recreated for the newly active
   // graph; no firmware/runtime store belongs to the project repository.
   useBehaviorPreviewStore.getState().setSnapshot(null, "idle");
@@ -596,6 +628,35 @@ function resetProjectRuntime() {
 
 const initialState = readStoredState();
 const initialProject = initialState.projects.find((project) => project.id === initialState.activeProjectId) ?? initialState.projects[0];
+
+/**
+ * Validation verdicts describe one exact semantic graph revision. Canvas
+ * position, labels, plans, and editable source are outside that verdict, so
+ * those high-frequency/artifact-only changes must not erase a still-current
+ * result. Component properties are compared canonically only after their
+ * immutable references differ, keeping the common drag path allocation-free.
+ */
+function validationGraphReferencesEqual(left: HardwareGraph, right: HardwareGraph) {
+  if (left.id !== right.id
+    || left.components.length !== right.components.length
+    || left.connections.length !== right.connections.length) return false;
+  for (let index = 0; index < left.components.length; index += 1) {
+    const a = left.components[index];
+    const b = right.components[index];
+    if (a === b) continue;
+    if (a.id !== b.id || a.definitionId !== b.definitionId) return false;
+    if (a.properties !== b.properties && sha256(a.properties) !== sha256(b.properties)) return false;
+  }
+  for (let index = 0; index < left.connections.length; index += 1) {
+    const a = left.connections[index];
+    const b = right.connections[index];
+    if (a === b) continue;
+    if (a.id !== b.id || a.domain !== b.domain
+      || a.source.componentId !== b.source.componentId || a.source.portId !== b.source.portId
+      || a.target.componentId !== b.target.componentId || a.target.portId !== b.target.portId) return false;
+  }
+  return true;
+}
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   project: initialProject,
@@ -662,31 +723,57 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   connectPorts(source, target) {
     const current = get().project;
-    if (current.connections.length >= MAX_CONNECTIONS_PER_PROJECT) throw new Error(`A project may contain at most ${MAX_CONNECTIONS_PER_PROJECT} connections`);
+    const reject = (code: string, message: string): never => {
+      const issue = connectionAttemptIssue(code, message, source, target);
+      useValidationStore.getState().lodgeIssues([issue]);
+      throw new ConnectionValidationError([issue]);
+    };
+    if (current.connections.length >= MAX_CONNECTIONS_PER_PROJECT) return reject("MAX_CONNECTIONS", `A project may contain at most ${MAX_CONNECTIONS_PER_PROJECT} connections`);
     const sourcePort = componentPort(current, source.componentId, source.portId);
     const targetPort = componentPort(current, target.componentId, target.portId);
-    if (!sourcePort || !targetPort) throw new Error("Both connection endpoints must reference existing component ports");
-    if (source.componentId === target.componentId) throw new Error("A component cannot be wired to itself");
-    const oriented = orientConnectionEndpoints(source, sourcePort, target, targetPort);
+    if (!sourcePort || !targetPort) return reject("MISSING_ENDPOINT", "Both connection endpoints must reference existing component ports");
+    if (source.componentId === target.componentId) return reject("SELF_CONNECTION", "A component cannot be wired to itself");
+    let oriented: ReturnType<typeof orientConnectionEndpoints>;
+    try {
+      oriented = orientConnectionEndpoints(source, sourcePort, target, targetPort);
+    } catch {
+      return reject("INVALID_CONNECTION_DIRECTION", "A connection needs one driving port and one receiving port; two input or two output ports cannot be wired together");
+    }
     const orientedSourcePort = componentPort(current, oriented.source.componentId, oriented.source.portId)!;
     const orientedTargetPort = componentPort(current, oriented.target.componentId, oriented.target.portId)!;
     const compatiblePower = ["power", "power_output"].includes(orientedSourcePort.domain) && ["power", "power_output"].includes(orientedTargetPort.domain);
-    if (orientedSourcePort.domain !== orientedTargetPort.domain && !compatiblePower) throw new Error(`Incompatible domains: ${orientedSourcePort.domain} → ${orientedTargetPort.domain}`);
     const duplicate = current.connections.some((connection) => (
       (connection.source.componentId === oriented.source.componentId && connection.source.portId === oriented.source.portId && connection.target.componentId === oriented.target.componentId && connection.target.portId === oriented.target.portId) ||
       (connection.source.componentId === oriented.target.componentId && connection.source.portId === oriented.target.portId && connection.target.componentId === oriented.source.componentId && connection.target.portId === oriented.source.portId)
     ));
-    if (duplicate) throw new Error("Those ports are already connected");
+    if (duplicate) return reject("DUPLICATE_CONNECTION", "Those ports are already connected");
     const id = makeId("conn");
     const domain = compatiblePower ? "power" : orientedSourcePort.domain;
+    const candidate = { id, source: oriented.source, target: oriented.target, domain };
+    const verification = validateGraphConnection(
+      current as unknown as Parameters<typeof validateGraphConnection>[0],
+      candidate as unknown as Parameters<typeof validateGraphConnection>[1],
+      (definitionId) => getCatalogComponent(definitionId),
+    );
+    const errors = verification.issues.filter((issue) => issue.severity === "error");
+    if (errors.length > 0) {
+      const affectedComponents = [...new Set([source.componentId, target.componentId])];
+      const scopedIssues = errors.map((issue) => ({
+        ...issue,
+        affectedComponents: [...new Set([...(issue.affectedComponents ?? []), ...affectedComponents])],
+      }));
+      useValidationStore.getState().lodgeIssues(scopedIssues);
+      throw new ConnectionValidationError(scopedIssues);
+    }
     set((state) => {
       const codeDocuments = markCodeDocumentsStale(state.project.codeDocuments, "project");
-      const project = { ...state.project, connections: [...state.project.connections, { id, source: oriented.source, target: oriented.target, domain }], ...(codeDocuments ? { codeDocuments } : {}), updatedAt: now() };
+      const project = { ...state.project, connections: [...state.project.connections, candidate], ...(codeDocuments ? { codeDocuments } : {}), updatedAt: now() };
       const projects = state.projects.map((item) => item.id === project.id ? project : item);
       persistState(projects, state.activeProjectId);
       return { project, projects };
     });
-    return { id, domain, source: oriented.source, target: oriented.target };
+    useValidationStore.getState().setResult(validateProject(get().project));
+    return candidate;
   },
 
   disconnectPorts(connectionId) {
@@ -697,6 +784,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       persistState(projects, state.activeProjectId);
       return { project, projects };
     });
+    useValidationStore.getState().setResult(validateProject(get().project));
   },
 
   getGraph() { return get().project; },
@@ -1073,6 +1161,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   listProjects() { return get().projects; },
 }));
+
+// A pass/fail badge must never survive a semantic graph edit. This subscriber
+// also covers project replacement and same-room cross-tab updates, while the
+// comparison deliberately preserves verdicts across layout and source edits.
+useProjectStore.subscribe((next, previous) => {
+  if (!validationGraphReferencesEqual(next.project, previous.project)) {
+    useValidationStore.getState().clear();
+  }
+});
 
 function applyRemoteState(value: unknown) {
   if (!value || typeof value !== "object") return;

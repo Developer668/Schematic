@@ -92,16 +92,15 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
         <ComponentVisualOverlay
           componentId={data.instanceId}
           projection={projection}
+          onAction={(actionId, payload) => {
+            void invokeAction({
+              componentId: data.instanceId,
+              definitionId: data.definitionId,
+              actionId,
+              payload,
+            });
+          }}
           onEvent={(eventId, payload) => {
-            if (eventId === "button.pressed" || eventId === "button.released") {
-              void invokeAction({
-                componentId: data.instanceId,
-                definitionId: data.definitionId,
-                actionId: "button.setPressed",
-                payload: { kind: "literal", value: { pressed: eventId === "button.pressed" } },
-              });
-              return;
-            }
             void dispatchEvent({ componentId: data.instanceId, definitionId: data.definitionId, eventId, payload });
           }}
         />

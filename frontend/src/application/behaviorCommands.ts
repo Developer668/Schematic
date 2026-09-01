@@ -57,7 +57,7 @@ const NO_SOURCE_CLAIM: PreviewClaims = {
   physicalBehaviorVerified: false,
 };
 
-const CODE_NOTICE = "Editable source for external use. Schematic has not compiled, uploaded, run, or physically tested this code. Behavior Preview follows the Behavior Plan.";
+const CODE_NOTICE = "Editable source handoff for external board testing. Behavior Preview follows the Behavior Plan; compile, upload, and physical bring-up happen on connected hardware.";
 
 export interface CommandError {
   code: string;

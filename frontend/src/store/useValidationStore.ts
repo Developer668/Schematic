@@ -87,6 +87,8 @@ interface ValidationState {
   checkedAt: number | null;
   compile: CompileState;
   setResult: (result: { valid: boolean; issues: ValidationIssue[]; codeIssues?: CodeIssue[] }) => void;
+  /** Add a user-visible graph problem without pretending source was checked. */
+  lodgeIssues: (issues: ValidationIssue[]) => void;
   setCodeIssues: (issues: CodeIssue[]) => void;
   setCompile: (result: CompileState) => void;
   clear: () => void;
@@ -168,10 +170,31 @@ function normalizeCompile(value: unknown): CompileState {
   };
 }
 
+function validationIssueKey(issue: ValidationIssue) {
+  return issue.id
+    ?? `${issue.code}:${issue.message}:${(issue.affectedComponents ?? []).join(",")}:${(issue.affectedConnections ?? []).join(",")}`;
+}
+
+function normalizeValidationIssues(value: unknown): ValidationIssue[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const issues: ValidationIssue[] = [];
+  for (const item of value.slice(0, MAX_VALIDATION_ISSUES * 2)) {
+    const issue = normalizeValidationIssue(item);
+    if (!issue) continue;
+    const key = validationIssueKey(issue);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    issues.push(issue);
+    if (issues.length >= MAX_VALIDATION_ISSUES) break;
+  }
+  return issues;
+}
+
 function normalizeValidationSnapshot(value: unknown): ValidationSnapshot {
   if (!value || typeof value !== "object" || Array.isArray(value)) return { issues: [], codeIssues: [], valid: null, checkedAt: null, compile: initialCompile };
   const state = value as Record<string, unknown>;
-  const issues = Array.isArray(state.issues) ? state.issues.slice(0, MAX_VALIDATION_ISSUES).flatMap((item) => { const issue = normalizeValidationIssue(item); return issue ? [issue] : []; }) : [];
+  const issues = normalizeValidationIssues(state.issues);
   const codeIssues = Array.isArray(state.codeIssues) ? state.codeIssues.slice(0, MAX_VALIDATION_ISSUES).flatMap((item) => { const issue = normalizeCodeIssue(item); return issue ? [issue] : []; }) : [];
   return {
     issues,
@@ -198,6 +221,24 @@ export const useValidationStore = create<ValidationState>((set) => ({
       // an older caller includes them in the result object.
       const normalized = normalizeValidationSnapshot({ issues: result?.issues, codeIssues: [], valid: true, checkedAt: Date.now(), compile: state.compile });
       const next = { issues: normalized.issues, codeIssues: [], valid: !normalized.issues.some((issue) => issue.severity === "error"), checkedAt: normalized.checkedAt };
+      publishValidation({ ...state, ...next });
+      return next;
+    });
+  },
+  lodgeIssues(issues) {
+    set((state) => {
+      // Prefer the newest connection attempt so a full issue list cannot
+      // starve a later, actionable problem. Lodging is a report of a failed
+      // or unverified operation, not a fresh whole-graph verdict.
+      const nextIssues = normalizeValidationIssues([...(Array.isArray(issues) ? issues : []), ...state.issues]);
+      const next = {
+        issues: nextIssues,
+        // Active validation is graph-only. A lodged connection problem should
+        // never resurrect source diagnostics from an older compatibility path.
+        codeIssues: [],
+        valid: null,
+        checkedAt: null,
+      };
       publishValidation({ ...state, ...next });
       return next;
     });

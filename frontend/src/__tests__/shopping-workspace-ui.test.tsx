@@ -34,8 +34,8 @@ describe("parts workspace agent scaffold", () => {
 
   it("shows the public search handoff scaffold and keeps cart sourcing agent-gated", () => {
     const container = renderWorkspace();
-    expect(container.textContent).toContain("Waiting for the WebMCP agent");
-    expect(container.textContent).toContain("Agent publication required");
+    expect(container.textContent).toContain("Ready for a sourcing request");
+    expect(container.textContent).toContain("Start with an exact part or board");
     expect(container.textContent).toContain("shopping.search");
     expect(Array.from(container.querySelectorAll("button")).some((button) => /search/i.test(button.textContent ?? ""))).toBe(true);
 

@@ -62,6 +62,23 @@ describe("WebMCP-only shopping publication", () => {
     expect(useShoppingStore.getState().publicationError).toMatch(/canonical catalogId/i);
   });
 
+  it("keeps accepted listings and cart lines when a later publication is rejected", () => {
+    const accepted = listing();
+    useShoppingStore.getState().publishAgentResults([accepted], publication);
+    useShoppingStore.getState().addToCart(accepted.id, 2);
+
+    const rejected = useShoppingStore.getState().publishAgentResults(
+      [listing({ exactMatch: false })],
+      publication,
+    );
+
+    expect(rejected.accepted).toBe(false);
+    expect(useShoppingStore.getState().results).toHaveLength(1);
+    expect(useShoppingStore.getState().results[0].id).toBe(accepted.id);
+    expect(useShoppingStore.getState().cart).toEqual([{ resultId: accepted.id, quantity: 2 }]);
+    expect(useShoppingStore.getState().requestStatus).toBe("failed");
+  });
+
   it("keeps cheapest totals, budget, and cart quantity functional", () => {
     const first = listing();
     const second = listing({ id: "listing-led", catalogId: "led", title: "LED", partNumber: "LED-5MM", offers: [{ ...first.offers[0], id: "offer-led", price: 1.25 }] });

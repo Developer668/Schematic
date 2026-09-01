@@ -119,15 +119,35 @@ describe("workspace UI", () => {
     expect(useProjectStore.getState().projects[0]?.id).toBe(secondId);
   });
 
-  it("shows explicit preview support truth on every visible catalog result", () => {
+  it("keeps preview support messaging at the library and Inspector level", () => {
     const container = studio();
     const catalogResults = container.querySelectorAll("button.component-list-item");
     const supportLabels = container.querySelectorAll("[aria-label^='Preview support:']");
 
     expect(catalogResults.length).toBeGreaterThan(0);
-    expect(supportLabels).toHaveLength(catalogResults.length);
-    expect(Array.from(supportLabels).some((label) => label.getAttribute("aria-label")?.includes("Preview mapped"))).toBe(true);
-    expect(Array.from(supportLabels).some((label) => label.getAttribute("aria-label")?.includes("No scripted preview"))).toBe(true);
+    expect(supportLabels).toHaveLength(0);
+    expect(container.querySelectorAll(".component-preview-status").length).toBe(catalogResults.length);
+    expect(container.querySelector(".component-preview-status.is-mapped")).toBeTruthy();
+    expect(container.textContent).toContain("Preview controls appear in the Inspector");
+    expect(container.textContent).not.toContain("Show 60 more");
+  });
+
+  it("supports keyboard clearing and keeps the full manufacturer filter available", () => {
+    const container = studio();
+    const input = container.querySelector<HTMLInputElement>("input[aria-label='Search component library']");
+    const selects = container.querySelectorAll<HTMLSelectElement>("aside[aria-label='Component library'] select");
+    expect(input).toBeTruthy();
+    expect(selects).toHaveLength(2);
+    expect(Array.from(selects[1]?.options ?? []).some((option) => option.textContent?.includes("Texas Instruments"))).toBe(true);
+
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "esp32");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(input?.value).toBe("esp32");
+    act(() => input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(input?.value).toBe("");
   });
 
   it("keeps project names unique and adds an explicit copy suffix", () => {

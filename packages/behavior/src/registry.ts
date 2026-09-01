@@ -141,7 +141,7 @@ export function capabilitiesForComponent(
   const limitations: string[] = [];
   if (!resolved.definitionKnown) limitations.push(`Definition ${component.definitionId} is not present in the catalog.`);
   if (!resolved.profile) limitations.push(`Behavior profile ${profileKey(resolved.binding.profileId, resolved.binding.profileVersion)} is not installed.`);
-  if (resolved.profile?.manifest.id === "catalog-only") limitations.push("This exact catalog definition has no registered scripted preview behavior.");
+  if (resolved.profile?.manifest.id === "catalog-only") limitations.push("Visual behavior controls are not mapped for this exact catalog part yet.");
   const actions: ComponentActionCapability[] = resolved.profile?.manifest.actions.map((descriptor) => ({ actionId: descriptor.id, descriptor, availability: { status: "available" } })) ?? [];
   const events: ComponentEventCapability[] = resolved.profile?.manifest.events.map((descriptor) => ({ eventId: descriptor.id, descriptor, availability: { status: "available" } })) ?? [];
   return { componentId: component.id, definitionId: component.definitionId, profile: resolved.binding, actions, events, limitations };

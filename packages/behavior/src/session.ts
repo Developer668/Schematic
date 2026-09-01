@@ -187,9 +187,9 @@ export function createBehaviorPreviewSession(
       const profile = resolved?.profile;
       let projection: ReturnType<BehaviorProfile["projectVisual"]>;
       try {
-        projection = profile?.projectVisual(profile.parseState(state.get(component.id))) ?? { primitives: [], accessibleSummary: "No scripted preview behavior is registered for this component." };
+        projection = profile?.projectVisual(profile.parseState(state.get(component.id))) ?? { primitives: [], accessibleSummary: "Visual behavior controls are not mapped for this exact catalog part yet." };
       } catch {
-        projection = { primitives: [], accessibleSummary: "Preview projection is unavailable for this component." };
+        projection = { primitives: [], accessibleSummary: "The visual outcome could not be rendered for this component." };
       }
       Object.defineProperty(projected, component.id, { value: projection, enumerable: true, configurable: true, writable: true });
     }
@@ -293,12 +293,16 @@ export function createBehaviorPreviewSession(
   }
 
   function dispatch(currentProject: HardwareProject, request: BehaviorDispatchRequest): ActionOutcome {
-    const ownedRequest = parseDispatchRequest(request);
-    if (!ownedRequest) {
+    const parsedRequest = parseDispatchRequest(request);
+    if (!parsedRequest) {
       const issue = diagnostic("INVALID_DISPATCH_REQUEST", "Provide exactly one bounded component event, input change, or component action request with exact string identifiers.");
       addDiagnostic(issue);
       return { status: "rejected", request: INVALID_DISPATCH_REQUEST, diagnostics: [issue], snapshot: buildSnapshot() };
     }
+    // Keep the request immutable while it crosses into profile code. A
+    // profile can be user-supplied in tests or a future extension, and a
+    // reducer mutating its action/trigger must not rewrite replay history.
+    const ownedRequest = cloneFrozenSnapshot(parsedRequest) as BehaviorDispatchRequest;
     const stale = ensureProject(currentProject);
     if (stale) {
       appendLog(ownedRequest, "rejected", [stale]);
@@ -387,9 +391,27 @@ export function createBehaviorPreviewSession(
     return { status: result.accepted && !issues.some((issue) => issue.severity === "error") ? "accepted" : "rejected", issues };
   }
 
-  function dispatchEmittedEvents(emittedEvents: readonly ComponentEventRequest[], depth: number): BehaviorDiagnostic[] {
+  function dispatchEmittedEvents(emittedEvents: unknown, depth: number): BehaviorDiagnostic[] {
     const issues: BehaviorDiagnostic[] = [];
-    for (const emitted of emittedEvents) {
+    if (emittedEvents === undefined) return issues;
+    if (!Array.isArray(emittedEvents)) {
+      const issue = diagnostic("INVALID_EMITTED_EVENT", "A behavior profile emitted events in an invalid shape; expected an array of component event requests.");
+      addDiagnostic(issue);
+      return [issue];
+    }
+    for (const candidate of emittedEvents) {
+      // Emissions cross the same ownership boundary as external dispatches.
+      // Parse and clone them before dispatching so a profile cannot smuggle an
+      // action/input request, mutate the runtime request, or crash the session
+      // by returning an arbitrary object.
+      const parsed = parseDispatchRequest(candidate);
+      if (!parsed || !("eventId" in parsed)) {
+        const issue = diagnostic("INVALID_EMITTED_EVENT", "A behavior profile emitted an invalid component event request.");
+        addDiagnostic(issue);
+        issues.push(issue);
+        continue;
+      }
+      const emitted = cloneFrozenSnapshot(parsed) as BehaviorDispatchRequest;
       if (dispatchCount >= BEHAVIOR_LIMITS.maxDispatchedEvents) {
         const limitIssue = diagnostic("EVENT_LIMIT_EXCEEDED", `A preview session may process at most ${BEHAVIOR_LIMITS.maxDispatchedEvents} dispatched events.`);
         addDiagnostic(limitIssue);
@@ -423,7 +445,7 @@ export function createBehaviorPreviewSession(
     trigger: ComponentEventRequest | InputChangeRequest | undefined,
     depth: number,
     record: boolean,
-  ): { accepted: boolean; issues: BehaviorDiagnostic[]; emittedEvents: ComponentEventRequest[] } {
+  ): { accepted: boolean; issues: BehaviorDiagnostic[]; emittedEvents: unknown } {
     const reference = validateComponentReference(request.componentId, request.definitionId, "action");
     const issues = [...reference.issues];
     const resolved = reference.resolved;
@@ -442,21 +464,24 @@ export function createBehaviorPreviewSession(
     const context: DeterministicActionContext = { componentId: request.componentId, definitionId: request.definitionId, logicalTimeMs, sequence: nextSequence, ...(trigger ? { trigger } : {}) };
     let transitions: readonly StateTransition<unknown>[] = [];
     try {
-      transitions = resolved.profile.reduce(resolved.profile.parseState(state.get(request.componentId)), action, context) as readonly StateTransition<unknown>[];
+      const reduced = resolved.profile.reduce(resolved.profile.parseState(state.get(request.componentId)), action, context);
+      if (!Array.isArray(reduced)) issues.push(diagnostic("INVALID_PROFILE_TRANSITION", "Behavior profile returned transitions in an invalid shape.", request.componentId));
+      else transitions = reduced as readonly StateTransition<unknown>[];
     } catch {
       issues.push(diagnostic("PROFILE_REDUCER_ERROR", `Profile reducer failed for action ${request.actionId}.`, request.componentId));
     }
-    if (issues.length || transitions.length === 0) {
+    const firstTransition = transitions[0];
+    if (issues.length || transitions.length === 0 || !firstTransition || typeof firstTransition !== "object" || !Object.prototype.hasOwnProperty.call(firstTransition, "state")) {
       if (!issues.length) issues.push(diagnostic("ACTION_REJECTED", `Action ${request.actionId} was rejected by the profile reducer.`, request.componentId));
       pushEvent({ logicalTimeMs, kind: "action", componentId: request.componentId, actionId: request.actionId, outcome: "rejected" });
       issues.forEach(addDiagnostic);
       if (record) appendLog(request, "rejected", issues);
       return { accepted: false, issues, emittedEvents: [] };
     }
-    state.set(request.componentId, transitions[0].state);
+    state.set(request.componentId, firstTransition.state);
     pushEvent({ logicalTimeMs, kind: "action", componentId: request.componentId, actionId: request.actionId, outcome: "accepted" });
     if (record) appendLog(request, "accepted", []);
-    return { accepted: true, issues: [], emittedEvents: [...(transitions[0].emittedEvents ?? [])] };
+    return { accepted: true, issues: [], emittedEvents: firstTransition.emittedEvents };
   }
 
   function resolveActionPayload(

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
 import { useWebMCPStore } from "../../store/useWebMCPStore.ts";
-import { isPreviewRunning, useBehaviorPreviewStore } from "../../behavior/useBehaviorPreviewStore.ts";
+import { isPreviewRunning, PREVIEW_DISCLAIMER, useBehaviorPreviewStore } from "../../behavior/useBehaviorPreviewStore.ts";
 import type { PreviewDiagnostic, PreviewSnapshot } from "../../behavior/previewTypes.ts";
 import { getRegisteredToolNames } from "../../webmcp/tools.ts";
 import ValidationPanel from "../validation/ValidationPanel.tsx";
@@ -244,8 +244,8 @@ function PreviewTimeline({
   const isPlaying = isPreviewRunning(status);
   return (
     <div className="h-full overflow-auto p-2 space-y-2 text-xs">
-      <div className="preview-timeline-header flex items-start justify-between gap-3 rounded border border-amber-300/50 bg-amber-50/70 p-2 dark:border-amber-800/60 dark:bg-amber-950/20">
-        <div><div className="flex items-center gap-1.5 font-medium"><Activity size={12} /> Behavior Preview <span className="preview-status-dot" aria-hidden="true" /></div><p className="mt-1 text-[11px] leading-snug text-muted-foreground">Scripted outcome · no code ran · wiring and hardware not verified.</p></div>
+      <div className="preview-timeline-header flex items-start justify-between gap-3 rounded border border-border bg-muted/20 p-2">
+        <div><div className="flex items-center gap-1.5 font-medium"><Activity size={12} /> Behavior Preview <span className="preview-status-dot" aria-hidden="true" /></div><p className="mt-1 text-[11px] leading-snug text-muted-foreground">{PREVIEW_DISCLAIMER}</p></div>
         <span className="shrink-0 rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[10px] uppercase">{status}</span>
       </div>
       {preparationStatus === "partial" && <div className="rounded border border-amber-400/60 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200"><strong>Partial plan:</strong> unsupported rules or actions were skipped. Review the preparation diagnostics below before treating this preview as the intended complete outcome.</div>}
@@ -260,7 +260,7 @@ function PreviewTimeline({
         <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Session</div><div className="space-y-1 text-[11px] text-muted-foreground"><div className="flex justify-between"><span>Time</span><span className="font-mono text-foreground">{currentTime} ms</span></div><div className="flex justify-between"><span>Actions</span><span className="font-mono text-foreground">{snapshot?.sessionLog.length ?? 0}</span></div><div className="flex justify-between"><span>Sequence</span><span className="font-mono text-foreground">{snapshot?.sequence ?? 0}</span></div><div className="flex justify-between"><span>Source</span><span className="font-mono text-foreground">none</span></div></div></div>
         <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Hashes</div><div className="space-y-1 break-all font-mono text-[10px] text-muted-foreground"><div>snapshot · {snapshot?.snapshotSha256 ?? "—"}</div><div>session · {snapshot?.sessionLogSha256 ?? "—"}</div></div></div>
       </div>
-      <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Claims</div><div className="grid gap-x-3 gap-y-1 text-[11px] text-muted-foreground sm:grid-cols-2"><Claim label="Source code read" value={snapshot?.claims?.sourceCodeRead} /><Claim label="Source code executed" value={snapshot?.claims?.sourceCodeExecuted} /><Claim label="Source code compiled" value={snapshot?.claims?.sourceCodeCompiled} /><Claim label="Hardware uploaded" value={snapshot?.claims?.hardwareUploaded} /><Claim label="Wiring verified" value={snapshot?.claims?.physicalWiringVerified} /><Claim label="Physical behavior verified" value={snapshot?.claims?.physicalBehaviorVerified} /></div></div>
+      <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Workflow boundary</div><div className="grid gap-x-3 gap-y-1 text-[11px] text-muted-foreground sm:grid-cols-2"><BoundaryClaim label="Preview basis" value="Behavior Plan" /><BoundaryClaim label="Source" value="Editable handoff" /><BoundaryClaim label="Build + upload" value="External hardware" /><BoundaryClaim label="Modeled wiring" value="Graph checks" /><BoundaryClaim label="Physical outcome" value="Connected board" /></div></div>
       <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Timeline</div>{!snapshot || snapshot.events.length === 0 ? <div className="text-[11px] text-muted-foreground">No accepted or rejected typed events yet.</div> : <div className="max-h-28 space-y-1 overflow-auto">{snapshot.events.slice(-40).map((event) => <div key={`${event.sequence}-${event.logicalTimeMs}`} className="flex items-start gap-2 rounded bg-muted/30 px-2 py-1 text-[11px]"><span className="shrink-0 font-mono text-muted-foreground">{event.logicalTimeMs ?? 0} ms</span><span className="min-w-0 flex-1 truncate">{event.actionId ?? event.eventId ?? event.kind ?? "event"}{event.message ? ` · ${event.message}` : ""}</span><span className={`shrink-0 font-mono ${event.outcome === "rejected" ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>{event.outcome ?? "—"}</span></div>)}</div>}</div>
       <div className="rounded border border-border p-2"><div className="mb-1 flex items-center gap-1.5 font-medium"><AlertTriangle size={12} /> Diagnostics <span className="font-mono text-[10px] text-muted-foreground">{diagnostics.length}</span></div>{diagnostics.length === 0 ? <div className="text-[11px] text-muted-foreground">No Behavior Plan diagnostics.</div> : <div className="space-y-1">{diagnostics.slice(0, 20).map((diagnostic, index) => <div key={`${diagnostic.code}-${index}`} className={`rounded border px-2 py-1 text-[11px] ${diagnostic.severity === "error" ? "border-red-300/60 bg-red-50/70 text-red-800 dark:border-red-800 dark:bg-red-950/20 dark:text-red-200" : "border-border bg-muted/20 text-muted-foreground"}`}><span className="font-mono">{diagnostic.code}</span> · {diagnostic.message}</div>)}</div>}</div>
       {snapshot && <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Component outcomes</div><div className="max-h-24 space-y-1 overflow-auto">{Object.entries(snapshot.components).map(([componentId, projection]) => <div key={componentId} className="flex items-start gap-2 rounded bg-muted/30 px-2 py-1 text-[11px]"><span className="font-mono text-muted-foreground">{componentId}</span><span>{projection.accessibleSummary}</span></div>)}</div></div>}
@@ -268,7 +268,6 @@ function PreviewTimeline({
   );
 }
 
-function Claim({ label, value }: { label: string; value: boolean | undefined }) {
-  const state = value === undefined ? "—" : value ? "Yes" : "No";
-  return <div className="flex items-center justify-between gap-2"><span>{label}</span><span className={`font-mono ${value === false ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{state}</span></div>;
+function BoundaryClaim({ label, value }: { label: string; value: string }) {
+  return <div className="flex items-center justify-between gap-2"><span>{label}</span><span className="font-mono text-foreground">{value}</span></div>;
 }

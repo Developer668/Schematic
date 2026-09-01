@@ -182,6 +182,39 @@ describe("WebMCP shopping trust boundary", () => {
     expect(state.data.cart).toEqual([]);
   });
 
+  it("keeps an accepted cart when later discovery or publication is rejected", async () => {
+    const publishedAt = publicationTime();
+    const first: any = await invokeWebMCPTool("shopping.search", {
+      query: "ESP32-S3",
+      quantity: 2,
+      listings: [listing({
+        updatedAt: publishedAt,
+        offers: [{ ...listing().offers[0], fetchedAt: publishedAt }],
+      })],
+      publication: publication(publishedAt),
+    });
+    expect(first.isError).not.toBe(true);
+    useShoppingStore.getState().addToCart(first.data.results[0].id, 2);
+
+    const discovery: any = await invokeWebMCPTool("shopping.search", {
+      query: "ESP32-S3",
+      quantity: 2,
+    });
+    expect(discovery.isError).toBe(true);
+    expect(useShoppingStore.getState().results).toHaveLength(1);
+    expect(useShoppingStore.getState().cart).toEqual([{ resultId: first.data.results[0].id, quantity: 2 }]);
+
+    const rejected: any = await invokeWebMCPTool("shopping.search", {
+      query: "ESP32-S3",
+      quantity: 2,
+      listings: [listing({ exactMatch: false })],
+      publication: publication(),
+    });
+    expect(rejected.isError).toBe(true);
+    expect(useShoppingStore.getState().results).toHaveLength(1);
+    expect(useShoppingStore.getState().cart).toEqual([{ resultId: first.data.results[0].id, quantity: 2 }]);
+  });
+
   it("rejects self-asserted publication without trusted WebMCP auth", async () => {
     auth.state.session = null;
     const result: any = await invokeWebMCPTool("shopping.search", {

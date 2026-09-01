@@ -30,6 +30,7 @@ import HardwareCanvas from "../components/canvas/HardwareCanvas.tsx";
 import HardwareNode from "../components/canvas/HardwareNode.tsx";
 import { useProjectStore } from "../store/useProjectStore.ts";
 import { useSelectionStore } from "../store/useSelectionStore.ts";
+import { useGraphFocusStore } from "../store/useGraphFocusStore.ts";
 
 let root: Root | undefined;
 let host: HTMLDivElement | undefined;
@@ -48,6 +49,7 @@ beforeEach(() => {
   flowMock.edgeChanges.mockReset();
   useProjectStore.getState().clear();
   useSelectionStore.getState().clear();
+  useGraphFocusStore.getState().clear();
 });
 
 afterEach(() => {
@@ -57,6 +59,7 @@ afterEach(() => {
   host = undefined;
   useProjectStore.getState().clear();
   useSelectionStore.getState().clear();
+  useGraphFocusStore.getState().clear();
 });
 
 describe("canvas destructive controls", () => {
@@ -105,5 +108,28 @@ describe("canvas destructive controls", () => {
     expect(flowMock.nodeChanges).not.toHaveBeenCalled();
     expect(flowMock.edgeChanges).not.toHaveBeenCalled();
     expect(useProjectStore.getState().project.components).toHaveLength(1);
+  });
+
+  it("selects a target wire and requires a second explicit deletion activation", () => {
+    const board = useProjectStore.getState().addComponent("esp32-devkit-v1");
+    const led = useProjectStore.getState().addComponent("led");
+    const connection = useProjectStore.getState().connectPorts(
+      { componentId: board.id, portId: "GPIO18" },
+      { componentId: led.id, portId: "IN" },
+    );
+    const container = render(<HardwareCanvas />);
+
+    act(() => flowMock.props?.onEdgeClick?.({}, { id: connection.id }));
+    let deleteButton = container.querySelector<HTMLButtonElement>("button.canvas-wire-delete");
+    expect(deleteButton?.getAttribute("aria-label")).toBe(`Delete wire ${connection.id}`);
+
+    act(() => deleteButton?.click());
+    expect(useProjectStore.getState().project.connections.some((item) => item.id === connection.id)).toBe(true);
+    deleteButton = container.querySelector<HTMLButtonElement>("button.canvas-wire-delete");
+    expect(deleteButton?.getAttribute("aria-label")).toBe(`Confirm delete wire ${connection.id}`);
+
+    act(() => deleteButton?.click());
+    expect(useProjectStore.getState().project.connections.some((item) => item.id === connection.id)).toBe(false);
+    expect(useGraphFocusStore.getState().activeConnectionId).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import {
   type HardwareDefinitionLookup,
   type HardwarePort,
   type PortDomain,
+  type Connection,
   type HardwareProject,
   type ValidationIssue,
   type ValidationResult,
@@ -83,7 +84,7 @@ function addI2cAddressIssues(
   index: ReturnType<typeof createHardwareGraphIndex>,
   issues: ValidationIssue[],
 ) {
-  const buses = new Map<string, Map<number, string[]>>();
+  const buses = new Map<string, Map<number, { components: string[]; connectionIds: string[] }>>();
   for (const component of [...project.components].sort((left, right) => left.id.localeCompare(right.id))) {
     const address = targetAddressFor(index, component.id);
     if (address === undefined) continue;
@@ -95,21 +96,31 @@ function addI2cAddressIssues(
     // with a target on another connected bus.
     if (!sdaNet?.connected || !sclNet?.connected) continue;
     const busKey = `${sdaNet.id}|${sclNet.id}`;
-    const addresses = buses.get(busKey) ?? new Map<number, string[]>();
-    addresses.set(address, [...(addresses.get(address) ?? []), component.id]);
+    const addresses = buses.get(busKey) ?? new Map<number, { components: string[]; connectionIds: string[] }>();
+    const previous = addresses.get(address);
+    const connectionIds = [...new Set([
+      ...(sdaNet.connectionIds ?? []),
+      ...(sclNet.connectionIds ?? []),
+      ...(previous?.connectionIds ?? []),
+    ])].sort();
+    addresses.set(address, {
+      components: [...(previous?.components ?? []), component.id],
+      connectionIds,
+    });
     buses.set(busKey, addresses);
   }
 
   for (const [busKey, addresses] of buses) {
-    for (const [address, components] of addresses) {
-      if (components.length < 2) continue;
-      const sortedComponents = [...components].sort();
+    for (const [address, entry] of addresses) {
+      if (entry.components.length < 2) continue;
+      const sortedComponents = [...entry.components].sort();
       issues.push({
         id: `i2c-collision-${encodeURIComponent(busKey)}-${address}`,
         severity: "error",
         code: "I2C_ADDRESS_COLLISION",
         message: `I2C address 0x${address.toString(16)} collision on bus ${busKey}: ${sortedComponents.join(", ")}.`,
         affectedComponents: sortedComponents,
+        affectedConnections: entry.connectionIds,
       });
     }
   }
@@ -270,6 +281,30 @@ export function validateProject(project: HardwareProject, lookup: ComponentDefLo
   };
 }
 
+/**
+ * Validate one prospective wire against the current graph before it is
+ * persisted.  The full project validator intentionally reports global graph
+ * context (for example, a missing ground net), but a connection preflight
+ * should only return diagnostics caused by the candidate edge.  This keeps a
+ * valid wire from being rejected because the rest of the project is still
+ * incomplete while still rejecting endpoint, domain, rail, bus, direction,
+ * and electrical conflicts introduced by the candidate.
+ */
+export function validateConnection(
+  project: HardwareProject,
+  connection: Connection,
+  lookup: ComponentDefLookup,
+): ValidationResult & { connectionId: string } {
+  const candidate = validateProject({ ...project, connections: [...project.connections, connection] }, lookup);
+  const issues = candidate.issues.filter((issue) => issue.affectedConnections?.includes(connection.id));
+  return {
+    valid: !issues.some((issue) => issue.severity === "error"),
+    issues,
+    codeIssues: [],
+    connectionId: connection.id,
+  };
+}
+
 export interface CodeIssue {
   id: string;
   severity: "error" | "warning" | "info";
@@ -305,6 +340,9 @@ export function validateFirmwareFiles(files: { name: string; content: string }[]
 export function explainIssue(issue: ValidationIssue): string {
   const fixes: Record<string, string> = {
     UNKNOWN_COMPONENT: "Choose a component definition that exists in the catalog.",
+    MAX_CONNECTIONS: "The project has reached its wire limit; remove an unused wire before adding another.",
+    MISSING_ENDPOINT: "Choose an existing component instance and port from the canvas or catalog.",
+    INVALID_CONNECTION_DIRECTION: "Connect a driving output to a receiving input, or use a bidirectional port.",
     INVALID_PORT_DOMAIN: "Update the catalog port to use a supported electrical or protocol domain.",
     MISSING_COMPONENT: "Restore the referenced component or remove the wire that points to it.",
     MISSING_PORT: "Choose an existing port on the referenced component or remove the stale wire.",

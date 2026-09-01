@@ -189,12 +189,17 @@ export default function Inspector() {
         <div className="font-medium mb-1.5 text-xs">Preview coverage</div>
         <ul className="space-y-1 text-xs">
           <li className={`flex items-center gap-1.5 px-2 py-1 rounded border ${previewClasses}`}>
-            {previewMapped ? <Check size={11} /> : <X size={11} />} Typed outcome preview {previewMapped ? "mapped" : "not mapped"}
+            {previewMapped ? <Check size={11} /> : <Info size={11} />} {previewMapped ? "Visual outcome controls available" : "Visual outcome controls not mapped yet"}
           </li>
           <li className="flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-muted text-muted-foreground"><Check size={11} /> Typed graph validation</li>
           <li className="flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-muted text-muted-foreground"><Check size={11} /> Editable source and external export</li>
-          <li className="flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-muted text-muted-foreground"><X size={11} /> Physical hardware validation</li>
+          <li className="flex items-center gap-1.5 px-2 py-1 rounded border border-border bg-muted text-muted-foreground"><X size={11} /> Hardware bring-up follows on the connected board</li>
         </ul>
+        <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
+          {previewMapped
+            ? "Start Behavior Preview to enable this part's typed controls."
+            : "This part can still be placed, wired, validated, and exported. Its visual behavior can be mapped later without blocking the design."}
+        </p>
       </div>
 
       <div className="p-2 rounded border border-border bg-muted/20">
@@ -203,7 +208,7 @@ export default function Inspector() {
           <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">Profile</span><span className={`px-1.5 py-0.5 rounded border font-mono ${previewClasses}`}>{behavior?.profile ? `${behavior.profile.profileId}:v${behavior.profile.profileVersion}` : "catalog-only:v1"}</span></div>
           <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">Actions</span><span className="font-mono">{behavior?.actions.length ?? 0}</span></div>
           <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">Events</span><span className="font-mono">{behavior?.events.length ?? 0}</span></div>
-          <div className="pt-1 text-muted-foreground leading-snug">Checked-in typed actions update the visual outcome. Editable source is not read or executed.</div>
+          <div className="pt-1 text-muted-foreground leading-snug">{previewMapped ? "Typed actions update the plan-driven visual outcome. Source remains an editable handoff." : "This catalog part has no typed outcome controls yet. Source remains an editable handoff."}</div>
         </div>
       </div>
 
@@ -212,11 +217,11 @@ export default function Inspector() {
           <div id="behavior-actions-title" className="font-medium text-xs">Events and actions</div>
           {behavior?.profile && <span className="font-mono text-[9px] text-muted-foreground">{behavior.profile.profileId}:v{behavior.profile.profileVersion}</span>}
         </div>
-        <p className="mb-2 text-[10px] leading-snug text-muted-foreground">{previewActive ? "Typed controls update the Behavior Preview only. They do not call firmware or arbitrary component functions." : "Start Behavior Preview to enable typed events and actions. No firmware or arbitrary component functions run."}</p>
+        <p className="mb-2 text-[10px] leading-snug text-muted-foreground">{previewActive ? "These typed controls update the plan-driven visual outcome; source stays ready for external testing." : previewMapped ? "Start Behavior Preview to enable typed events and actions." : "Outcome controls will appear here when this catalog part receives a typed behavior profile."}</p>
         {behavior?.limitations.map((limitation) => <div key={limitation} className="mb-1.5 flex items-start gap-1.5 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] leading-snug text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200"><Info size={11} className="mt-0.5 shrink-0" /> <span>{limitation}</span></div>)}
         {behavior && behavior.events.length > 0 && <div className="mb-2"><div className="kicker mb-1 !text-[9px]">Events</div><div className="space-y-1">{behavior.events.map((capability) => <EventControl key={`${active.id}:${capability.eventId}`} componentId={active.id} definitionId={active.definitionId} capability={capability} />)}</div></div>}
         {behavior && behavior.actions.length > 0 && <div><div className="kicker mb-1 !text-[9px]">Actions</div><div className="space-y-1">{behavior.actions.map((capability) => <ActionControl key={`${active.id}:${capability.actionId}`} componentId={active.id} definitionId={active.definitionId} capability={capability} />)}</div></div>}
-        {behavior && behavior.events.length === 0 && behavior.actions.length === 0 && behavior.limitations.length === 0 && <div className="text-[10px] text-muted-foreground">No typed preview controls are registered for this component.</div>}
+        {behavior && behavior.events.length === 0 && behavior.actions.length === 0 && behavior.limitations.length === 0 && <div className="text-[10px] text-muted-foreground">Outcome controls will appear here when this catalog part receives a typed behavior profile.</div>}
       </section>
 
       <div>

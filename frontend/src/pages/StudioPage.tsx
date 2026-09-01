@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, useDeferredValue } from "react";
 import { Link } from "react-router-dom";
 import HardwareCanvas from "../components/canvas/HardwareCanvas.tsx";
 import RightPanel from "../components/layout/RightPanel.tsx";
@@ -12,31 +12,14 @@ import { triggerDownloadVlx } from "../utils/vllxFile.ts";
 import { useThemeStore } from "../store/useThemeStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { isPreviewRunning, PREVIEW_DISCLAIMER, useBehaviorPreviewStore } from "../behavior/useBehaviorPreviewStore.ts";
-import { catalog, categories as allCategories, getCatalogComponent, type CatalogComponent } from "../data/catalog.ts";
+import { catalog, categories as allCategories, getCatalogComponent } from "../data/catalog.ts";
 import ComponentArtwork from "../components/ComponentArtwork.tsx";
 import LogoMark from "../components/LogoMark.tsx";
 import { useAuth, signOut, getCurrentUserId } from "../auth/session.ts";
 import { getProjectPersistenceStatus, subscribeProjectPersistenceStatus } from "../store/projectPersistence.ts";
-import { Search, X, Settings, Download, Trash2, Play, Pause, RotateCcw, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User, Menu, Save, AlertTriangle } from "lucide-react";
+import { Search, X, Settings, Download, Trash2, Play, Pause, RotateCcw, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User, Menu, Save, AlertTriangle, Info, LoaderCircle } from "lucide-react";
 
 const LIBRARY_PAGE_SIZE = 60;
-
-function previewSupportPresentation(definition: CatalogComponent) {
-  const binding = definition.behavior;
-  if (binding) {
-    const variant = binding.variant ? ` (${binding.variant})` : "";
-    return {
-      label: "Preview mapped",
-      executable: true,
-      detail: `Exact typed profile ${binding.profileId}:v${binding.profileVersion}${variant}. The visual outcome is scripted; source code is not run.`,
-    };
-  }
-  return {
-    label: "No scripted preview",
-    executable: false,
-    detail: "No exact Behavior Profile is registered for this catalog definition. Placement, graph validation, and editable source remain available.",
-  };
-}
 
 function ThemeIcon({ theme }: { theme: string }) {
   return theme === "dark" ? (
@@ -76,7 +59,7 @@ function UserRoomBadge() {
 }
 
 export default function StudioPage() {
-  const { results, search, setCategory, category } = useComponentCatalogStore();
+  const { results, search, setQuery: setCatalogQuery, setCategory, category } = useComponentCatalogStore();
   const { addComponent, project, projects, activeProjectId, clear, createProject, duplicateProject, switchProject, deleteProject, renameProject } = useProjectStore();
   const previewStatus = useBehaviorPreviewStore((state) => state.status);
   const previewSnapshot = useBehaviorPreviewStore((state) => state.snapshot);
@@ -110,6 +93,8 @@ export default function StudioPage() {
   const [visibleLibraryCount, setVisibleLibraryCount] = useState(LIBRARY_PAGE_SIZE);
   const [persistenceStatus, setPersistenceStatus] = useState(() => getProjectPersistenceStatus());
   const closeImport = useCallback(() => setShowImport(false), []);
+  const deferredQuery = useDeferredValue(query);
+  const isLibrarySearchPending = deferredQuery !== query;
 
   const [leftCollapsed, setLeftCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   const [rightCollapsed, setRightCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
@@ -188,7 +173,7 @@ export default function StudioPage() {
         setRunError(result.message ?? "Behavior Preview could not start");
         return;
       }
-      if (validation.issues.some((issue) => issue.severity === "error")) setRunNotice(`Preview started with ${validation.issues.filter((issue) => issue.severity === "error").length} graph issue(s). See Problems; the scripted outcome does not verify wiring.`);
+      if (validation.issues.some((issue) => issue.severity === "error")) setRunNotice(`Preview is available, but ${validation.issues.filter((issue) => issue.severity === "error").length} graph issue(s) need attention. Open Problems before hardware bring-up.`);
     } catch (error) {
       setRunError(`Behavior Preview failed: ${(error as Error).message}`);
     }
@@ -199,7 +184,7 @@ export default function StudioPage() {
     await pausePreview();
   };
 
-  const handleSearch = (v: string) => { setQuery(v); search(v); };
+  const handleSearch = (v: string) => { setQuery(v); setCatalogQuery(v); };
   const handleCategory = (c: string | null) => { setActiveCat(c); setCategory(c); };
 
   const beginProjectRename = (item: { id: string; name: string }) => {
@@ -257,7 +242,13 @@ export default function StudioPage() {
   const manufacturers = useMemo(() => {
     const m = new Map<string, number>();
     for (const c of catalog) if (c.manufacturer) m.set(c.manufacturer, (m.get(c.manufacturer) ?? 0) + 1);
-    return Array.from(m.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n]) => n);
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, []);
+
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of catalog) counts.set(c.category, (counts.get(c.category) ?? 0) + 1);
+    return counts;
   }, []);
 
   const filteredResults = useMemo(() => {
@@ -265,12 +256,25 @@ export default function StudioPage() {
     return results.filter((c) => c.manufacturer === orgFilter);
   }, [results, orgFilter]);
 
-  useEffect(() => setVisibleLibraryCount(LIBRARY_PAGE_SIZE), [query, activeCat, orgFilter]);
+  useEffect(() => setVisibleLibraryCount(LIBRARY_PAGE_SIZE), [deferredQuery, activeCat, orgFilter]);
+
+  useEffect(() => {
+    search(deferredQuery);
+  }, [deferredQuery, search]);
 
   const visibleResults = useMemo(
     () => filteredResults.slice(0, visibleLibraryCount),
     [filteredResults, visibleLibraryCount],
   );
+
+  const loadMoreLibraryResults = useCallback(() => {
+    setVisibleLibraryCount((count) => Math.min(count + LIBRARY_PAGE_SIZE, filteredResults.length));
+  }, [filteredResults.length]);
+
+  const handleLibraryScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget;
+    if (target.scrollHeight - target.scrollTop - target.clientHeight < 180) loadMoreLibraryResults();
+  };
 
   const deleteProjectArmed = deleteProjectArmedId === activeProjectId;
   const clearWorkspaceArmed = clearWorkspaceArmedId === activeProjectId;
@@ -490,9 +494,11 @@ export default function StudioPage() {
         {!leftCollapsed && (
           <aside aria-label="Component library" className="panel-enter z-30 flex w-[292px] shrink-0 flex-col border-r border-border bg-card max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:shadow-2xl">
             <div className="flex h-11 items-center justify-between border-b border-border px-3">
-              <div className="flex items-center gap-2"><Box size={14} /><div><div className="text-xs font-semibold">Components</div><div className="text-[10px] text-muted-foreground">Drag into the workspace</div></div></div>
+              <div className="flex items-center gap-2"><Box size={14} /><div><div className="text-xs font-semibold">Components</div><div className="text-[10px] text-muted-foreground">Click to add · drag to place</div></div></div>
               <div className="flex items-center gap-1.5">
-                <span className="count-badge">{filteredResults.length}</span>
+                <span className="count-badge" data-testid="component-search-count" role="status" aria-live="polite" aria-label={isLibrarySearchPending ? "Updating component results" : `${filteredResults.length} matching components`}>
+                  {isLibrarySearchPending ? <LoaderCircle size={11} className="animate-spin" aria-hidden="true" /> : filteredResults.length}
+                </span>
                 <button type="button" onClick={() => setLeftCollapsed(true)} className="grid h-7 w-7 place-items-center rounded hover:bg-muted md:hidden" aria-label="Close component library"><X size={13} /></button>
               </div>
             </div>
@@ -504,8 +510,18 @@ export default function StudioPage() {
                   ref={searchInputRef}
                   value={query}
                   onChange={(e) => handleSearch(e.target.value)}
-                  placeholder="Search parts and boards"
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape" && query) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      handleSearch("");
+                    }
+                  }}
+                  placeholder="Search parts, boards, or IDs"
                   aria-label="Search component library"
+                  aria-controls="component-library-results"
+                  aria-keyshortcuts="/ Control+K"
+                  inputMode="search"
                   className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:border-foreground/30 focus:outline-none focus:ring-2 focus:ring-ring/10"
                 />
                 {query ? (
@@ -522,8 +538,8 @@ export default function StudioPage() {
                   <span className="kicker !text-[8px] !tracking-[0.06em]">Category</span>
                   <div className="relative">
                     <select value={activeCat ?? ""} onChange={(e) => handleCategory(e.target.value || null)} className="h-8 w-full appearance-none rounded-md border border-border bg-background pl-2 pr-6 text-xs focus:outline-none focus:ring-2 focus:ring-ring/10">
-                      <option value="">All</option>
-                      {allCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+                      <option value="">All ({catalog.length})</option>
+                      {allCategories.map((c) => <option key={c} value={c}>{c} · {categoryCounts.get(c) ?? 0}</option>)}
                     </select>
                     <ChevronDown size={10} strokeWidth={1.7} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   </div>
@@ -532,8 +548,8 @@ export default function StudioPage() {
                   <span className="kicker !text-[8px]">Mfr</span>
                   <div className="relative">
                     <select value={orgFilter ?? ""} onChange={(e) => setOrgFilter(e.target.value || null)} className="h-8 w-full appearance-none rounded-md border border-border bg-background pl-2 pr-6 text-xs focus:outline-none focus:ring-2 focus:ring-ring/10">
-                      <option value="">All</option>
-                      {manufacturers.map((m) => <option key={m} value={m}>{m}</option>)}
+                      <option value="">All manufacturers</option>
+                      {manufacturers.map(([m, count]) => <option key={m} value={m}>{m} · {count}</option>)}
                     </select>
                     <ChevronDown size={10} strokeWidth={1.7} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   </div>
@@ -548,17 +564,19 @@ export default function StudioPage() {
               )}
             </div>
 
-            <div className="flex-1 overflow-auto">
+            <div id="component-library-results" className="flex-1 overflow-auto" onScroll={handleLibraryScroll} aria-busy={isLibrarySearchPending}>
               <div className={`component-list p-2 ${libraryDensity === "compact" ? "is-compact" : ""}`}>
                 {filteredResults.length === 0 ? (
-                  <div className="mx-1 my-4 rounded border border-dashed border-border p-4 text-center">
-                    <p className="text-[11px] font-medium">No components</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">Try “esp32”</p>
+                  <div className="component-library-empty mx-1 my-4 rounded border border-dashed border-border p-4 text-center" role="status">
+                    <Info size={14} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
+                    <p className="text-[11px] font-medium">{isLibrarySearchPending ? "Updating parts" : query || activeCat || orgFilter ? `No parts match ${query ? `“${query}”` : "these filters"}` : "No parts in the catalog"}</p>
+                    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{query || activeCat || orgFilter ? "Try a broader term or clear the filters." : "Parts added to the catalog will appear here."}</p>
+                    {(query || activeCat || orgFilter) && <button type="button" onClick={() => { setActiveCat(null); setCategory(null); setOrgFilter(null); handleSearch(""); }} className="mt-3 rounded border border-border px-2 py-1 text-[10px] font-medium hover:bg-muted">Clear filters</button>}
                   </div>
                 ) : (
                   visibleResults.map((c) => {
                     const dot = c.category === "board" || c.category === "display" ? "bg-blue-500" : "bg-zinc-400";
-                    const previewSupport = previewSupportPresentation(c);
+                    const previewMapped = Boolean(c.behavior);
                     return (
                       <button
                         key={c.id}
@@ -566,6 +584,7 @@ export default function StudioPage() {
                         onDragStart={(e) => handleDragStart(e, c.id)}
                         onClick={() => addComponent(c.id)}
                         className="component-list-item group"
+                        aria-label={`Add ${c.title} to the workspace`}
                       >
                         <div className="component-preview shrink-0" aria-hidden="true">
                           <ComponentArtwork definition={c} alt="" />
@@ -578,36 +597,25 @@ export default function StudioPage() {
                             <span className="text-[10px] capitalize text-muted-foreground">{c.category}</span>
                             <span className="text-muted-foreground text-[10px]" aria-hidden="true">·</span>
                             <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{c.ports.length}</span>
+                            <span
+                              className={`component-preview-status ${previewMapped ? "is-mapped" : ""}`}
+                              title={previewMapped ? "Inspector exposes typed visual outcome controls" : "Place and validate this part now; a typed visual outcome profile can be added later"}
+                              aria-hidden="true"
+                            />
                           </div>
-                          <span
-                            className={`mt-1 inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-px text-[9px] font-medium leading-4 ${previewSupport.executable ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}
-                            aria-label={`Preview support: ${previewSupport.label}`}
-                            title={previewSupport.detail}
-                          >
-                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${previewSupport.executable ? "bg-emerald-500" : "bg-amber-500"}`} aria-hidden="true" />
-                            <span className="truncate">{previewSupport.label}</span>
-                          </span>
                         </div>
                         <span className="component-add">+</span>
                       </button>
                     );
                   })
                 )}
-                {visibleResults.length < filteredResults.length && (
-                  <button
-                    type="button"
-                    onClick={() => setVisibleLibraryCount((count) => count + LIBRARY_PAGE_SIZE)}
-                    className="mx-1 mt-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px] font-medium hover:bg-muted"
-                  >
-                    Show {Math.min(LIBRARY_PAGE_SIZE, filteredResults.length - visibleResults.length)} more
-                  </button>
-                )}
+                {visibleResults.length < filteredResults.length && <div className="component-list-progress" role="status" aria-live="polite"><span>Scroll to continue</span><span>{filteredResults.length - visibleResults.length} more parts</span></div>}
                 <div className="py-1.5 text-center font-mono text-[10px] text-muted-foreground">Showing {visibleResults.length} of {filteredResults.length}</div>
               </div>
             </div>
 
             <div className="border-t border-border bg-muted/20 px-3 py-2">
-              <p className="flex items-center gap-1.5 text-[10px] leading-relaxed text-muted-foreground"><Wrench size={11} /> Click to add · drag to position</p>
+              <p className="component-library-guidance flex items-start gap-1.5 text-[10px] leading-relaxed text-muted-foreground"><Wrench size={11} className="mt-0.5 shrink-0" /> Preview controls appear in the Inspector for parts with a typed profile.</p>
             </div>
           </aside>
         )}
@@ -616,7 +624,7 @@ export default function StudioPage() {
         <section aria-label="Hardware project canvas" className="flex flex-1 flex-col min-w-0 bg-background relative">
           <h1 className="sr-only">{project.name} hardware workspace</h1>
           {leftCollapsed && (
-            <button type="button" onClick={() => setLeftCollapsed(false)} className="absolute left-1.5 top-1.5 z-10 grid h-6 w-6 place-items-center rounded border border-border bg-card hover:bg-muted" aria-label="Open component library" title="Open component library">
+            <button type="button" onClick={() => setLeftCollapsed(false)} className="library-toggle-button absolute left-1.5 top-1.5 z-10 grid h-6 w-6 place-items-center rounded border border-border bg-card hover:bg-muted" aria-label="Open component library" title="Open component library">
               <PanelLeft size={11} strokeWidth={1.7} />
             </button>
           )}
