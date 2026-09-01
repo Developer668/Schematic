@@ -7,7 +7,7 @@
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "moduleDetection": "force",
-    "noEmit": false,
+    "noEmit": true,
     "composite": true,
     "strict": true,
     "noUnusedLocals": false,

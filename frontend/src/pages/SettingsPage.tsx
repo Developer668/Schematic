@@ -7,6 +7,7 @@ import { useWebMCPStore } from "../store/useWebMCPStore.ts";
 import { getRegisteredToolNames } from "../webmcp/tools.ts";
 import LogoMark from "../components/LogoMark.tsx";
 import { apiUrl, getAuthHeaders } from "../auth/session.ts";
+import { parseSchematicProjectFile, triggerDownloadVlx } from "../utils/vllxFile.ts";
 import {
   Palette,
   Grid3X3,
@@ -81,35 +82,23 @@ export default function SettingsPage() {
   useEffect(() => { void checkApi(); }, [checkApi]);
 
   const handleExport = () => {
-    const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${project.name || "schematic"}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerDownloadVlx(project.name);
+    setNotice({ kind: "success", text: "Project exported as a portable .vlx file." });
   };
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const input = e.currentTarget;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result as string);
-        useProjectStore.getState().loadProject(data);
-        setNotice({ kind: "success", text: "Project imported successfully." });
-      } catch {
-        setNotice({ kind: "error", text: "This file is not valid project JSON." });
-      }
+    try {
+      const imported = await parseSchematicProjectFile(file);
+      useProjectStore.getState().importProject(imported);
+      setNotice({ kind: "success", text: `Imported “${imported.name}” as a new project. Your previous project was kept.` });
+    } catch (cause) {
+      setNotice({ kind: "error", text: cause instanceof Error ? cause.message : "The project file could not be read." });
+    } finally {
       input.value = "";
-    };
-    reader.onerror = () => {
-      setNotice({ kind: "error", text: "The project file could not be read." });
-      input.value = "";
-    };
-    reader.readAsText(file);
+    }
   };
 
   const handleClear = () => {
@@ -128,7 +117,7 @@ export default function SettingsPage() {
       {/* Header */}
       <header className="h-[52px] shrink-0 border-b border-border flex items-center justify-between px-4 bg-card/95 backdrop-blur-md z-30">
         <div className="flex items-center gap-3">
-          <Link to="/studio" className="w-8 h-8 rounded-lg border border-border hover:bg-muted flex items-center justify-center transition-colors">
+          <Link to="/studio" aria-label="Back to studio" className="w-8 h-8 rounded-lg border border-border hover:bg-muted flex items-center justify-center transition-colors">
             <ArrowLeft size={14} />
           </Link>
           <div className="flex items-center gap-2.5">
@@ -269,7 +258,7 @@ export default function SettingsPage() {
           <div className="rounded-lg border border-border bg-card overflow-hidden shadow-sm">
             <div className="px-4 py-3 border-b border-border bg-muted/20 flex items-center gap-2">
               <Wifi size={14} className="text-primary" />
-              <span className="text-sm font-semibold">Connectivity · “all connect”</span>
+              <span className="text-sm font-semibold">Connectivity</span>
               <span className={`ml-auto text-[11px] px-2 py-0.5 rounded-full border ${apiStatus === "ok" ? "bg-emerald-500 text-white border-emerald-600" : "bg-amber-500 text-white border-amber-600"}`}>{apiStatus}</span>
             </div>
             <div className="p-4 space-y-3">
@@ -350,7 +339,7 @@ export default function SettingsPage() {
                 </button>
                 <label className="flex-1 text-xs py-2 rounded-xl border border-border hover:bg-muted flex items-center justify-center gap-1.5 cursor-pointer">
                   <Upload size={12} /> Import
-                  <input type="file" accept=".json" className="hidden" onChange={handleImport} />
+                  <input type="file" accept=".vlx,.json,application/json" className="hidden" onChange={(event) => void handleImport(event)} />
                 </label>
               </div>
 
@@ -362,7 +351,7 @@ export default function SettingsPage() {
               </button>}
 
               <div className="text-[11px] text-muted-foreground leading-snug p-2 rounded-xl bg-muted/20 border border-border">
-                Exports include components, wires, and firmware source targets. Import replaces the current project.
+                Exports include components, connections, and firmware source. Imports always open as a new project so the current project stays recoverable.
               </div>
             </div>
           </div>
@@ -371,7 +360,7 @@ export default function SettingsPage() {
           <div className="rounded-lg border border-border bg-card overflow-hidden shadow-sm">
             <div className="px-4 py-3 border-b border-border bg-muted/20 flex items-center gap-2">
               <Info size={14} className="text-primary" />
-              <span className="text-sm font-semibold">About · WebMCP Studio</span>
+              <span className="text-sm font-semibold">About Schematic</span>
             </div>
             <div className="p-4 space-y-3 text-sm leading-snug">
               <p className="text-muted-foreground">
@@ -379,12 +368,12 @@ export default function SettingsPage() {
               </p>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="rounded-xl border border-border bg-muted/20 p-3">
-                  <div className="font-semibold">Layout</div>
-                  <div className="text-muted-foreground">Left: Components · Center: World (dots) · Right: Code/Inspector · Bottom: WebMCP/Terminal/Debug</div>
+                  <div className="font-semibold">Workspace</div>
+                  <div className="text-muted-foreground">Place components on the canvas, connect compatible ports, and keep firmware beside the hardware graph.</div>
                 </div>
                 <div className="rounded-xl border border-border bg-muted/20 p-3">
-                  <div className="font-semibold">Curriculum</div>
-                  <div className="text-muted-foreground">Minimap small top-right · drag shows 3D board preview · white-on-white cursor fixed</div>
+                  <div className="font-semibold">Project files</div>
+                  <div className="text-muted-foreground">Portable .vlx exports include the graph and firmware source without changing your saved copy.</div>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -396,7 +385,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="text-center text-[11px] text-muted-foreground py-4">
-          Dark black default · Animations on every panel · Dotted world · No emoji — lucide icons only.
+          Projects are stored on this device and scoped to your signed-in workspace.
         </div>
         </div>
       </main>

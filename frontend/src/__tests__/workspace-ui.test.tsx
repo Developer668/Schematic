@@ -86,6 +86,50 @@ describe("workspace UI", () => {
     expect(useProjectStore.getState().project.name).toBe("Renamed hardware");
   }, 15_000);
 
+  it("binds delete confirmation to the project that was armed", () => {
+    const original = useProjectStore.getState().project;
+    const secondId = useProjectStore.getState().createProject("Delete guard");
+    const second = useProjectStore.getState().projects.find((project) => project.id === secondId);
+    expect(second).toBeTruthy();
+
+    const container = studio();
+    const selector = container.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']");
+    act(() => selector?.click());
+
+    let deleteButton = container.querySelector<HTMLButtonElement>(`button[aria-label='Delete ${second?.name}']`);
+    expect(deleteButton).toBeTruthy();
+    act(() => deleteButton?.click());
+    expect(container.querySelector(`button[aria-label='Confirm deletion of ${second?.name}']`)).toBeTruthy();
+
+    const menu = container.querySelector<HTMLElement>("[role='menu'][aria-label='Projects']");
+    const originalButton = Array.from(menu?.querySelectorAll<HTMLButtonElement>("button[role='menuitem']") ?? [])
+      .find((button) => button.textContent?.includes(original.name));
+    expect(originalButton).toBeTruthy();
+    act(() => originalButton?.click());
+    expect(useProjectStore.getState().activeProjectId).toBe(original.id);
+
+    deleteButton = container.querySelector<HTMLButtonElement>(`button[aria-label='Delete ${original.name}']`);
+    expect(deleteButton).toBeTruthy();
+    act(() => deleteButton?.click());
+    expect(useProjectStore.getState().projects).toHaveLength(2);
+    expect(container.querySelector(`button[aria-label='Confirm deletion of ${original.name}']`)).toBeTruthy();
+
+    act(() => container.querySelector<HTMLButtonElement>(`button[aria-label='Confirm deletion of ${original.name}']`)?.click());
+    expect(useProjectStore.getState().projects).toHaveLength(1);
+    expect(useProjectStore.getState().projects[0]?.id).toBe(secondId);
+  });
+
+  it("shows simulation support truth on every visible catalog result", () => {
+    const container = studio();
+    const catalogResults = container.querySelectorAll("button.component-list-item");
+    const supportLabels = container.querySelectorAll("[aria-label^='Simulation support:']");
+
+    expect(catalogResults.length).toBeGreaterThan(0);
+    expect(supportLabels).toHaveLength(catalogResults.length);
+    expect(Array.from(supportLabels).some((label) => label.getAttribute("aria-label")?.includes("Behavioral model"))).toBe(true);
+    expect(Array.from(supportLabels).some((label) => label.getAttribute("aria-label")?.includes("Validation only"))).toBe(true);
+  });
+
   it("keeps project names unique and adds an explicit copy suffix", () => {
     const store = useProjectStore.getState();
     const source = store.project;

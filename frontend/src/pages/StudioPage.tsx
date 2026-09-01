@@ -12,11 +12,32 @@ import { getRegisteredToolNames, invokeWebMCPTool } from "../webmcp/tools.ts";
 import { triggerDownloadVlx } from "../utils/vllxFile.ts";
 import { useThemeStore } from "../store/useThemeStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
-import { catalog, categories as allCategories, getCatalogComponent } from "../data/catalog.ts";
+import { catalog, categories as allCategories, getCatalogComponent, type CatalogComponent } from "../data/catalog.ts";
 import ComponentArtwork from "../components/ComponentArtwork.tsx";
 import LogoMark from "../components/LogoMark.tsx";
 import { useAuth, signOut, getCurrentUserId } from "../auth/session.ts";
-import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User, Menu } from "lucide-react";
+import { getProjectPersistenceStatus, subscribeProjectPersistenceStatus } from "../store/projectPersistence.ts";
+import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User, Menu, Save, AlertTriangle } from "lucide-react";
+
+const LIBRARY_PAGE_SIZE = 60;
+
+function simulationSupportPresentation(definition: CatalogComponent) {
+  const fidelity = Object.values(definition.models).find((model) => model.fidelity)?.fidelity;
+  const support = definition.model.support;
+  const presentation = support === "behavioral"
+    ? { label: "Behavioral model", executable: true, detail: "Runs in the bounded browser behavioral runtime." }
+    : support === "engine-backed"
+      ? { label: "Engine-backed", executable: true, detail: "Runs with its assigned simulation engine." }
+      : support === "visual"
+        ? { label: "Visual only", executable: false, detail: "Placement and artwork are available; executable behavior is not." }
+        : { label: "Validation only", executable: false, detail: "Wiring and metadata checks are available; executable device behavior is not." };
+
+  return {
+    ...presentation,
+    fidelity,
+    detail: [presentation.detail, fidelity ? `Model fidelity: ${fidelity}.` : "", definition.model.reason ?? ""].filter(Boolean).join(" "),
+  };
+}
 
 function ThemeIcon({ theme }: { theme: string }) {
   return theme === "dark" ? (
@@ -74,10 +95,14 @@ export default function StudioPage() {
   const [showImport, setShowImport] = useState(false);
   const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
+  const [deleteProjectArmedId, setDeleteProjectArmedId] = useState<string | null>(null);
+  const [clearWorkspaceArmedId, setClearWorkspaceArmedId] = useState<string | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState("");
   const [runError, setRunError] = useState("");
   const [runNotice, setRunNotice] = useState("");
+  const [visibleLibraryCount, setVisibleLibraryCount] = useState(LIBRARY_PAGE_SIZE);
+  const [persistenceStatus, setPersistenceStatus] = useState(() => getProjectPersistenceStatus());
   const closeImport = useCallback(() => setShowImport(false), []);
 
   const [leftCollapsed, setLeftCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
@@ -86,7 +111,10 @@ export default function StudioPage() {
   const isRightResizingRef = useRef(false);
   const projectMenuRef = useRef<HTMLDivElement>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const toolNames = getRegisteredToolNames();
+
+  useEffect(() => subscribeProjectPersistenceStatus(() => setPersistenceStatus(getProjectPersistenceStatus())), []);
 
   useEffect(() => {
     if (!showProjectMenu && !showOverflowMenu) return;
@@ -109,9 +137,36 @@ export default function StudioPage() {
       setShowOverflowMenu(false);
       setEditingProjectId(null);
       setEditingProjectName("");
+      if (window.innerWidth < 768) {
+        setLeftCollapsed(true);
+        setRightCollapsed(true);
+      }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
+
+  useEffect(() => {
+    if (!showProjectMenu) setDeleteProjectArmedId(null);
+    if (!showOverflowMenu) setClearWorkspaceArmedId(null);
+  }, [showProjectMenu, showOverflowMenu]);
+
+  useEffect(() => {
+    setDeleteProjectArmedId(null);
+    setClearWorkspaceArmedId(null);
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    const focusLibrarySearch = (event: KeyboardEvent) => {
+      const target = event.target;
+      const isEditing = target instanceof Element && target.matches("input, textarea, select, [contenteditable='true']");
+      if (isEditing || (event.key !== "/" && !(event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey)))) return;
+      event.preventDefault();
+      setLeftCollapsed(false);
+      window.setTimeout(() => searchInputRef.current?.focus(), 0);
+    };
+    window.addEventListener("keydown", focusLibrarySearch);
+    return () => window.removeEventListener("keydown", focusLibrarySearch);
   }, []);
 
   const doRun = async () => {
@@ -146,6 +201,7 @@ export default function StudioPage() {
   };
 
   const switchProjectFromMenu = (item: { id: string }) => {
+    setDeleteProjectArmedId(null);
     switchProject(item.id);
   };
 
@@ -170,6 +226,16 @@ export default function StudioPage() {
     if (!orgFilter) return results;
     return results.filter((c) => c.manufacturer === orgFilter);
   }, [results, orgFilter]);
+
+  useEffect(() => setVisibleLibraryCount(LIBRARY_PAGE_SIZE), [query, activeCat, orgFilter]);
+
+  const visibleResults = useMemo(
+    () => filteredResults.slice(0, visibleLibraryCount),
+    [filteredResults, visibleLibraryCount],
+  );
+
+  const deleteProjectArmed = deleteProjectArmedId === activeProjectId;
+  const clearWorkspaceArmed = clearWorkspaceArmedId === activeProjectId;
 
   const handleDragStart = (e: React.DragEvent, compId: string) => {
     e.dataTransfer.setData("application/x-schematic-component", compId);
@@ -219,10 +285,10 @@ export default function StudioPage() {
   };
 
   return (
-    <div className="workbench flex h-screen flex-col overflow-hidden bg-background text-foreground select-none">
+    <div className="workbench flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <header className="workbench-header relative z-40 h-11 shrink-0 gap-2 overflow-visible border-b border-border px-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <Link to="/" className="flex items-center gap-1.5">
+          <Link to="/" aria-label="Schematic home" className="flex items-center gap-1.5">
             <span className="brand-mark"><LogoMark /></span>
             <span className="hidden text-[13px] font-semibold tracking-[-0.025em] sm:inline">Schematic</span>
           </Link>
@@ -239,7 +305,15 @@ export default function StudioPage() {
               <span className="min-w-0 max-w-[min(34vw,190px)] flex-1 truncate">{project.name}</span>
               <ChevronDown size={11} className={`shrink-0 transition-transform ${showProjectMenu ? "rotate-180" : ""}`} />
             </button>
-            <span className="status-pill hidden sm:inline-flex">Saved locally</span>
+            <span
+              className={`status-pill hidden sm:inline-flex ${persistenceStatus.state === "error" ? "!border-red-500/35 !bg-red-500/10 !text-red-600 dark:!text-red-300" : ""}`}
+              role="status"
+              aria-live="polite"
+              title={persistenceStatus.error ?? "Projects are stored on this device"}
+            >
+              {persistenceStatus.state === "error" ? <AlertTriangle size={10} /> : <Save size={10} />}
+              {persistenceStatus.state === "loading" ? "Loading…" : persistenceStatus.state === "saving" ? "Saving…" : persistenceStatus.state === "error" ? "Save failed" : "Saved on this device"}
+            </span>
             {showProjectMenu && (
               <div role="menu" aria-label="Projects" className="absolute left-0 top-full z-[70] mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-border bg-card shadow-xl">
                 <div className="flex items-center justify-between border-b border-border px-3 py-2">
@@ -283,7 +357,23 @@ export default function StudioPage() {
                 <div className="flex gap-1 border-t border-border bg-muted/20 p-1.5">
                   <button type="button" onClick={() => { createProject(`Project ${projects.length + 1}`); setShowProjectMenu(false); }} className="flex flex-1 items-center justify-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] hover:bg-muted"><Plus size={11} /> New</button>
                   <button type="button" onClick={() => { duplicateProject(); setShowProjectMenu(false); }} className="flex flex-1 items-center justify-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] hover:bg-muted"><Copy size={11} /> Duplicate</button>
-                  <button type="button" disabled={projects.length <= 1} onClick={() => { deleteProject(); setShowProjectMenu(false); }} className="flex items-center justify-center rounded border border-border px-2 py-1.5 text-[11px] text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 dark:hover:bg-red-950/20" title="Delete current project"><Trash2 size={11} /></button>
+                  <button
+                    type="button"
+                    disabled={projects.length <= 1}
+                    onClick={() => {
+                      const currentProjectId = useProjectStore.getState().activeProjectId;
+                      if (deleteProjectArmedId !== currentProjectId) {
+                        setDeleteProjectArmedId(currentProjectId);
+                        return;
+                      }
+                      const deleted = deleteProject(deleteProjectArmedId);
+                      setDeleteProjectArmedId(null);
+                      if (deleted) setShowProjectMenu(false);
+                    }}
+                    className={`flex items-center justify-center gap-1 rounded border px-2 py-1.5 text-[11px] text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 ${deleteProjectArmed ? "border-red-500/40 bg-red-500/10" : "border-border hover:bg-red-50 dark:hover:bg-red-950/20"}`}
+                    aria-label={deleteProjectArmed ? `Confirm deletion of ${project.name}` : `Delete ${project.name}`}
+                    title={deleteProjectArmed ? "Choose again to confirm" : "Delete current project"}
+                  ><Trash2 size={11} />{deleteProjectArmed && <span>Confirm</span>}</button>
                 </div>
               </div>
             )}
@@ -322,26 +412,37 @@ export default function StudioPage() {
                 <button type="button" role="menuitem" onClick={() => { setLeftCollapsed((value) => !value); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><PanelLeft size={13} /> {leftCollapsed ? "Show components" : "Hide components"}</button>
                 <button type="button" role="menuitem" onClick={() => { setRightCollapsed((value) => !value); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><PanelRight size={13} /> {rightCollapsed ? "Show code panel" : "Hide code panel"}</button>
                 <button type="button" role="menuitem" onClick={() => { setBottomCollapsed(!bottomCollapsed); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><PanelBottom size={13} /> {bottomCollapsed ? "Show bottom panel" : "Hide bottom panel"}</button>
-                <button type="button" role="menuitem" onClick={() => { clear(); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/20"><Trash2 size={13} /> Clear workspace</button>
+                <button type="button" role="menuitem" onClick={() => {
+                  const currentProjectId = useProjectStore.getState().activeProjectId;
+                  if (clearWorkspaceArmedId !== currentProjectId) { setClearWorkspaceArmedId(currentProjectId); return; }
+                  clear();
+                  setClearWorkspaceArmedId(null);
+                  setShowOverflowMenu(false);
+                }} className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs text-red-600 dark:text-red-400 ${clearWorkspaceArmed ? "bg-red-500/10" : "hover:bg-red-50 dark:hover:bg-red-950/20"}`}><Trash2 size={13} /> {clearWorkspaceArmed ? "Confirm clear project" : "Clear project"}</button>
               </div>
             )}
           </div>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden min-h-0">
+      <main aria-label="Studio workspace layout" className="relative flex flex-1 overflow-hidden min-h-0">
+        {!leftCollapsed && <button type="button" className="absolute inset-0 z-20 bg-background/70 backdrop-blur-[1px] md:hidden" onClick={() => setLeftCollapsed(true)} aria-label="Close component library" />}
         {/* LEFT — compact 260px */}
         {!leftCollapsed && (
-          <aside className="panel-enter w-[292px] shrink-0 border-r border-border bg-card flex flex-col">
+          <aside aria-label="Component library" className="panel-enter z-30 flex w-[292px] shrink-0 flex-col border-r border-border bg-card max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:shadow-2xl">
             <div className="flex h-11 items-center justify-between border-b border-border px-3">
               <div className="flex items-center gap-2"><Box size={14} /><div><div className="text-xs font-semibold">Components</div><div className="text-[10px] text-muted-foreground">Drag into the workspace</div></div></div>
-              <span className="count-badge">{filteredResults.length}</span>
+              <div className="flex items-center gap-1.5">
+                <span className="count-badge">{filteredResults.length}</span>
+                <button type="button" onClick={() => setLeftCollapsed(true)} className="grid h-7 w-7 place-items-center rounded hover:bg-muted md:hidden" aria-label="Close component library"><X size={13} /></button>
+              </div>
             </div>
 
             <div className="space-y-2.5 border-b border-border p-3">
               <div className="relative">
                 <Search size={13} strokeWidth={1.8} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input
+                  ref={searchInputRef}
                   value={query}
                   onChange={(e) => handleSearch(e.target.value)}
                   placeholder="Search parts and boards"
@@ -396,8 +497,9 @@ export default function StudioPage() {
                     <p className="text-[10px] text-muted-foreground mt-0.5">Try “esp32”</p>
                   </div>
                 ) : (
-                  filteredResults.map((c) => {
+                  visibleResults.map((c) => {
                     const dot = c.category === "board" || c.category === "display" ? "bg-blue-500" : "bg-zinc-400";
+                    const simulationSupport = simulationSupportPresentation(c);
                     return (
                       <button
                         key={c.id}
@@ -406,8 +508,8 @@ export default function StudioPage() {
                         onClick={() => addComponent(c.id)}
                         className="component-list-item group"
                       >
-                        <div className="component-preview shrink-0">
-                          <ComponentArtwork definition={c} />
+                        <div className="component-preview shrink-0" aria-hidden="true">
+                          <ComponentArtwork definition={c} alt="" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs font-semibold leading-tight">{c.title}</div>
@@ -415,16 +517,34 @@ export default function StudioPage() {
                           <div className="mt-0.5 flex items-center gap-1">
                             <span className={`h-3 w-[2px] rounded-sm ${dot}`} />
                             <span className="text-[10px] capitalize text-muted-foreground">{c.category}</span>
-                            <span className="text-muted-foreground/30 text-[10px]">·</span>
+                            <span className="text-muted-foreground text-[10px]" aria-hidden="true">·</span>
                             <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{c.ports.length}</span>
                           </div>
+                          <span
+                            className={`mt-1 inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-px text-[9px] font-medium leading-4 ${simulationSupport.executable ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}
+                            aria-label={`Simulation support: ${simulationSupport.label}${simulationSupport.fidelity ? `, fidelity ${simulationSupport.fidelity}` : ""}`}
+                            title={simulationSupport.detail}
+                          >
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${simulationSupport.executable ? "bg-emerald-500" : "bg-amber-500"}`} aria-hidden="true" />
+                            <span className="truncate">{simulationSupport.label}</span>
+                            {simulationSupport.fidelity && <span className="truncate opacity-70">· {simulationSupport.fidelity}</span>}
+                          </span>
                         </div>
                         <span className="component-add">+</span>
                       </button>
                     );
                   })
                 )}
-                <div className="py-1.5 text-center font-mono text-[10px] text-muted-foreground">{filteredResults.length} components • scroll to browse • {filteredResults.length > 80 ? "all visible" : ""}</div>
+                {visibleResults.length < filteredResults.length && (
+                  <button
+                    type="button"
+                    onClick={() => setVisibleLibraryCount((count) => count + LIBRARY_PAGE_SIZE)}
+                    className="mx-1 mt-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px] font-medium hover:bg-muted"
+                  >
+                    Show {Math.min(LIBRARY_PAGE_SIZE, filteredResults.length - visibleResults.length)} more
+                  </button>
+                )}
+                <div className="py-1.5 text-center font-mono text-[10px] text-muted-foreground">Showing {visibleResults.length} of {filteredResults.length}</div>
               </div>
             </div>
 
@@ -435,14 +555,15 @@ export default function StudioPage() {
         )}
 
         {/* CENTER */}
-        <main className="flex flex-1 flex-col min-w-0 bg-background relative">
+        <section aria-label="Hardware project canvas" className="flex flex-1 flex-col min-w-0 bg-background relative">
+          <h1 className="sr-only">{project.name} hardware workspace</h1>
           {leftCollapsed && (
             <button type="button" onClick={() => setLeftCollapsed(false)} className="absolute left-1.5 top-1.5 z-10 grid h-6 w-6 place-items-center rounded border border-border bg-card hover:bg-muted" aria-label="Open component library" title="Open component library">
               <PanelLeft size={11} strokeWidth={1.7} />
             </button>
           )}
           <div className="relative min-h-0 flex-1">
-            <HardwareCanvas key={project.id} />
+            <HardwareCanvas key={project.id} onBrowseComponents={() => { setLeftCollapsed(false); window.setTimeout(() => searchInputRef.current?.focus(), 0); }} />
             {runError && <div className="run-error" role="alert">{runError}</div>}
             {runNotice && <div role="status" className="absolute bottom-3 left-3 right-3 z-10 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/80 dark:text-amber-100">{runNotice}</div>}
           </div>
@@ -450,7 +571,7 @@ export default function StudioPage() {
             <span className="h-px w-10 rounded-full bg-muted-foreground/40" />
           </div>}
           <BottomDock collapsed={bottomCollapsed} onToggleCollapse={() => setBottomCollapsed(!bottomCollapsed)} height={bottomHeight} />
-        </main>
+        </section>
 
         {/* RIGHT — compact 300px */}
         {!rightCollapsed ? (
@@ -474,7 +595,7 @@ export default function StudioPage() {
               className="workbench-resize-handle hidden md:flex"
               title="Drag to resize the code panel"
             />
-            <aside data-testid="docked-code-panel" style={{ width: `${rightPanelWidth}px` }} className="workbench-code-panel panel-enter hidden shrink-0 flex-col border-l border-border bg-card md:flex">
+            <aside aria-label="Code and project inspector" data-testid="docked-code-panel" style={{ width: `${rightPanelWidth}px` }} className="workbench-code-panel panel-enter hidden shrink-0 flex-col border-l border-border bg-card md:flex">
             <RightPanel />
             </aside>
           </>
@@ -485,12 +606,12 @@ export default function StudioPage() {
             </button>
           </div>
         )}
-      </div>
+      </main>
 
       <div data-testid="code-panel-mobile-region" className="md:hidden">
         {!rightCollapsed && (
-          <div data-testid="code-panel-overlay" className="fixed inset-0 z-30 flex">
-            <div className="flex-1 bg-foreground/10 backdrop-blur-[1px]" onClick={() => setRightCollapsed(true)} />
+          <div data-testid="code-panel-overlay" className="fixed inset-0 z-30 flex" role="dialog" aria-modal="true" aria-label="Code and project inspector">
+            <button type="button" className="flex-1 bg-foreground/10 backdrop-blur-[1px]" onClick={() => setRightCollapsed(true)} aria-label="Close code and project inspector" />
             <div className="flex w-[84vw] max-w-[320px] flex-col border-l border-border bg-card">
               <div className="flex h-7 items-center justify-between border-b border-border px-2.5">
                 <span className="kicker">Inspector</span>

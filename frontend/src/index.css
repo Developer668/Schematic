@@ -32,7 +32,7 @@
   --border: 240 4% 18%;
   --input: 240 4% 16%;
   --ring: 0 0% 93%;
-  --accent: 217 91% 60%;
+  --accent: 221 83% 53%;
   --accent-soft: 220 24% 15%;
 }
 
@@ -44,7 +44,7 @@ html.dark { color-scheme: dark; }
 
 body {
   margin: 0;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   -webkit-font-smoothing: antialiased;
@@ -58,7 +58,7 @@ body.landing-body { overflow: auto; }
 
 /* mono for technical */
 .font-mono {
-  font-family: JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: -0.02em;
 }
 
@@ -215,6 +215,7 @@ body.landing-body { overflow: auto; }
 .hardware-pin-label { display: inline-flex; min-width: 36px; max-width: 68px; height: 16px; align-items: center; gap: 4px; overflow: hidden; border: 1px solid hsl(var(--border) / .9); border-radius: 4px; padding: 0 4px; color: hsl(var(--foreground)); background: hsl(var(--card) / .92); box-shadow: 0 1px 6px hsl(240 20% 4% / .14); backdrop-filter: blur(8px); font: 600 8.5px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; pointer-events: auto; }
 .hardware-pin-left .hardware-pin-label { justify-content: flex-end; }.hardware-pin-label b { width: 2px; height: 9px; flex: none; border-radius: 1px; }
 .hardware-pin .react-flow__handle { position: absolute; top: 50%; transform: translateY(-50%); width: 10px !important; height: 10px !important; border-radius: 50% !important; border-width: 1.5px !important; box-shadow: 0 1px 4px hsl(240 20% 4% / .22); pointer-events: auto; }
+.hardware-pin .react-flow__handle::after { content: ""; position: absolute; inset: -7px; border-radius: 50%; }
 .hardware-pin-left .react-flow__handle { left: -4px; }.hardware-pin-right .react-flow__handle { right: -4px; left: auto; }
 .hardware-node-caption { width: 205px; margin: 2px auto 0; overflow: hidden; color: hsl(var(--muted-foreground)); font-size: 9px; line-height: 1.35; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .node-toolbar { display: flex; min-width: 150px; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 5px 4px 9px; border: 1px solid hsl(var(--border)); border-radius: 7px; background: hsl(var(--card) / .96); box-shadow: 0 7px 22px hsl(240 20% 4% / .2); backdrop-filter: blur(12px); font-size: 10px; font-weight: 600; }
@@ -314,10 +315,10 @@ html.light .react-flow__pane {
 .landing-shell a { color: inherit; text-decoration: none; }
 .landing-noise { position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.025; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E"); }
 .landing-mesh { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
-.landing-mesh span { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.14; will-change: transform; }
-.mesh-a { width: 720px; height: 720px; left: -120px; top: -180px; background: radial-gradient(circle, #6d5cff 0%, transparent 68%); }
-.mesh-b { width: 620px; height: 620px; right: -140px; top: 320px; background: radial-gradient(circle, #0ea5e9 0%, transparent 70%); opacity: 0.10; }
-.mesh-c { width: 900px; height: 600px; left: 30%; bottom: -240px; background: radial-gradient(ellipse, #f59e0b 0%, transparent 72%); opacity: 0.07; }
+.landing-mesh span { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.09; }
+.mesh-a { width: 720px; height: 720px; left: -120px; top: -180px; background: radial-gradient(circle, #b45309 0%, transparent 68%); }
+.mesh-b { width: 620px; height: 620px; right: -140px; top: 320px; background: radial-gradient(circle, #78350f 0%, transparent 70%); opacity: 0.07; }
+.mesh-c { display: none; }
 .landing-nav { position: sticky; top: 14px; z-index: 30; display: flex; width: min(1120px, calc(100% - 24px)); height: 54px; margin: 14px auto 0; align-items: center; justify-content: space-between; gap: 16px; padding: 6px 8px 6px 14px; border: 1px solid rgb(255 255 255 / .08); border-radius: 999px; background: rgb(16 16 20 / .72); backdrop-filter: blur(24px) saturate(1.4); box-shadow: 0 8px 32px rgb(0 0 0 / .28), inset 0 1px 0 rgb(255 255 255 / .06); }
 .landing-brand { display: flex; align-items: center; gap: 10px; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px; letter-spacing: -0.02em; }
 .landing-logo { flex-shrink: 0; }
@@ -360,7 +361,7 @@ html.light .react-flow__pane {
 .landing-proof span { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 999px; background: rgb(255 255 255 / .04); border: 1px solid rgb(255 255 255 / .06); color: #a1a1aa; font-size: 11px; font-weight: 500; }
 .landing-visual-wrap { position: relative; z-index: 2; }
 .double-bezel { padding: 8px; border-radius: 28px; background: rgb(255 255 255 / .06); border: 1px solid rgb(255 255 255 / .08); box-shadow: 0 24px 80px rgb(0 0 0 / .5), inset 0 1px 0 rgb(255 255 255 / .08); backdrop-filter: blur(16px); }
-.landing-visual { position: relative; overflow: hidden; border-radius: 20px; background: #0c0e12; border: 1px solid rgb(255 255 255 / .06); box-shadow: inset 0 1px 0 rgb(255 255 255 / .04); transform: perspective(1400px) rotateY(-4deg) rotateX(1.5deg); transition: transform 700ms cubic-bezier(0.32,0.72,0,1); will-change: transform; }
+.landing-visual { position: relative; overflow: hidden; border-radius: 20px; background: #0c0e12; border: 1px solid rgb(255 255 255 / .06); box-shadow: inset 0 1px 0 rgb(255 255 255 / .04); transform: perspective(1400px) rotateY(-4deg) rotateX(1.5deg); transition: transform 700ms cubic-bezier(0.32,0.72,0,1); }
 .landing-visual:hover { transform: perspective(1400px) rotateY(-2deg) rotateX(1deg) translateY(-4px); }
 .landing-window-bar { display: flex; height: 38px; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid rgb(255 255 255 / .06); background: linear-gradient(to bottom, rgb(255 255 255 / .04), transparent); color: #a1a1aa; font: 500 11px 'Geist Mono', ui-monospace, monospace; }
 .window-dots { display: flex; gap: 6px; }
@@ -369,8 +370,8 @@ html.light .react-flow__pane {
 .landing-window-bar .logo-mark { width: 16px; height: 16px; margin-left: 6px; }
 .window-badge { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; background: #22c55e; color: #052e16; font: 700 10px 'Geist Mono', monospace; letter-spacing: 0.06em; }
 .landing-window-body { display: grid; height: 420px; grid-template-columns: 126px 1fr 156px; }
-.landing-rail,.landing-code { padding: 14px 12px; border-right: 1px solid rgb(255 255 255 / .05); background: #0a0b0e; color: #71717a; font: 500 11px 'Geist Mono', ui-monospace, monospace; }
-.landing-rail b,.landing-code b { display: block; font-size: 10px; letter-spacing: 0.14em; color: #52525b; margin-bottom: 10px; }
+.landing-rail,.landing-code { padding: 14px 12px; border-right: 1px solid rgb(255 255 255 / .05); background: #0a0b0e; color: #a1a1aa; font: 500 11px 'Geist Mono', ui-monospace, monospace; }
+.landing-rail b,.landing-code b { display: block; font-size: 10px; letter-spacing: 0.14em; color: #a1a1aa; margin-bottom: 10px; }
 .landing-code { border: 0; border-left: 1px solid rgb(255 255 255 / .05); }
 .landing-code pre { margin-top: 14px; color: #d4d4d8; font: 500 11px 'Geist Mono', monospace; line-height: 1.85; white-space: pre-wrap; }
 .landing-code em { color: #60a5fa; font-style: normal; }
@@ -379,7 +380,7 @@ html.light .react-flow__pane {
 .landing-part { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 7px 8px; border-radius: 10px; background: rgb(255 255 255 / .03); border: 1px solid rgb(255 255 255 / .04); color: #d4d4d8; font-size: 12px; font-weight: 500; transition: all 200ms cubic-bezier(0.32,0.72,0,1); }
 .landing-part:hover { background: rgb(255 255 255 / .06); transform: translateX(2px); }
 .landing-part img { width: 28px; height: 26px; object-fit: contain; }
-.landing-rail-foot { display: flex; align-items: center; gap: 6px; margin-top: 14px; padding: 7px 8px; border-radius: 8px; background: rgb(255 255 255 / .03); color: #71717a; font-size: 10px; }
+.landing-rail-foot { display: flex; align-items: center; gap: 6px; margin-top: 14px; padding: 7px 8px; border-radius: 8px; background: rgb(255 255 255 / .03); color: #a1a1aa; font-size: 10px; }
 .landing-canvas { position: relative; overflow: hidden; background-color: #0c0e12; background-image: linear-gradient(rgb(255 255 255 / .04) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / .04) 1px, transparent 1px); background-size: 26px 26px; }
 .landing-board { position: absolute; z-index: 2; display: grid; width: 110px; justify-items: center; gap: 6px; color: #d4d4d8; font: 600 10px 'Geist Mono', monospace; }
 .landing-board img { width: 94px; height: 82px; object-fit: contain; filter: drop-shadow(0 14px 16px rgb(0 0 0 / .5)); transition: transform 400ms cubic-bezier(0.32,0.72,0,1); }
@@ -392,13 +393,13 @@ html.light .react-flow__pane {
 .landing-connection-power, .showcase-connection-power { stroke: #f59e0b; filter: drop-shadow(0 0 4px rgb(245 158 11 / .32)); }
 .landing-connection-dot { stroke: #0c0e12; stroke-width: 0.7; vector-effect: non-scaling-stroke; }
 .landing-connection-dot-main { fill: #60a5fa; }.landing-connection-dot-device { fill: #f59e0b; }
-.visual-caption { margin-top: 10px; text-align: center; color: #71717a; font: 500 11px 'Geist Mono', monospace; letter-spacing: 0.02em; }
+.visual-caption { margin-top: 10px; text-align: center; color: #a1a1aa; font: 500 11px 'Geist Mono', monospace; letter-spacing: 0.02em; }
 .landing-section { position: relative; z-index: 1; width: min(1160px, calc(100% - 32px)); margin: 0 auto; padding: 96px 0; border-top: 1px solid rgb(255 255 255 / .06); content-visibility: auto; contain-intrinsic-size: 800px; }
 .landing-section-head { max-width: 640px; }
 .eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; background: rgb(255 255 255 / .06); border: 1px solid rgb(255 255 255 / .07); color: #a1a1aa; font: 700 10px 'Geist Mono', monospace; letter-spacing: 0.16em; text-transform: uppercase; }
 .eyebrow.light { background: rgb(255 255 255 / .08); border-color: rgb(255 255 255 / .1); color: #e4e4e7; }
 .landing-section-head h2 { margin: 14px 0 12px; font-family: 'Space Grotesk', sans-serif; font-size: clamp(32px, 4vw, 44px); line-height: 0.95; letter-spacing: -0.05em; font-weight: 700; }
-.landing-section-head h2 span { color: #71717a; font-weight: 500; }
+.landing-section-head h2 span { color: #a1a1aa; font-weight: 500; }
 .landing-section-head p { max-width: 560px; color: #a1a1aa; font-size: 15px; line-height: 1.65; }
 .landing-bento { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; margin-top: 36px; }
 .bento-card { position: relative; overflow: hidden; padding: 22px; border-radius: 20px; background: rgb(255 255 255 / .03); border: 1px solid rgb(255 255 255 / .07); backdrop-filter: blur(12px); transition: all 400ms cubic-bezier(0.32,0.72,0,1); }
@@ -411,13 +412,13 @@ html.light .react-flow__pane {
 .bento-card p { position: relative; margin-top: 8px; color: #a1a1aa; font-size: 13px; line-height: 1.6; }
 .bento-stat { position: relative; display: flex; align-items: baseline; gap: 8px; margin-top: 18px; padding: 10px 12px; border-radius: 12px; background: rgb(255 255 255 / .04); border: 1px solid rgb(255 255 255 / .04); }
 .bento-stat strong { font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 700; letter-spacing: -0.04em; }
-.bento-stat span { color: #71717a; font: 600 10px 'Geist Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase; }
+.bento-stat span { color: #a1a1aa; font: 600 10px 'Geist Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase; }
 .workflow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 32px; }
 .workflow-step { position: relative; padding: 22px; border-radius: 20px; background: rgb(255 255 255 / .03); border: 1px solid rgb(255 255 255 / .07); transition: all 350ms cubic-bezier(0.32,0.72,0,1); }
 .workflow-step:hover { transform: translateY(-2px); background: rgb(255 255 255 / .05); }
 .step-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 999px; background: #fff; color: #050508; font: 700 12px 'Geist Mono', monospace; }
 .step-icon { display: grid; width: 36px; height: 36px; place-items: center; margin-top: 14px; border-radius: 12px; background: rgb(255 255 255 / .06); border: 1px solid rgb(255 255 255 / .06); color: #e4e4e7; }
-.workflow-step h4 { margin: 14px 0 8px; font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+.workflow-step h3 { margin: 14px 0 8px; font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
 .workflow-step p { color: #a1a1aa; font-size: 13px; line-height: 1.6; }
 .workflow-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .workflow-bar span { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border-radius: 999px; background: rgb(255 255 255 / .04); border: 1px solid rgb(255 255 255 / .06); color: #a1a1aa; font-size: 11px; font-weight: 500; }
@@ -428,20 +429,20 @@ html.light .react-flow__pane {
 .showcase-canvas { position: relative; height: 340px; background: #0c0e12; background-image: linear-gradient(rgb(255 255 255 / .03) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / .03) 1px, transparent 1px); background-size: 24px 24px; overflow: hidden; }
 .showcase-canvas img { position: absolute; width: 96px; height: 84px; object-fit: contain; filter: drop-shadow(0 12px 16px rgb(0 0 0 / .5)); transition: transform 400ms cubic-bezier(0.32,0.72,0,1); }
 .showcase-canvas img:hover { transform: scale(1.04) translateY(-2px); }
-.showcase-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-top: 1px solid rgb(255 255 255 / .06); color: #71717a; font: 500 11px 'Geist Mono', monospace; }
-.mini-cta { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: #fff; color: #050508; font-weight: 700; font-size: 11px; }
+.showcase-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-top: 1px solid rgb(255 255 255 / .06); color: #a1a1aa; font: 500 11px 'Geist Mono', monospace; }
+.landing-shell .mini-cta { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: #fff; color: #050508; font-weight: 700; font-size: 11px; }
 .showcase-side { display: grid; gap: 12px; }
 .mini-card { padding: 16px; border-radius: 16px; background: rgb(255 255 255 / .03); border: 1px solid rgb(255 255 255 / .07); }
 .mini-card b { display: block; font-size: 12px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 8px; }
 .mini-card code { display: block; padding: 8px 10px; border-radius: 10px; background: rgb(0 0 0 / .3); border: 1px solid rgb(255 255 255 / .06); color: #d4d4d8; font: 500 11px 'Geist Mono', monospace; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mini-card code.muted { margin-top: 8px; color: #71717a; background: transparent; border: 0; padding: 0; }
+.mini-card code.muted { margin-top: 8px; color: #a1a1aa; background: transparent; border: 0; padding: 0; }
 .landing-cta { width: min(1160px, calc(100% - 32px)); margin: 0 auto 64px; padding: 0; border: 0; background: transparent; }
 .cta-bezel { padding: 8px; border-radius: 28px; background: rgb(255 255 255 / .06); border: 1px solid rgb(255 255 255 / .08); backdrop-filter: blur(16px); }
 .cta-inner { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 28px; border-radius: 20px; background: linear-gradient(135deg, #0f0f12 0%, #1a1a1e 100%); border: 1px solid rgb(255 255 255 / .06); box-shadow: inset 0 1px 0 rgb(255 255 255 / .06); }
 .cta-inner h2 { margin: 8px 0 8px; font-family: 'Space Grotesk', sans-serif; font-size: clamp(28px, 3.2vw, 36px); line-height: 0.95; letter-spacing: -0.04em; font-weight: 700; }
 .cta-inner p { color: #a1a1aa; font-size: 14px; line-height: 1.6; max-width: 520px; }
-.cta-foot { margin-top: 12px; text-align: center; color: #52525b; font: 500 11px 'Geist Mono', monospace; letter-spacing: 0.04em; }
-.landing-footer { position: relative; z-index: 1; width: min(1160px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 32px; border-top: 1px solid rgb(255 255 255 / .06); color: #52525b; font: 500 11px 'Geist Mono', monospace; text-align: center; letter-spacing: 0.04em; }
+.cta-foot { margin-top: 12px; text-align: center; color: #a1a1aa; font: 500 11px 'Geist Mono', monospace; letter-spacing: 0.04em; }
+.landing-footer { position: relative; z-index: 1; width: min(1160px, calc(100% - 32px)); margin: 0 auto; padding: 24px 0 32px; border-top: 1px solid rgb(255 255 255 / .06); color: #a1a1aa; font: 500 11px 'Geist Mono', monospace; text-align: center; letter-spacing: 0.04em; }
 @media(max-width:900px){ .landing-hero{grid-template-columns:1fr; gap: 28px; padding: 24px 0 16px; min-height: auto;} .landing-visual{transform:none !important} .landing-bento{grid-template-columns:1fr 1fr} .workflow{grid-template-columns:1fr} .showcase{grid-template-columns:1fr} .landing-nav-pill{display:none !important} .hamburger{display:grid !important} }
 @media(max-width:600px){ .landing-window-body{grid-template-columns:92px 1fr} .landing-code{display:none} .landing-bento{grid-template-columns:1fr} .landing-bento .bento-card{grid-column: span 1 !important; grid-row: span 1 !important} .cta-inner{flex-direction:column; align-items:flex-start; gap:18px} .landing-proof{flex-direction:column; gap:8px} .landing-hero h1{font-size: clamp(36px, 10vw, 52px)} }
 

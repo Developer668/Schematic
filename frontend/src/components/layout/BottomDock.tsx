@@ -125,7 +125,7 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
 
   return (
     <div className="h-full flex flex-col font-mono text-xs">
-        <div className="flex-1 overflow-auto p-2 space-y-1.5 bg-[#0a0a0a] text-zinc-100" role="log" aria-live="polite">
+        <div className="flex-1 overflow-auto p-2 space-y-1.5 bg-[#0a0a0a] text-zinc-100" role="log" aria-live="polite" tabIndex={0} aria-label="WebMCP activity log">
         {history.map((h, i) => (
           <div key={i} className="space-y-1">
             <div className="flex gap-2">
@@ -182,7 +182,7 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
         <button type="button" onClick={() => void run()} className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200">Run</button>
         <button type="button" onClick={() => { setHistory([]); clearActivities(); }} className="text-xs px-2 py-1 rounded border border-zinc-700 hover:bg-zinc-800 text-zinc-400" aria-label="Clear WebMCP activity" title="Clear WebMCP activity"><Trash2 size={11} /></button>
       </div>
-      <div className="px-2 py-1 border-t border-zinc-800 bg-zinc-900 text-[11px] text-zinc-500 flex items-center gap-3">
+      <div className="px-2 py-1 border-t border-zinc-800 bg-zinc-900 text-[11px] text-zinc-400 flex items-center gap-3">
         <span>Enter: run · Tab: autocomplete · clear: reset</span>
         <span className="ml-auto">{toolNames.length} tools</span>
       </div>
@@ -195,7 +195,7 @@ function TerminalTab({ running, serialOutput }: { running: boolean; serialOutput
   return (
     <div className="h-full flex flex-col font-mono text-xs">
       <div className="flex items-center justify-between px-2 py-1.5 border-b border-border bg-muted/20 text-xs font-sans">
-        <span className="flex items-center gap-1.5"><Terminal size={12} /> Serial</span>
+        <span className="flex items-center gap-1.5"><Terminal size={12} /> Serial log</span>
         <span className="text-muted-foreground">{running ? "Streaming" : "Idle"} · {serialOutput.length} chars</span>
       </div>
       <div className="flex-1 overflow-auto p-2 bg-[#0a0a0a] text-zinc-100 text-xs">
@@ -203,7 +203,7 @@ function TerminalTab({ running, serialOutput }: { running: boolean; serialOutput
       </div>
       <div className="border-t border-zinc-800 bg-zinc-900 flex items-center gap-2 px-2 py-1.5">
         <span className="text-zinc-500">$</span>
-        <input value={local} onChange={(e) => setLocal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && local.trim()) { useSimulationStore.getState().appendSerial(`$ ${local}\n`); setLocal(""); } }} placeholder="Type — logs to serial" className="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none" />
+        <input value={local} onChange={(e) => setLocal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && local.trim()) { useSimulationStore.getState().appendSerial(`[note] ${local}\n`); setLocal(""); } }} placeholder="Add a note to the local log" aria-label="Add a note to the local serial log" className="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-400 focus:outline-none" />
       </div>
     </div>
   );

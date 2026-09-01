@@ -31,6 +31,7 @@ interface ProjectState {
   getGraph: () => HardwareGraph;
   clear: () => void;
   loadProject: (graph: HardwareGraph) => void;
+  importProject: (graph: HardwareGraph) => string;
   updateComponentProps: (id: string, props: Record<string, unknown>) => void;
   updateFirmware: (componentId: string, files: { name: string; content: string }[], metadata?: { language?: string; boardFqbn?: string }) => void;
   setCompiledArtifact: (componentId: string, artifact: { success: boolean; log: string; hexB64?: string; elfB64?: string; binB64?: string; identity?: Record<string, unknown> }) => void;
@@ -60,7 +61,7 @@ let loadedRoomId = getCurrentUserId();
 // Per-user room: projects are stored on device keyed by the verified session
 // subject. The browser never chooses a different user's room.
 
-type StoredProjects = { version: 1; activeProjectId: string; projects: HardwareGraph[] };
+type StoredProjects = { version: 1; activeProjectId: string; projects: HardwareGraph[]; updatedAt?: string };
 
 function makeId(prefix: string) {
   const uuid = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -272,7 +273,9 @@ function readStoredState(): StoredProjects {
 }
 
 function persistState(projects: HardwareGraph[], activeProjectId: string, broadcast = true) {
-  const state: StoredProjects = { version: 1, activeProjectId, projects };
+  // Workspace-level time records collection-only changes such as switching or
+  // deleting a project, where no remaining project's updatedAt must change.
+  const state: StoredProjects = { version: 1, activeProjectId, projects, updatedAt: now() };
   try {
     if (typeof localStorage !== "undefined") localStorage.setItem(storageKey(), JSON.stringify(state));
   } catch {}
@@ -415,6 +418,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       persistState(projects, state.activeProjectId);
       return { project, projects };
     });
+  },
+
+  importProject(graph) {
+    let importedProjectId = "";
+    set((state) => {
+      const project = normalizeProject({
+        ...graph,
+        id: makeId("proj"),
+        name: uniqueProjectName(graph.name || "Imported project", state.projects),
+        createdAt: now(),
+        updatedAt: now(),
+      });
+      importedProjectId = project.id;
+      const projects = [...state.projects, project];
+      persistState(projects, project.id);
+      return { project, projects, activeProjectId: project.id };
+    });
+    resetProjectRuntime();
+    return importedProjectId;
   },
 
   updateComponentProps(id, props) {

@@ -22,12 +22,18 @@ interface PersistenceContext {
   applying: boolean;
   pendingBeforeHydration: boolean;
   revision: number | null;
+  error: string | null;
 }
 
 let activeContext: PersistenceContext | null = null;
 let hydrationGeneration = 0;
 let persistenceLifecycleGeneration = 0;
 let persistenceReady: Promise<void> = Promise.resolve();
+const statusListeners = new Set<() => void>();
+
+function emitPersistenceStatus() {
+  for (const listener of statusListeners) listener();
+}
 
 function contextKey(userId: string | null) {
   return `${userId ?? "anonymous"}:${ROOM_ID}`;
@@ -40,6 +46,63 @@ function currentWorkspace(): Workspace {
     activeProjectId: state.activeProjectId,
     projects: state.projects,
   };
+}
+
+function parsedTimestamp(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function latestProjectUpdate(workspace: Pick<Workspace, "projects">): number | null {
+  let latest: number | null = null;
+  for (const project of workspace.projects) {
+    const timestamp = parsedTimestamp(project.updatedAt);
+    if (timestamp !== null && (latest === null || timestamp > latest)) latest = timestamp;
+  }
+  return latest;
+}
+
+/**
+ * The Zustand store bootstraps synchronously from the first applicable
+ * localStorage record. Read only that same record's explicit timestamps here;
+ * normalization-generated timestamps must not make an undated legacy record
+ * appear newer than a durable IndexedDB revision.
+ */
+function latestLocalStorageProjectUpdate(userId: string | null): number | null {
+  if (typeof localStorage === "undefined") return null;
+  const currentKey = userId ? `schematic-projects:${userId}` : "schematic-projects";
+  const allKeys = [...new Set([currentKey, ...getSchematicLegacyProjectKeys(userId)])];
+  const keys = userId && userId !== "local-development" ? [currentKey] : allKeys;
+  for (const key of keys) {
+    let raw: string | null;
+    try {
+      raw = localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+    if (raw === null) continue;
+    try {
+      const value = JSON.parse(raw) as unknown;
+      if (!value || typeof value !== "object") return null;
+      const record = value as { projects?: unknown; updatedAt?: unknown };
+      const projects = Array.isArray(record.projects) && record.projects.length > 0
+        ? record.projects
+        : !Array.isArray(record.projects)
+          ? [record]
+          : [];
+      let latest: number | null = parsedTimestamp(record.updatedAt);
+      for (const project of projects) {
+        if (!project || typeof project !== "object") continue;
+        const timestamp = parsedTimestamp((project as { updatedAt?: unknown }).updatedAt);
+        if (timestamp !== null && (latest === null || timestamp > latest)) latest = timestamp;
+      }
+      return latest;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 function applyWorkspace(workspace: Workspace, context: PersistenceContext): boolean {
@@ -60,14 +123,51 @@ function applyWorkspace(workspace: Workspace, context: PersistenceContext): bool
 
 function scheduleSave(context: PersistenceContext) {
   if (activeContext !== context || !context.hydrated) return;
+  context.error = null;
   const save = context.saver.schedule(currentWorkspace(), {
     source: "save",
     ...(getCurrentUserId() ? { updatedBy: getCurrentUserId()! } : {}),
   });
+  emitPersistenceStatus();
   void save.then((result) => {
-    if (activeContext !== context || !result.ok) return;
-    context.revision = result.value.metadata.revision;
+    if (activeContext !== context) return;
+    if (result.ok) context.revision = result.value.metadata.revision;
+    else context.error = result.error.message;
+    emitPersistenceStatus();
   });
+}
+
+async function flushContext(context: PersistenceContext): Promise<StoredWorkspace<HardwareGraph> | null> {
+  const result = await context.saver.flush();
+  if (activeContext === context) {
+    if (result?.ok) {
+      context.revision = result.value.metadata.revision;
+      context.error = null;
+    } else if (result) {
+      context.error = result.error.message;
+    }
+    emitPersistenceStatus();
+  }
+  return result?.ok ? result.value : null;
+}
+
+async function preserveCurrentWorkspace(
+  context: PersistenceContext,
+  expectedRevision: number,
+  isCurrent: () => boolean,
+): Promise<void> {
+  const workspace = currentWorkspace();
+  // Changes after this snapshot must schedule one more save once hydration is
+  // complete instead of being mistaken for the change we are reconciling now.
+  context.pendingBeforeHydration = false;
+  const saved = await context.repository.saveWorkspace(workspace, {
+    expectedRevision,
+    source: "migration",
+    ...(getCurrentUserId() ? { updatedBy: getCurrentUserId()! } : {}),
+  });
+  if (!isCurrent() || activeContext !== context) return;
+  if (saved.ok) context.revision = saved.value.metadata.revision;
+  else context.error = saved.error.message;
 }
 
 function makeContext(userId: string | null): PersistenceContext {
@@ -82,6 +182,7 @@ function makeContext(userId: string | null): PersistenceContext {
     applying: false,
     pendingBeforeHydration: false,
     revision: null,
+    error: null,
   };
 }
 
@@ -95,15 +196,41 @@ async function hydrateForCurrentRoom(isCurrent: () => boolean = () => true): Pro
   activeContext?.saver.cancel();
   const context = makeContext(userId);
   activeContext = context;
+  emitPersistenceStatus();
+
+  const localStorageUpdatedAt = latestLocalStorageProjectUpdate(userId);
 
   const loaded = await context.repository.loadWorkspace();
   if (!isCurrent() || generation !== hydrationGeneration || activeContext !== context) return;
 
   let workspace: Workspace | undefined;
-  if (loaded.ok && loaded.value) {
-    workspace = loaded.value;
+  if (!loaded.ok) {
+    context.error = loaded.error.message;
+    context.hydrated = true;
+    emitPersistenceStatus();
+    return;
+  }
+  if (loaded.value) {
     context.revision = loaded.value.metadata.revision;
-  } else if (loaded.ok) {
+    const indexedDbProjectUpdatedAt = latestProjectUpdate(loaded.value);
+    const indexedDbMetadataUpdatedAt = parsedTimestamp(loaded.value.metadata.updatedAt);
+    const indexedDbUpdatedAt = indexedDbProjectUpdatedAt === null
+      ? indexedDbMetadataUpdatedAt
+      : indexedDbMetadataUpdatedAt === null
+        ? indexedDbProjectUpdatedAt
+        : Math.max(indexedDbProjectUpdatedAt, indexedDbMetadataUpdatedAt);
+    const localStorageIsNewer = localStorageUpdatedAt !== null
+      && (indexedDbUpdatedAt === null || localStorageUpdatedAt > indexedDbUpdatedAt);
+    if (context.pendingBeforeHydration || localStorageIsNewer) {
+      await preserveCurrentWorkspace(context, loaded.value.metadata.revision, isCurrent);
+      if (!isCurrent() || generation !== hydrationGeneration || activeContext !== context) return;
+      context.hydrated = true;
+      emitPersistenceStatus();
+      if (context.pendingBeforeHydration) scheduleSave(context);
+      return;
+    }
+    workspace = loaded.value;
+  } else {
     const migrated = await migrateLocalStorageWorkspace(context.repository, {
       keys: getSchematicLegacyProjectKeys(userId),
       normalizeProject: (value) => normalizeProject(value),
@@ -118,8 +245,14 @@ async function hydrateForCurrentRoom(isCurrent: () => boolean = () => true): Pro
     }
   }
 
-  if (workspace) applyWorkspace(workspace, context);
+  if (workspace && context.pendingBeforeHydration && context.revision !== null) {
+    await preserveCurrentWorkspace(context, context.revision, isCurrent);
+    if (!isCurrent() || generation !== hydrationGeneration || activeContext !== context) return;
+  } else if (workspace) {
+    applyWorkspace(workspace, context);
+  }
   context.hydrated = true;
+  emitPersistenceStatus();
   if (context.pendingBeforeHydration || !workspace) scheduleSave(context);
 }
 
@@ -138,6 +271,17 @@ export function startProjectPersistence(): () => void {
     }
     scheduleSave(context);
   });
+  const flushForPageLifecycle = () => {
+    if (!isCurrent()) return;
+    const context = activeContext;
+    if (!context?.hydrated || !context.saver.pending) return;
+    void flushContext(context);
+  };
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") flushForPageLifecycle();
+  };
+  window.addEventListener("pagehide", flushForPageLifecycle);
+  document.addEventListener("visibilitychange", onVisibilityChange);
   const onSessionChange = () => {
     if (!isCurrent()) return;
     persistenceReady = hydrateForCurrentRoom(isCurrent);
@@ -154,6 +298,8 @@ export function startProjectPersistence(): () => void {
   return () => {
     disposed = true;
     unsubscribe();
+    window.removeEventListener("pagehide", flushForPageLifecycle);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
     window.removeEventListener("schematic-session", onSessionChange);
     // A stale StrictMode cleanup must not cancel the context belonging to a
     // newer mount. Its generation guard still invalidates this lifecycle's
@@ -164,6 +310,7 @@ export function startProjectPersistence(): () => void {
     activeContext = null;
     hydrationGeneration += 1;
     persistenceReady = Promise.resolve();
+    emitPersistenceStatus();
   };
 }
 
@@ -176,18 +323,27 @@ export function waitForProjectPersistence(): Promise<void> {
 export async function flushProjectPersistence(): Promise<StoredWorkspace<HardwareGraph> | null> {
   const context = activeContext;
   if (!context) return null;
-  const result = await context.saver.flush();
-  if (result?.ok) context.revision = result.value.metadata.revision;
-  return result?.ok ? result.value : null;
+  return flushContext(context);
+}
+
+/** Subscribe to loading/saving/failure changes for honest workspace status UI. */
+export function subscribeProjectPersistenceStatus(listener: () => void) {
+  statusListeners.add(listener);
+  return () => { statusListeners.delete(listener); };
 }
 
 export function getProjectPersistenceStatus() {
+  const hydrated = activeContext?.hydrated ?? false;
+  const pending = activeContext?.saver.pending ?? false;
+  const error = activeContext?.error ?? null;
   return {
     backend: "indexeddb" as const,
     roomId: ROOM_ID,
     userId: getCurrentUserId(),
-    hydrated: activeContext?.hydrated ?? false,
-    pending: activeContext?.saver.pending ?? false,
+    hydrated,
+    pending,
     revision: activeContext?.revision ?? null,
+    error,
+    state: !hydrated ? "loading" as const : pending ? "saving" as const : error ? "error" as const : "saved" as const,
   };
 }

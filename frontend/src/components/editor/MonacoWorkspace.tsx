@@ -1,4 +1,4 @@
-import Editor from "@monaco-editor/react";
+import Editor, { type Monaco } from "@monaco-editor/react";
 import { useState, useEffect, useRef } from "react";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
@@ -29,8 +29,17 @@ const EDITOR_OPTIONS = {
   lineNumbersMinChars: 2, glyphMargin: false, lineDecorationsWidth: 4,
   folding: false, overviewRulerLanes: 0, hideCursorInOverviewRuler: true,
   scrollBeyondLastLine: false, padding: { top: 8, bottom: 8 },
-  fontFamily: "JetBrains Mono, monospace",
+  fontFamily: "Geist Mono, ui-monospace, monospace",
 };
+
+function configureEditorTheme(monaco: Monaco) {
+  monaco.editor.defineTheme("schematic-dark", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [{ token: "comment", foreground: "7CA668" }],
+    colors: { "editor.background": "#18181b" },
+  });
+}
 
 export default function MonacoWorkspace() {
   const activeId = useSelectionStore((state) => state.activeComponentId);
@@ -111,8 +120,8 @@ export default function MonacoWorkspace() {
           <div className="flex items-center gap-1.5 text-xs"><FileCode2 size={12} className="text-muted-foreground" /><span className="font-medium">Firmware</span><span className="text-muted-foreground hidden sm:inline">· select a board</span></div>
           <button type="button" onClick={() => void copyCode()} className="w-7 h-7 rounded hover:bg-muted flex items-center justify-center text-muted-foreground" title={copied ? "Copied" : "Copy code"} aria-label={copied ? "Code copied" : "Copy code"}>{copied ? <span className="text-[10px] text-emerald-500">✓</span> : <Copy size={11} />}</button>
         </div>
-        <div className="flex-1 min-h-[160px] relative"><Editor height="100%" theme={isDark ? "vs-dark" : "light"} language={binding?.targetConfig?.editorLanguage ?? "cpp"} value={code} options={EDITOR_OPTIONS} onChange={(value) => setCode(value ?? "")} /></div>
-        <div className="px-2 py-1.5 border-t border-border bg-muted/20 text-[11px] text-muted-foreground">Select a board on canvas to bind firmware.</div>
+        <div className="flex-1 min-h-[160px] relative"><Editor height="100%" beforeMount={configureEditorTheme} theme={isDark ? "schematic-dark" : "light"} language={binding?.targetConfig?.editorLanguage ?? "cpp"} value={code} options={{ ...EDITOR_OPTIONS, readOnly: true }} /></div>
+        <div className="px-2 py-1.5 border-t border-border bg-muted/20 text-[11px] text-muted-foreground">Add or select a programmable board to save and check firmware.</div>
       </div>
     );
   }
@@ -124,10 +133,10 @@ export default function MonacoWorkspace() {
         <div className="flex items-center gap-1">
           <button type="button" onClick={() => void copyCode()} className="w-7 h-7 rounded border border-border hover:bg-muted flex items-center justify-center" title={copied ? "Copied" : "Copy code"} aria-label={copied ? "Code copied" : "Copy code"}>{copied ? <span className="text-[10px] text-emerald-500">✓</span> : <Copy size={11} />}</button>
           <button type="button" onClick={() => setCompile({ status: "idle" })} className="hidden sm:inline-flex text-xs px-2 py-1 rounded border border-border hover:bg-muted">Clear</button>
-          <button type="button" className="text-xs px-2.5 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 font-medium flex items-center gap-1" onClick={() => void doCompile()} disabled={compiling}><Play size={10} className="fill-white" /> {compiling ? "Compiling…" : "Compile"}</button>
+          <button type="button" className="text-xs px-2.5 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90 font-medium flex items-center gap-1" onClick={() => void doCompile()} disabled={compiling}><Play size={10} className="fill-white" /> {compiling ? "Checking…" : "Check source"}</button>
         </div>
       </div>
-      <div className="flex-1 min-h-[120px] relative"><Editor height="100%" theme={isDark ? "vs-dark" : "light"} language={binding?.targetConfig?.editorLanguage ?? "cpp"} value={code} onChange={(value) => handleCodeChange(value ?? "")} options={EDITOR_OPTIONS} /></div>
+      <div className="flex-1 min-h-[120px] relative"><Editor height="100%" beforeMount={configureEditorTheme} theme={isDark ? "schematic-dark" : "light"} language={binding?.targetConfig?.editorLanguage ?? "cpp"} value={code} onChange={(value) => handleCodeChange(value ?? "")} options={EDITOR_OPTIONS} /></div>
       {compile.status === "unavailable" && <div role="status" className="border-t border-amber-200 bg-amber-50 px-2 py-2 text-[11px] leading-snug text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">Browser compilation is not available for this board in this Site. Your source is saved and can be exported, compiled with the board’s normal toolchain, and tested on the actual hardware.</div>}
       {compile.log && compile.status !== "idle" && (
         <div className="border-t border-border max-h-[140px] flex flex-col shrink-0">

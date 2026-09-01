@@ -28,7 +28,7 @@ const bento = [
     kicker: "CATALOG • 500+ DEFINITIONS",
     title: "A catalog that tells you what runs",
     body: "Boards, sensors, displays, power and passives share typed identities. Each part exposes its port contract and execution coverage, so validation-only parts are never presented as simulated hardware.",
-    accent: "from-violet-500/10 via-transparent to-transparent",
+    accent: "from-amber-500/10 via-transparent to-transparent",
     stat: "500+",
     statLabel: "definitions",
   },
@@ -36,9 +36,9 @@ const bento = [
     span: "lg:col-span-5",
     icon: Cable,
     kicker: "TYPED GRAPH",
-    title: "Wires that understand voltage",
-    body: "Explicit ports (power/i2c/spi/uart/pwm/adc) with validation for shorts, missing pull-ups, and ground.",
-    accent: "from-sky-500/10 via-transparent to-transparent",
+    title: "Wires that know their domain",
+    body: "Explicit power, I²C, SPI, UART, PWM, and ADC ports support typed checks for shorts, missing pull-ups, and ground. This is validation, not analog circuit simulation.",
+    accent: "from-amber-500/10 via-transparent to-transparent",
   },
   {
     span: "lg:col-span-5",
@@ -46,7 +46,7 @@ const bento = [
     kicker: "FIRMWARE",
     title: "Code lives next to copper",
     body: "Monaco, per-board targets, and browser preflight — so agent and human share the same project.",
-    accent: "from-emerald-500/10 via-transparent to-transparent",
+    accent: "from-amber-500/10 via-transparent to-transparent",
   },
   {
     span: "lg:col-span-5",
@@ -62,7 +62,7 @@ const bento = [
     kicker: "SHOPPING DESK",
     title: "From graph to cart without copy-paste",
     body: "Agent-supplied offers, retailer links, alternatives, and budget quotes stay attached to the graph — with unavailable prices clearly marked until a provider supplies them.",
-    accent: "from-fuchsia-500/10 via-transparent to-transparent",
+    accent: "from-amber-500/10 via-transparent to-transparent",
   },
 ];
 
@@ -188,20 +188,20 @@ export default function LandingPage() {
             </div>
             <div className="landing-proof">
               <span>
-                <ShieldCheck size={14} strokeWidth={1.4} /> Local-first • no cloud required
+                <ShieldCheck size={14} strokeWidth={1.4} /> Projects stay on this device
               </span>
               <span>
                 <Cpu size={14} strokeWidth={1.4} /> 500+ defs • {WEBMCP_TOOL_COUNT} tools
               </span>
               <span className="hidden lg:inline-flex">
-                <Zap size={14} strokeWidth={1.4} /> Browser runtime 20k execs
+                <Zap size={14} strokeWidth={1.4} /> Supported models run in-browser
               </span>
             </div>
           </div>
 
           <div className="landing-visual-wrap">
             <div className="double-bezel">
-              <div className="landing-visual" aria-label="Hardware workspace preview">
+              <div className="landing-visual" role="img" aria-label="Hardware workspace preview">
                 <div className="landing-window-bar">
                   <span className="window-dots">
                     <i />
@@ -211,7 +211,7 @@ export default function LandingPage() {
                   <LogoMark />
                   <span>environment-controller.vlx — Untitled • 3 components</span>
                   <span className="window-badge">
-                    <Play size={10} strokeWidth={1.6} /> LIVE
+                    <Play size={10} strokeWidth={1.6} /> MODELED
                   </span>
                 </div>
                 <div className="landing-window-body">
@@ -271,7 +271,7 @@ export default function LandingPage() {
                       {"}"}
                     </pre>
                     <div className="code-foot">
-                      <span className="dot on" /> browser runtime • button → LED
+                      <span className="dot on" /> behavioral model • button → LED
                     </div>
                   </div>
                 </div>
@@ -329,7 +329,7 @@ export default function LandingPage() {
                 <div className="step-icon">
                   <Icon size={18} strokeWidth={1.4} />
                 </div>
-                <h4>{title}</h4>
+                <h3>{title}</h3>
                 <p>{desc}</p>
               </div>
             ))}
@@ -339,7 +339,7 @@ export default function LandingPage() {
               <ShieldCheck size={14} strokeWidth={1.4} /> validation: missing pull-up, TX→TX, I²C collision
             </span>
             <span>
-              <Activity size={14} strokeWidth={1.4} /> deterministic browser runtime • GPIO + I²C trace
+              <Activity size={14} strokeWidth={1.4} /> bounded behavioral runtime • modeled GPIO + I²C
             </span>
             <span>
               <Layers size={14} strokeWidth={1.4} /> netlist • Union-Find • 8 resolved nets in demo
@@ -355,7 +355,7 @@ export default function LandingPage() {
           </div>
           <div className="showcase">
             <div className="showcase-main">
-              <div className="showcase-label">VERIFIED FLOW • button-led • 3 comps • 3 signal paths</div>
+              <div className="showcase-label">SUPPORTED FLOW • button-led • 3 comps • 3 signal paths</div>
               <div className="showcase-canvas">
                 <img src="/component-svgs/esp32-board.svg" alt="" loading="lazy" style={{ left: "18%", top: "28%" }} />
                 <img src="/component-svgs/pushbutton.svg" alt="" loading="lazy" style={{ left: "8%", top: "62%" }} />
@@ -415,7 +415,7 @@ export default function LandingPage() {
               </Link>
             </div>
           </div>
-          <div className="cta-foot">AGPL-3.0 • WebMCP {WEBMCP_TOOL_COUNT} tools • browser runtime • provider-backed prices when connected</div>
+          <div className="cta-foot">AGPL-3.0 • WebMCP {WEBMCP_TOOL_COUNT} tools • bounded browser models • provider-backed prices when connected</div>
         </section>
       </main>
 

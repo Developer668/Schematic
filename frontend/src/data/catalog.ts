@@ -662,7 +662,7 @@ function inferManufacturer(id: string, title: string, tags: string[]): string | 
   if (blob.includes("arduino")) return "Arduino";
   if (blob.includes("esp32") || blob.includes("espressif") || blob.includes("esp8266") || blob.includes("nodemcu")) return "Espressif";
   if (blob.includes("raspberry") || blob.includes("pico")) return "Raspberry Pi";
-  if (blob.includes("stm32") || blob.includes("st ")) return "ST Micro";
+  if (blob.includes("stm32")) return "ST Micro";
   if (blob.includes("teensy")) return "PJRC";
   if (blob.includes("microbit") || blob.includes("bbc")) return "BBC";
   if (blob.includes("bosch") || blob.includes("bmp280") || blob.includes("bme280")) return "Bosch";

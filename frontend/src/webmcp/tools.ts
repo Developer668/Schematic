@@ -10,7 +10,7 @@ import { useWorkspaceStore, type BottomPanel } from "../store/useWorkspaceStore.
 import { useValidationStore, validateFirmwareFiles, validateProject } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
 import { createShoppingHandoff, useShoppingStore, type AgentPublication, type PartOffer, type ShoppingDiscovery, type ShoppingResult } from "../store/useShoppingStore.ts";
-import { waitForProjectPersistence } from "../store/projectPersistence.ts";
+import { flushProjectPersistence, getProjectPersistenceStatus, waitForProjectPersistence } from "../store/projectPersistence.ts";
 import { runFirmwareRuntime } from "../simulation/runtime.ts";
 import { hasPortableButtonLedContract, PortableHarnessUnavailableError, runPortableButtonLedHarness } from "../simulation/portableHarness.ts";
 import { getCatalogComponent, searchCatalog } from "../data/catalog.ts";
@@ -20,6 +20,8 @@ import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.j
 
 type ToolAnnotations = {
   readOnlyHint?: boolean;
+  /** The operation can irreversibly remove user-created state. */
+  destructiveHint?: boolean;
   /** Result may contain content supplied by an external provider or agent. */
   untrustedContentHint?: boolean;
 };
@@ -53,6 +55,24 @@ function toolFailure(code: string, message: string, data: Record<string, unknown
     isError: true,
     error: { code, message, retryable: false },
     data: { code, ...data },
+  };
+}
+
+async function persistProjectMutation(action: string, projectId: string) {
+  const stored = await flushProjectPersistence();
+  const status = getProjectPersistenceStatus();
+  if (status.error) {
+    return {
+      failure: toolFailure(
+        "PROJECT_PERSISTENCE_FAILED",
+        `${action} was applied to the current tab and fallback snapshot, but the device-local project repository could not be updated: ${status.error}`,
+        { projectId, locallyApplied: true, backend: status.backend },
+      ),
+    };
+  }
+  return {
+    persistence: stored ? "flushed" : status.hydrated ? "already-current" : "local-snapshot-only",
+    revision: stored?.metadata.revision ?? status.revision,
   };
 }
 
@@ -737,12 +757,28 @@ const tools: ToolDef[] = [
   },
   {
     name: "project.delete",
-    description: "Delete a saved project; the final remaining project cannot be deleted",
-    inputSchema: { type: "object", properties: { projectId: { type: "string" } } },
-    execute: async ({ projectId }) => {
-      const deleted = useProjectStore.getState().deleteProject(projectId);
-      if (!deleted) return { content: [{ type: "text", text: "Project was not deleted — keep one project and provide a valid id" }], isError: true };
-      return { content: [{ type: "text", text: `Deleted project ${projectId ?? "current"}` }] };
+    description: "Delete one saved project after confirming its exact id; the final remaining project cannot be deleted",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "Exact id of the project to delete" },
+        confirmProjectId: { type: "string", description: "Repeat the exact project id to confirm this irreversible operation" },
+      },
+      required: ["projectId", "confirmProjectId"],
+    },
+    annotations: { destructiveHint: true },
+    execute: async ({ projectId, confirmProjectId }) => {
+      const targetId = typeof projectId === "string" ? projectId : "";
+      if (!targetId.trim() || confirmProjectId !== targetId) {
+        return toolFailure("CONFIRMATION_REQUIRED", "Project deletion requires confirmProjectId to exactly match projectId.", { projectId: targetId || null });
+      }
+      const target = useProjectStore.getState().projects.find((project) => project.id === targetId);
+      if (!target) return toolFailure("PROJECT_NOT_FOUND", `Unknown project ${targetId}.`, { projectId: targetId });
+      const deleted = useProjectStore.getState().deleteProject(targetId);
+      if (!deleted) return toolFailure("PROJECT_DELETE_REJECTED", "Project was not deleted. Schematic must retain at least one project.", { projectId: targetId });
+      const persisted = await persistProjectMutation("Project deletion", targetId);
+      if ("failure" in persisted) return persisted.failure;
+      return { content: [{ type: "text", text: `Deleted project ${target.name} (${targetId})` }], data: { projectId: targetId, name: target.name, ...persisted } };
     },
   },
   {
@@ -751,16 +787,39 @@ const tools: ToolDef[] = [
     inputSchema: { type: "object", properties: {} },
     execute: async () => {
       const saved = useProjectStore.getState().saveProject();
-      return { content: [{ type: "text", text: `Saved ${saved.projectId} at ${saved.savedAt}` }], data: saved };
+      const stored = await flushProjectPersistence();
+      const status = getProjectPersistenceStatus();
+      if (status.error) {
+        return toolFailure("PROJECT_SAVE_FAILED", `The device-local project repository could not be saved: ${status.error}`, { projectId: saved.projectId, backend: status.backend });
+      }
+      const persistence = stored ? "flushed" : status.hydrated ? "already-current" : "local-snapshot-only";
+      const message = persistence === "local-snapshot-only"
+        ? `Saved a device-local fallback snapshot for ${saved.projectId}; the IndexedDB repository is not active in this context.`
+        : `Saved ${saved.projectId} to the device-local project repository at ${saved.savedAt}.`;
+      return { content: [{ type: "text", text: message }], data: { ...saved, persistence, revision: stored?.metadata.revision ?? status.revision } };
     },
   },
   {
     name: "project.clear",
-    description: "Clear the current project (remove all components and connections)",
-    inputSchema: { type: "object", properties: {} },
-    execute: async () => {
+    description: "Clear the current project after confirming its exact id (remove all components, connections, and firmware)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "Exact id of the active project to clear" },
+        confirmProjectId: { type: "string", description: "Repeat the exact active project id to confirm this irreversible operation" },
+      },
+      required: ["projectId", "confirmProjectId"],
+    },
+    annotations: { destructiveHint: true },
+    execute: async ({ projectId, confirmProjectId }) => {
+      const active = useProjectStore.getState().project;
+      if (projectId !== active.id || confirmProjectId !== active.id) {
+        return toolFailure("CONFIRMATION_REQUIRED", "Clearing requires projectId and confirmProjectId to exactly match the active project id.", { activeProjectId: active.id, requestedProjectId: projectId ?? null });
+      }
       useProjectStore.getState().clear();
-      return { content: [{ type: "text", text: "Project cleared" }] };
+      const persisted = await persistProjectMutation("Project clear", active.id);
+      if ("failure" in persisted) return persisted.failure;
+      return { content: [{ type: "text", text: `Cleared ${active.name} (${active.id})` }], data: { projectId: active.id, name: active.name, ...persisted } };
     },
   },
   {

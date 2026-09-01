@@ -20,7 +20,7 @@ import { useProjectStore } from "../../store/useProjectStore.ts";
 import { getCatalogComponent } from "../../data/hardware.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
-import { Maximize2, Grid3X3, EyeOff, Map, AlertCircle } from "lucide-react";
+import { Maximize2, Grid3X3, EyeOff, Map, AlertCircle, Cpu, Search, ArrowRight } from "lucide-react";
 import { componentArtworkHref } from "../../data/componentArtwork.ts";
 
 const nodeTypes = { hardware: HardwareNode };
@@ -75,7 +75,7 @@ function projectToFlow(project: ReturnType<typeof useProjectStore.getState>["pro
   return { nodes, edges };
 }
 
-export default function HardwareCanvas() {
+export default function HardwareCanvas({ onBrowseComponents }: { onBrowseComponents?: () => void }) {
   const project = useProjectStore((s) => s.project);
   const connectPorts = useProjectStore((s) => s.connectPorts);
   const moveComponent = useProjectStore((s) => s.moveComponent);
@@ -91,6 +91,10 @@ export default function HardwareCanvas() {
   const [dragPreview, setDragPreview] = useState<{ html: string; title: string; x: number; y: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<ReactFlowInstance | null>(null);
+
+  useEffect(() => {
+    canvasRef.current?.querySelector(".react-flow__controls")?.removeAttribute("aria-label");
+  }, []);
 
   useEffect(() => {
     if (!initialNodes.length) return;
@@ -230,7 +234,6 @@ export default function HardwareCanvas() {
         autoPanOnNodeFocus
         ariaLabelConfig={{
           "minimap.ariaLabel": "Hardware workspace overview",
-          "controls.ariaLabel": "Canvas view controls",
         }}
       >
         {/* Optional drafting grid uses lines only. */}
@@ -287,6 +290,36 @@ export default function HardwareCanvas() {
           )}
         </div>
       </ReactFlow>
+
+      {nodes.length === 0 && (
+        <section className="pointer-events-none absolute inset-0 z-[5] grid place-items-center p-6" aria-labelledby="empty-canvas-title">
+          <div className="pointer-events-auto w-full max-w-[470px] rounded-2xl border border-border bg-card/95 p-5 shadow-[0_18px_60px_hsl(240_20%_4%/.2)] backdrop-blur-xl sm:p-6">
+            <div className="mb-4 grid h-10 w-10 place-items-center rounded-lg border border-border bg-muted text-muted-foreground">
+              <Cpu size={18} strokeWidth={1.6} />
+            </div>
+            <p className="kicker">New hardware project</p>
+            <h2 id="empty-canvas-title" className="mt-2 text-xl font-semibold tracking-[-0.035em]">Place the first component.</h2>
+            <p className="mt-2 max-w-md text-xs leading-5 text-muted-foreground">Start with a controller, then add devices and connect compatible ports. Schematic validates the graph as you build.</p>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+              <button type="button" onClick={() => useProjectStore.getState().addComponent("esp32-devkit-v1")} className="run-button h-9 flex-1 px-4">
+                <Cpu size={13} /> Add an ESP32 board
+              </button>
+              <button type="button" onClick={onBrowseComponents} className="secondary-button h-9 flex-1 px-4">
+                <Search size={13} /> Browse components
+              </button>
+            </div>
+            <ol className="mt-5 grid grid-cols-4 gap-2 border-t border-border pt-4 text-[10px] text-muted-foreground">
+              {["Place", "Wire", "Validate", "Run"].map((label, index) => (
+                <li key={label} className="flex items-center gap-1.5">
+                  <span className="grid h-4 w-4 shrink-0 place-items-center rounded-sm bg-muted font-mono text-[8px] text-foreground">{index + 1}</span>
+                  <span>{label}</span>
+                  {index < 3 && <ArrowRight size={9} className="ml-auto hidden sm:block" aria-hidden="true" />}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+      )}
 
       {dragPreview && (
         <div className="drag-preview" style={{ left: dragPreview.x, top: dragPreview.y }}>

@@ -11,6 +11,7 @@ export default defineConfig({
       '@schematic/validation': path.resolve(__dirname, '../packages/validation/src'),
       '@schematic/component-format': path.resolve(__dirname, '../packages/component-format/src'),
       '@schematic/firmware-harness': path.resolve(__dirname, '../packages/firmware-harness/src/index.ts'),
+      '@schematic/project-storage': path.resolve(__dirname, '../packages/project-storage/src'),
     },
   },
   server: {
@@ -36,8 +37,8 @@ export default defineConfig({
     sourcemap: false,
     cssMinify: true,
     minify: 'esbuild',
-    chunkSizeWarningLimit: 8000,
-    reportCompressedSize: false,
+    chunkSizeWarningLimit: 1000,
+    reportCompressedSize: true,
     rollupOptions: {
       output: {
         manualChunks: {

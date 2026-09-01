@@ -102,6 +102,25 @@ describe("WebMCP tools", () => {
     expect(renamed).not.toBe(source.name);
   });
 
+  it("requires destructive project tools to confirm the exact target id", async () => {
+    const source = useProjectStore.getState().project;
+    const secondId = useProjectStore.getState().createProject("Destructive target");
+    useProjectStore.getState().addComponent("led");
+
+    const wrongDelete: any = await invokeWebMCPTool("project.delete", { projectId: source.id, confirmProjectId: secondId });
+    expect(wrongDelete.isError).toBe(true);
+    expect(wrongDelete.data.code).toBe("CONFIRMATION_REQUIRED");
+    expect(useProjectStore.getState().projects.some((project) => project.id === source.id)).toBe(true);
+
+    const wrongClear: any = await invokeWebMCPTool("project.clear", { projectId: source.id, confirmProjectId: source.id });
+    expect(wrongClear.isError).toBe(true);
+    expect(useProjectStore.getState().project.components).toHaveLength(1);
+
+    const cleared: any = await invokeWebMCPTool("project.clear", { projectId: secondId, confirmProjectId: secondId });
+    expect(cleared.isError).not.toBe(true);
+    expect(useProjectStore.getState().project.components).toHaveLength(0);
+  });
+
   it("executes the real component lifecycle through WebMCP callbacks", async () => {
     const search: any = await invokeWebMCPTool("component.search", { query: "bmp280" });
     expect(search.data.some((definition: any) => definition.id === "bmp280")).toBe(true);
@@ -184,6 +203,8 @@ describe("WebMCP tools", () => {
     for (const name of shoppingNames) expect(definitions.get(name).annotations?.untrustedContentHint).toBe(true);
     expect(definitions.get("shopping.get_state").annotations?.readOnlyHint).toBe(true);
     expect(definitions.get("shopping.quote").annotations?.readOnlyHint).toBe(true);
+    expect(definitions.get("project.delete").annotations?.destructiveHint).toBe(true);
+    expect(definitions.get("project.clear").annotations?.destructiveHint).toBe(true);
   });
 
   it("does not expose an inbound postMessage mutation bridge", () => {
@@ -239,13 +260,14 @@ describe("WebMCP tools", () => {
       return result;
     };
 
-    await call("project.clear");
+    const initialProjectId = useProjectStore.getState().activeProjectId;
+    await call("project.clear", { projectId: initialProjectId, confirmProjectId: initialProjectId });
     await call("project.list");
     const createdProject = await call("project.create", { name: "Scratch hardware" });
     const duplicateProject = await call("project.duplicate");
     await call("project.switch", { projectId: createdProject.data.projectId });
     await call("project.save");
-    await call("project.delete", { projectId: duplicateProject.data.projectId });
+    await call("project.delete", { projectId: duplicateProject.data.projectId, confirmProjectId: duplicateProject.data.projectId });
     await call("project.rename", { name: "WebMCP integration" });
     await call("project.apply_blueprint", { blueprintId: "meta-glasses" });
     await call("workspace.get_state");

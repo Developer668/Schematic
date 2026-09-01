@@ -6,7 +6,7 @@ export default function ComponentArtwork({ definition, className = "", alt }: { 
   const category = definition.category.toLowerCase().replace(/[^a-z0-9-]/g, "-");
   const classes = `component-artwork component-artwork-${category} ${className}`;
   const src = componentArtworkPath(definition.id);
-  if (src) return <img src={src} alt={alt ?? definition.title} className={classes} draggable={false} />;
+  if (src) return <img src={src} alt={alt ?? definition.title} className={classes} draggable={false} loading="lazy" decoding="async" />;
   const thumbnail = definition.thumbnail ? presentationSvg(definition.thumbnail) : "";
   if (thumbnail && /<(?:path|circle|ellipse|line|polyline|polygon|rect|g|image|use)\b/i.test(thumbnail)) {
     return <div role="img" aria-label={alt ?? definition.title} className={`${classes} component-artwork-inline`} dangerouslySetInnerHTML={{ __html: thumbnail }} />;

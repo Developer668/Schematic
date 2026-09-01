@@ -24,6 +24,11 @@ describe("catalog expansion", () => {
     expect(cats.has("sensor")).toBe(true);
     expect(cats.has("display")).toBe(true);
   });
+  it("does not infer ST Micro from ordinary words ending in st", () => {
+    for (const id of ["pms5003-dust", "mt3608-boost", "sps30-dust", "xl6009-boost"]) {
+      expect(catalog.find((component) => component.id === id)?.manufacturer).not.toBe("ST Micro");
+    }
+  });
   it("provides artwork for every component, including minimap rendering", () => {
     const missing = catalog.filter((component) => !componentArtworkHref(component));
     expect(missing.map((component) => component.id)).toEqual([]);
