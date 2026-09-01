@@ -3,9 +3,9 @@
 Status: non-product browser acceptance route (repository checked 2026-08-31)
 
 Canonical Site:
-[schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
+[schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site)
 
-Sites project ID: `appgprj_6a913ce4a58881918a47ea49fa0ca505`.
+Sites project ID: `appgprj_6a9216cfb16881919e467839d41b29b8`.
 Whether the current revision is published must be checked by the release agent;
 this file documents the probe route, not deployment success.
 

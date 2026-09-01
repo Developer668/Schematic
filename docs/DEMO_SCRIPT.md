@@ -1,7 +1,7 @@
 # Judge demo — Behavior Preview plus editable code
 
 Target: the published ChatGPT Site at
-[schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
+[schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site)
 
 This is a three-minute demo of the product's actual boundary. The model uses
 WebMCP to build a graph, declare a Behavior Plan, preview typed outcomes, and

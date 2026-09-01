@@ -19,8 +19,9 @@ Ship Schematic as a web workspace where:
 - Branch: `main`
 - GitHub remote: `https://github.com/Developer668/Schematic.git`
 - Remote HEAD before this release: `477e81d95a4366e55893037cf563ebfc4922efaf`
-- Existing Site project ID: `appgprj_6a913ce4a58881918a47ea49fa0ca505`
-- Existing Site URL: `https://schematic-hardware-workspace.decipherer71.chatgpt.site/`
+- Existing Site project ID in the original account: `appgprj_6a913ce4a58881918a47ea49fa0ca505` (not visible after the account switch).
+- Current-account matching Site project ID: `appgprj_6a9216cfb16881919e467839d41b29b8`
+- Current-account Site URL: `https://schematic-hardware-workbench.decipherer71951502.chatgpt.site/`
 - Site source checkout: `chatgpt-site/`
 - Site metadata: `.openai/hosting.json`
 - GitHub issue tracking this release: `https://github.com/Developer668/Schematic/issues/1`

@@ -264,6 +264,6 @@ The release agent must verify the published Site in the ChatGPT in-app browser:
 
 Local tests and compatibility bridges cannot establish publication status or
 native host support. The canonical Site is
-[schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site),
-bound to Sites project `appgprj_6a913ce4a58881918a47ea49fa0ca505`; the release
+[schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site),
+bound to Sites project `appgprj_6a9216cfb16881919e467839d41b29b8`; the release
 agent must record which revision is actually live.

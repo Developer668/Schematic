@@ -13,8 +13,8 @@ This is the implementation handoff for the landed compiler-free
 Behavior-Preview/editable-Code path. Earlier runtime/compiler notes are retained
 only when they explain migration or quarantine; they are not current product
 capabilities. The repository's canonical Site binding is
-`appgprj_6a913ce4a58881918a47ea49fa0ca505` at
-<https://schematic-hardware-workspace.decipherer71.chatgpt.site>. Publication of
+`appgprj_6a9216cfb16881919e467839d41b29b8` at
+<https://schematic-hardware-workbench.decipherer71951502.chatgpt.site>. Publication of
 the current revision must be verified by the release agent.
 
 ## 1. Decision summary
@@ -1558,9 +1558,9 @@ commits.
 
 GitHub push and ChatGPT Site deployment are separate operations. The repository
 currently persists Sites project ID
-`appgprj_6a913ce4a58881918a47ea49fa0ca505` in
+`appgprj_6a9216cfb16881919e467839d41b29b8` in
 `chatgpt-site/.openai/hosting.json`; the canonical URL is
-<https://schematic-hardware-workspace.decipherer71.chatgpt.site>.
+<https://schematic-hardware-workbench.decipherer71951502.chatgpt.site>.
 If the selected ChatGPT workspace cannot access that opaque ID, do not replace
 it or create a duplicate Site silently. Switch to the owning workspace or obtain
 explicit authorization for a new binding. See `docs/CHATGPT_SITE_RUNBOOK.md`.

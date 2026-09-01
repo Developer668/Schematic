@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "../../frontend/src/index.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://schematic-hardware-workspace.decipherer71.chatgpt.site"),
+  metadataBase: new URL("https://schematic-hardware-workbench.decipherer71951502.chatgpt.site"),
   title: "Schematic · Hardware WebMCP Studio",
   description: "Design connected hardware, preview typed outcomes, and edit source with an agent-native workbench.",
   openGraph: {
