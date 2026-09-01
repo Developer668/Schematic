@@ -1,5 +1,7 @@
 # Schematic — HardwareWebMCP Master Plan (40 Steps)
 
+> **Historical roadmap — superseded 2026-08-31.** [ADR-001](docs/ADR-001-BEHAVIOR-PLAN-PREVIEW.md) defines the current product: typed Behavior Plan outcome previews plus editable source for external use. Compiler, emulator, simulation, upload, and physical-test phases below are not current ChatGPT Site capabilities or release commitments.
+
 > Generated 2026-08-26. Implements `HardwareWebMCP.md` end-to-end. No toy demo — production, typed, isolated workers, agent-native.
 > Architecture = 3 reusable layers (universal component format + per-engine adapter + typed connection) → every project is a graph, not hardcoded `if Pi → do_this()`.
 
@@ -73,7 +75,7 @@ interface FirmwareTarget { id:string; componentId:string; language:"arduino"|"mi
 ```ts
 function validateConnection(src:Port,tgt:Port, ctx:ProjectContext): ValidationResult
 ```
-Checks: wrong voltage, missing ground, output→output, i2c addr collision (scan all i2c targets), missing pull-ups, tx→tx, spi CS collision, insufficient power, usb host-host, pcie ep-ep, rf impedance mismatch, camera bw, battery peakCurrent, driver missing, physical collision, thermal. Return `{valid:boolean; severity:"error"|"warning"; code; message; autoFix?:{addComponent?,insertPullup?,levelShifter?}}`.
+Checks: wrong voltage, missing ground, output→output, i2c addr collision (scan all i2c targets), missing pull-ups, tx→tx, spi CS collision, insufficient power, usb host-host, pcie ep-ep, rf impedance mismatch, camera bw, battery peakCurrent, driver missing, physical collision, thermal. Return `{valid:boolean; severity:"error"|"warning"; code; message}` plus affected graph identities. Repair guidance is explicit and informational; topology-changing fixes are never represented as automatic actions.
 - Ported from Velxio `circuit/verifier` + expanded for typed ports.
 - 20+ rule unit tests.
 

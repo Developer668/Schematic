@@ -4,7 +4,10 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { registerWebMCPTools, unregisterWebMCPTools } from "./webmcp/tools.ts";
 import "./store/useThemeStore.ts";
 import { useAuth, getCurrentUserId, initAuth } from "./auth/session.ts";
-import { startProjectPersistence, waitForProjectPersistence } from "./store/projectPersistence.ts";
+import { getProjectPersistenceStatus, startProjectPersistence, subscribeProjectPersistenceStatus, waitForProjectPersistence } from "./store/projectPersistence.ts";
+import { installBehaviorPreviewAdapter } from "./application/behaviorCommands.ts";
+import { isPreviewRunning, useBehaviorPreviewStore } from "./behavior/useBehaviorPreviewStore.ts";
+import { useProjectStore } from "./store/useProjectStore.ts";
 import LogoMark from "./components/LogoMark.tsx";
 
 const LandingPage = lazy(() => import("./pages/LandingPage.tsx"));
@@ -44,6 +47,58 @@ function AuthGate() {
   return <AuthPage />;
 }
 
+/** App-level owner for the one ephemeral logical preview clock. WebMCP tools
+ * are registered across routes, so timed rules must not depend on StudioPage
+ * being mounted. The shared reducer remains deterministic and timer-free. */
+function BehaviorPreviewController() {
+  const projectId = useProjectStore((state) => state.project.id);
+  const status = useBehaviorPreviewStore((state) => state.status);
+  const snapshot = useBehaviorPreviewStore((state) => state.snapshot);
+  const durationMs = useBehaviorPreviewStore((state) => state.durationMs);
+  const resetPreview = useBehaviorPreviewStore((state) => state.resetPreview);
+  const seekPreview = useBehaviorPreviewStore((state) => state.seekPreview);
+  const setStatus = useBehaviorPreviewStore((state) => state.setStatus);
+  const snapshotIdentity = snapshot?.snapshotSha256 ?? null;
+
+  useEffect(() => {
+    void resetPreview();
+  }, [projectId, resetPreview]);
+
+  useEffect(() => {
+    if (!isPreviewRunning(status) || !snapshot) return;
+    const initialTimeMs = snapshot.logicalTimeMs ?? 0;
+    if (initialTimeMs >= durationMs) {
+      setStatus("ready");
+      return;
+    }
+    let cancelled = false;
+    let frame = 0;
+    let lastSeekMs = initialTimeMs;
+    const startedAt = performance.now();
+    const tick = async (now: number) => {
+      if (cancelled) return;
+      const nextTimeMs = Math.min(durationMs, Math.round(initialTimeMs + now - startedAt));
+      if (nextTimeMs === durationMs || nextTimeMs - lastSeekMs >= 50) {
+        lastSeekMs = nextTimeMs;
+        await seekPreview(nextTimeMs);
+        if (cancelled) return;
+      }
+      if (nextTimeMs >= durationMs) {
+        setStatus("ready");
+        return;
+      }
+      frame = window.requestAnimationFrame((next) => { void tick(next); });
+    };
+    frame = window.requestAnimationFrame((next) => { void tick(next); });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [durationMs, seekPreview, setStatus, snapshot, snapshotIdentity, status]);
+
+  return null;
+}
+
 export default function App() {
   const [workspaceReady, setWorkspaceReady] = useState(false);
 
@@ -52,10 +107,23 @@ export default function App() {
     // registry waits for this same hydration gate, so an agent cannot mutate
     // the default room while the authenticated Site room is still loading.
     const stopProjectPersistence = startProjectPersistence();
+    // A verified subject change swaps the persistence lease synchronously and
+    // marks it unhydrated. Keep already-mounted routes read-only/loading until
+    // that room has been applied; otherwise a stale click or editor callback
+    // can write the new user's delayed IndexedDB room.
+    const syncWorkspaceReadiness = () => {
+      setWorkspaceReady(getProjectPersistenceStatus().hydrated);
+    };
+    const stopPersistenceStatus = subscribeProjectPersistenceStatus(syncWorkspaceReadiness);
+    syncWorkspaceReadiness();
+    // Install the UI adapter during the client lifecycle rather than at module
+    // evaluation time. This is reliable under Site SSR/hydration and React
+    // StrictMode, and it cannot leave a stale adapter after unmount.
+    const stopBehaviorPreviewAdapter = installBehaviorPreviewAdapter();
     void initAuth();
     let disposed = false;
     void waitForProjectPersistence().then(() => {
-      if (!disposed) setWorkspaceReady(true);
+      if (!disposed) syncWorkspaceReadiness();
     });
     // Defer registration one microtask so a StrictMode setup/cleanup pair can
     // cancel before any native tools are registered. unregisterWebMCPTools()
@@ -74,12 +142,15 @@ export default function App() {
     return () => {
       disposed = true;
       unregisterWebMCPTools();
+      stopBehaviorPreviewAdapter();
+      stopPersistenceStatus();
       stopProjectPersistence();
     };
   }, []);
 
   return (
     <BrowserRouter>
+      <BehaviorPreviewController />
       <Suspense fallback={<LoadingScreen message="Opening Schematic…" />}>
         <Routes>
           <Route path="/" element={<LandingPage />} />

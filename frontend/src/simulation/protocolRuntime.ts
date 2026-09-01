@@ -1,6 +1,7 @@
 import type { HardwarePort } from "@schematic/hardware-graph";
 import { getCatalogComponent, type CatalogComponent } from "../data/catalog.ts";
 import { capabilityRegistryEntry, type CapabilityAdapterId } from "./capabilityRegistry.ts";
+import { inferModelContract } from "./modelContract.ts";
 
 export type ProtocolValue = boolean | number;
 
@@ -55,6 +56,10 @@ interface RuntimeState {
   spiChipSelect: Map<string, number | string | undefined>;
   serialRx: Map<string, number[]>;
   deviceStates: Map<string, DeviceRuntimeState>;
+}
+
+function legacyModelFor(definition: CatalogComponent) {
+  return inferModelContract(definition);
 }
 
 const I2C_ADDRESSES: Record<string, number> = {
@@ -168,7 +173,7 @@ function connectedProtocolTarget(
   if (!controller || !controllerDefinition) return undefined;
   const candidates = project.components.filter((candidate) => candidate.id !== controllerId).filter((candidate) => {
     const definition = definitionFor(candidate);
-    if (!definition || !["behavioral", "engine-backed"].includes(definition.model.support) || !definition.ports.some((candidatePort) => candidatePort.domain === domain)) return false;
+    if (!definition || !["behavioral", "engine-backed"].includes(legacyModelFor(definition).support) || !definition.ports.some((candidatePort) => candidatePort.domain === domain)) return false;
     if (domain === "i2c" && address !== undefined && modelAddress(candidate, definition) !== address) return false;
     if (domain === "i2c") {
       return netsConnected(dsu, busPort(controllerDefinition, "i2c", "data"), controllerId, busPort(definition, "i2c", "data"), candidate.id)
@@ -185,7 +190,7 @@ function connectedProtocolTarget(
 }
 
 function initialDeviceState(component: RuntimeProject["components"][number], definition: CatalogComponent): DeviceRuntimeState {
-  const model = definition.model;
+  const model = legacyModelFor(definition);
   const adapter = capabilityRegistryEntry(model.adapterId);
   const values: DeviceRuntimeState["values"] = {};
   if (model.family === "digital-input") values.input = false;
@@ -263,7 +268,7 @@ export function createProtocolRuntime(project: RuntimeProject, dsu: RuntimeDisjo
     const sourceId = key.slice(0, separator);
     for (const controller of project.components) {
       const controllerDefinition = definitionFor(controller);
-      if (!controllerDefinition || controllerDefinition.model.family !== "mcu") continue;
+      if (!controllerDefinition || legacyModelFor(controllerDefinition).family !== "mcu") continue;
       const sourceDefinition = definitionFor(componentFor(project, sourceId));
       const receivesFromSource = sourceId === controller.id || (
         sourceId !== controller.id
@@ -304,7 +309,7 @@ export function createProtocolRuntime(project: RuntimeProject, dsu: RuntimeDisjo
     if (!candidate || !definition) return undefined;
     const device = state.deviceStates.get(candidate.id);
     if (!device || !["i2c-register", "i2c-display"].includes(device.family)) return undefined;
-    if (!["behavioral", "engine-backed"].includes(definition.model.support)) return undefined;
+    if (!["behavioral", "engine-backed"].includes(legacyModelFor(definition).support)) return undefined;
     updateClock(candidate.id);
     return { component: candidate, definition, state: device };
   }
@@ -367,7 +372,7 @@ export function createProtocolRuntime(project: RuntimeProject, dsu: RuntimeDisjo
       const sensor = project.components.find((candidate) => {
         if (candidate.id === controllerId) return false;
         const definition = definitionFor(candidate);
-        return Boolean(definition?.model.family === "adc-source") && definition?.ports.some((candidatePort) => candidatePort.domain === "adc" && sharedNet(dsu, root, dsu.find(endpointKey(candidate.id, candidatePort.id))));
+        return Boolean(definition && legacyModelFor(definition).family === "adc-source") && definition?.ports.some((candidatePort) => candidatePort.domain === "adc" && sharedNet(dsu, root, dsu.find(endpointKey(candidate.id, candidatePort.id))));
       });
       const definition = definitionFor(sensor);
       const inputEntries = sensor ? Object.entries(inputs).filter(([key]) => key.startsWith(`${sensor.id}:`)) : [];
@@ -412,7 +417,7 @@ export function createProtocolRuntime(project: RuntimeProject, dsu: RuntimeDisjo
       const target = transaction.deviceId ? { component: componentFor(project, transaction.deviceId), definition: definitionFor(componentFor(project, transaction.deviceId)) } : undefined;
       const acknowledged = Boolean(target?.component && target.definition);
       if (target?.component && target.definition && transaction.bytes.length > 0) {
-        const displayPayload = target.definition.model.adapterId === "i2c-display-text";
+        const displayPayload = legacyModelFor(target.definition).adapterId === "i2c-display-text";
         const pointer = transaction.bytes[0] & 0xff;
         if (!displayPayload) state.registerPointers.set(target.component.id, pointer);
         transaction.pointer = pointer;
@@ -497,7 +502,8 @@ export function createProtocolRuntime(project: RuntimeProject, dsu: RuntimeDisjo
 
 export function catalogModelCoverage(definitions: CatalogComponent[]) {
   return definitions.reduce<Record<string, number>>((coverage, definition) => {
-    const key = `${definition.model.support}:${definition.model.family}`;
+    const model = legacyModelFor(definition);
+    const key = `${model.support}:${model.family}`;
     coverage[key] = (coverage[key] ?? 0) + 1;
     return coverage;
   }, {});

@@ -12,6 +12,7 @@ vi.mock("../auth/session.ts", () => ({
 }));
 
 import ImportDialog from "../components/import/ImportDialog.tsx";
+import { MAX_PROJECTS_PER_WORKSPACE, useProjectStore } from "../store/useProjectStore.ts";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -76,18 +77,43 @@ describe("ImportDialog", () => {
       .find((button) => button.textContent?.includes("Check selected files"))?.click());
 
     await act(async () => {
-      second.resolve(new Response(JSON.stringify({ engines: ["Touchstone"], fidelity: {}, steps: [] }), { status: 200 }));
+      second.resolve(new Response(JSON.stringify({ possibleExternalTools: ["Touchstone"], claims: { filesRead: false, filesExecuted: false, filesImported: false, compatibilityVerified: false }, steps: [] }), { status: 200 }));
       await second.promise;
       await Promise.resolve();
     });
     expect(container.textContent).toContain("Touchstone");
 
     await act(async () => {
-      first.resolve(new Response(JSON.stringify({ engines: ["Stale IBIS"], fidelity: {}, steps: [] }), { status: 200 }));
+      first.resolve(new Response(JSON.stringify({ possibleExternalTools: ["Stale IBIS"], claims: { filesRead: false, filesExecuted: false, filesImported: false, compatibilityVerified: false }, steps: [] }), { status: 200 }));
       await first.promise;
       await Promise.resolve();
     });
     expect(container.textContent).toContain("Touchstone");
     expect(container.textContent).not.toContain("Stale IBIS");
+  });
+
+  it("keeps the dialog open when the workspace cannot accept another project", async () => {
+    while (useProjectStore.getState().projects.length < MAX_PROJECTS_PER_WORKSPACE) useProjectStore.getState().createProject();
+    try {
+      const container = renderDialog();
+      const input = container.querySelector<HTMLInputElement>("input[type='file']:not([multiple])");
+      expect(input).toBeTruthy();
+      chooseFiles(input!, [new File([JSON.stringify({ id: "capacity-import", name: "Capacity import", components: [], connections: [], firmwareTargets: [], version: 1 })], "capacity.json", { type: "application/json" })]);
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(container.textContent).toContain("Ready to import");
+
+      act(() => Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+        .find((button) => button.textContent?.includes("Import as new project"))?.click());
+      expect(container.querySelector("[role='dialog']")).toBeTruthy();
+      expect(container.querySelector("[role='alert']")?.textContent).toContain(`${MAX_PROJECTS_PER_WORKSPACE} projects`);
+    } finally {
+      act(() => {
+        let state = useProjectStore.getState();
+        for (const project of state.projects.slice(1)) state.deleteProject(project.id);
+        state = useProjectStore.getState();
+        state.switchProject(state.projects[0]?.id ?? state.activeProjectId);
+        state.clear();
+      });
+    }
   });
 });

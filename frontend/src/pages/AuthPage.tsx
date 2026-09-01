@@ -27,7 +27,7 @@ export default function AuthPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Schematic studio</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">Continue to your workspace</h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Sign-in is handled by your {label} identity. Your projects, WebMCP actions, and simulation sessions are scoped to that verified account.
+            Sign-in is handled by your {label} identity. Your projects, WebMCP actions, and preview sessions are scoped to that verified account.
           </p>
           <a
             href={authLoginUrl("/studio")}

@@ -9,7 +9,9 @@ import {
   addEdge,
   type Connection as FlowConnection,
   type Edge,
+  type EdgeChange,
   type Node,
+  type NodeChange,
   BackgroundVariant,
   type ReactFlowInstance,
   type MiniMapNodeProps,
@@ -44,6 +46,7 @@ function projectToFlow(project: ReturnType<typeof useProjectStore.getState>["pro
     return {
       id: c.id,
       type: "hardware",
+      deletable: false,
       position: c.position,
       data: {
         label: def?.title ?? c.definitionId,
@@ -70,6 +73,7 @@ function projectToFlow(project: ReturnType<typeof useProjectStore.getState>["pro
     labelBgPadding: [4, 2] as any,
     labelBgBorderRadius: 4 as any,
     animated: false,
+    deletable: false,
     type: "smoothstep",
   }));
   return { nodes, edges };
@@ -91,6 +95,21 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
   const [dragPreview, setDragPreview] = useState<{ html: string; title: string; x: number; y: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<ReactFlowInstance | null>(null);
+
+  const onSafeNodesChange = useCallback((changes: NodeChange[]) => {
+    // React Flow can emit a remove change for keyboard/context-menu deletion.
+    // Component removal is intentionally available only through a confirmed,
+    // target-bound control, so never apply a remove change here.
+    const safeChanges = changes.filter((change) => change.type !== "remove");
+    if (safeChanges.length > 0) onNodesChange(safeChanges);
+  }, [onNodesChange]);
+
+  const onSafeEdgesChange = useCallback((changes: EdgeChange[]) => {
+    // Keep wire visibility and durable graph state aligned. A wire can be
+    // disconnected explicitly through the confirmed command boundary.
+    const safeChanges = changes.filter((change) => change.type !== "remove");
+    if (safeChanges.length > 0) onEdgesChange(safeChanges);
+  }, [onEdgesChange]);
 
   useEffect(() => {
     canvasRef.current?.querySelector(".react-flow__controls")?.removeAttribute("aria-label");
@@ -144,11 +163,6 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
   );
 
   const onPaneClick = useCallback(() => {
-    useSelectionStore.getState().clear();
-  }, []);
-
-  const onNodesDelete = useCallback((deleted: Node[]) => {
-    for (const node of deleted) useProjectStore.getState().removeComponent(node.id);
     useSelectionStore.getState().clear();
   }, []);
 
@@ -209,11 +223,10 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        onNodesChange={onSafeNodesChange}
+        onEdgesChange={onSafeEdgesChange}
         onConnect={onConnect}
         onNodeClick={onNodeClick}
-        onNodesDelete={onNodesDelete}
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
         onInit={(instance) => { flowRef.current = instance; }}
@@ -229,6 +242,9 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
         connectionLineStyle={{ stroke: "hsl(var(--primary))", strokeWidth: 2.5, strokeDasharray: "6 4" }}
         elevateEdgesOnSelect
         selectNodesOnDrag={false}
+        // Destructive removal is deliberately routed through target-bound
+        // confirmation controls in the node toolbar/Inspector.
+        deleteKeyCode={null}
         nodesFocusable
         edgesFocusable
         autoPanOnNodeFocus
@@ -299,7 +315,7 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
             </div>
             <p className="kicker">New hardware project</p>
             <h2 id="empty-canvas-title" className="mt-2 text-xl font-semibold tracking-[-0.035em]">Place the first component.</h2>
-            <p className="mt-2 max-w-md text-xs leading-5 text-muted-foreground">Start with a controller, then add devices and connect compatible ports. Schematic validates the graph as you build.</p>
+            <p className="mt-2 max-w-md text-xs leading-5 text-muted-foreground">Start with a controller, then add devices and connect compatible ports. Run on-demand static graph checks as you build; physical wiring, hardware behavior, and editable source remain unverified.</p>
             <div className="mt-5 flex flex-col gap-2 sm:flex-row">
               <button type="button" onClick={() => useProjectStore.getState().addComponent("esp32-devkit-v1")} className="run-button h-9 flex-1 px-4">
                 <Cpu size={13} /> Add an ESP32 board
@@ -309,7 +325,7 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
               </button>
             </div>
             <ol className="mt-5 grid grid-cols-4 gap-2 border-t border-border pt-4 text-[10px] text-muted-foreground">
-              {["Place", "Wire", "Validate", "Run"].map((label, index) => (
+              {["Place", "Wire", "Validate", "Preview"].map((label, index) => (
                 <li key={label} className="flex items-center gap-1.5">
                   <span className="grid h-4 w-4 shrink-0 place-items-center rounded-sm bg-muted font-mono text-[8px] text-foreground">{index + 1}</span>
                   <span>{label}</span>

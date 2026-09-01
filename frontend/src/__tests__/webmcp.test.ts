@@ -2,14 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { useProjectStore } from "../store/useProjectStore.ts";
-import { useSimulationStore } from "../store/useSimulationStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { useValidationStore } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
 import { useShoppingStore } from "../store/useShoppingStore.ts";
 import { getCatalogComponent } from "../data/catalog.ts";
 import { resolveBoardPin } from "../data/hardware.ts";
-import { hasPortableButtonLedContract } from "../simulation/portableHarness.ts";
 import { fetchJson, getRegisteredToolNames, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools, WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
 
 const AGENT_PUBLICATION = {
@@ -50,34 +48,35 @@ function validAgentListing(catalogId: string, overrides: Record<string, unknown>
 }
 
 describe("WebMCP tools", () => {
-  beforeEach(() => useProjectStore.getState().clear());
+  beforeEach(() => {
+    useProjectStore.getState().clear();
+    useShoppingStore.getState().clearResults();
+    useValidationStore.getState().clear();
+  });
+
   afterEach(() => {
     unregisterWebMCPTools();
     vi.unstubAllGlobals();
     delete (document as any).modelContext;
   });
 
-  it("registers the complete tool surface", () => {
+  it("registers the complete behavior/code tool surface without retired runtime names", () => {
     const names = getRegisteredToolNames();
     expect(names.length).toBe(WEBMCP_TOOL_COUNT);
-    expect(WEBMCP_TOOL_COUNT).toBe(42);
-    expect(WEBMCP_TOOL_COUNT).toBeGreaterThanOrEqual(15);
-    expect(names).toContain("project.get_graph");
-    expect(names).toContain("component.search");
-    expect(names).toContain("connection.connect");
-    expect(names).toContain("simulation.run");
-    expect(names).toContain("validation.check");
+    expect(WEBMCP_TOOL_COUNT).toBe(45);
+    expect(names).toEqual(expect.arrayContaining([
+      "behavior.get_capabilities", "behavior.plan.write", "behavior.preview", "behavior.invoke",
+      "behavior.get_state", "code.write", "code.read", "code.export",
+      "project.get_graph", "component.search", "connection.connect", "validation.check",
+    ]));
+    expect(names.some((name) => name.startsWith("simulation."))).toBe(false);
+    expect(names).not.toContain("firmware.compile");
   });
 
   it("project tools work via fallback window.__schematicTools", async () => {
     const tools: any = (globalThis as any).window?.__schematicTools ?? (globalThis as any).__schematicTools;
-    // if not yet registered, trigger via import
-    if (!tools) {
-      const { registerWebMCPTools } = await import("../webmcp/tools.ts");
-      await registerWebMCPTools();
-    }
+    if (!tools) await registerWebMCPTools();
     const fallback = (globalThis as any).__schematicTools ?? (globalThis as any).window?.__schematicTools;
-    // At least fallback should exist after register
     expect(fallback ?? {}).toBeDefined();
   });
 
@@ -86,6 +85,33 @@ describe("WebMCP tools", () => {
     const { id } = addComponent("esp32-s3");
     expect(id).toContain("esp32-s3");
     expect(useProjectStore.getState().project.components).toHaveLength(1);
+  });
+
+  it("keeps project.get_graph source-blind and requires code.read for file contents", async () => {
+    const board = useProjectStore.getState().addComponent("arduino-uno");
+    const source = "void setup() { /* explicit source boundary */ }";
+    const written = await invokeWebMCPTool("code.write", {
+      targetComponentId: board.id,
+      language: "arduino",
+      files: [{ name: "sketch.ino", content: source }],
+      expectedContentSha256: null,
+    });
+    expect(written.isError).not.toBe(true);
+    const current = useProjectStore.getState().project;
+    useProjectStore.setState({
+      project: { ...current, legacyBehaviorData: { privateLegacyText: "must-never-leave-project-room" } },
+      projects: [{ ...current, legacyBehaviorData: { privateLegacyText: "must-never-leave-project-room" } }],
+    });
+
+    const graphResult = await invokeWebMCPTool("project.get_graph", {});
+    const serializedGraph = JSON.stringify(graphResult.data);
+    expect(serializedGraph).not.toContain(source);
+    expect(serializedGraph).not.toContain("must-never-leave-project-room");
+    expect(graphResult.data.codeDocuments[0].files).toEqual([{ name: "sketch.ino", byteLength: new TextEncoder().encode(source).byteLength }]);
+    expect(graphResult.data.sourceAccess).toContain("code.read");
+
+    const sourceResult = await invokeWebMCPTool("code.read", { targetComponentId: board.id });
+    expect(sourceResult.data.document.files[0].content).toBe(source);
   });
 
   it("keeps new and duplicated project names distinct", () => {
@@ -97,7 +123,6 @@ describe("WebMCP tools", () => {
     const copyId = useProjectStore.getState().duplicateProject(source.id);
     const copy = useProjectStore.getState().projects.find((project) => project.id === copyId);
     expect(copy?.name).toContain(`${source.name} copy`);
-
     const renamed = useProjectStore.getState().renameProject(copyId ?? "", source.name);
     expect(renamed).not.toBe(source.name);
   });
@@ -121,6 +146,89 @@ describe("WebMCP tools", () => {
     expect(useProjectStore.getState().project.components).toHaveLength(0);
   });
 
+  it("creates blueprints in a new project by default and requires exact replacement confirmation", async () => {
+    const original = useProjectStore.getState().project;
+    const originalId = original.id;
+    useProjectStore.getState().addComponent("led");
+
+    const created: any = await invokeWebMCPTool("project.apply_blueprint", { blueprintId: "meta-glasses" });
+    expect(created.isError).not.toBe(true);
+    expect(created.data.replaced).toBe(false);
+    expect(created.data.projectId).not.toBe(originalId);
+    expect(useProjectStore.getState().activeProjectId).toBe(created.data.projectId);
+    expect(useProjectStore.getState().projects.find((project) => project.id === originalId)?.components).toHaveLength(1);
+
+    const replacementId = useProjectStore.getState().activeProjectId;
+    const beforeFailedReplacement = useProjectStore.getState().project;
+    const rejected: any = await invokeWebMCPTool("project.apply_blueprint", {
+      blueprintId: "meta-glasses",
+      replace: true,
+      confirmProjectId: originalId,
+    });
+    expect(rejected.isError).toBe(true);
+    expect(rejected.data.code).toBe("CONFIRMATION_REQUIRED");
+    expect(useProjectStore.getState().activeProjectId).toBe(replacementId);
+    expect(useProjectStore.getState().project.updatedAt).toBe(beforeFailedReplacement.updatedAt);
+
+    const replaced: any = await invokeWebMCPTool("project.apply_blueprint", {
+      blueprintId: "meta-glasses",
+      replace: true,
+      confirmProjectId: replacementId,
+    });
+    expect(replaced.isError).not.toBe(true);
+    expect(replaced.data.replaced).toBe(true);
+    expect(replaced.data.projectId).toBe(replacementId);
+    expect(useProjectStore.getState().activeProjectId).toBe(replacementId);
+
+    // Do not leave this test's extra project in the shared in-memory store.
+    useProjectStore.getState().switchProject(originalId);
+    expect(useProjectStore.getState().deleteProject(replacementId)).toBe(true);
+  });
+
+  it("rejects malformed behavior invokes and destructive component/connection calls", async () => {
+    const malformed: any = await invokeWebMCPTool("behavior.invoke", {
+      componentId: "led-1",
+      definitionId: "led",
+      eventId: "button.pressed",
+      payload: { pressed: true },
+      unexpected: true,
+    });
+    expect(malformed.isError).toBe(true);
+    expect(malformed.data.code).toBe("INVALID_BEHAVIOR_REQUEST");
+
+    const missingPayload: any = await invokeWebMCPTool("behavior.invoke", {
+      componentId: "led-1",
+      definitionId: "led",
+      eventId: "button.pressed",
+    });
+    expect(missingPayload.isError).toBe(true);
+    expect(missingPayload.data.code).toBe("INVALID_BEHAVIOR_REQUEST");
+
+    const led: any = await invokeWebMCPTool("component.add", { componentId: "led" });
+    const instanceId = led.data.instanceId;
+    const wrongRemove: any = await invokeWebMCPTool("component.remove", { instanceId, confirmInstanceId: "different-id" });
+    expect(wrongRemove.isError).toBe(true);
+    expect(wrongRemove.data.code).toBe("CONFIRMATION_REQUIRED");
+    expect(useProjectStore.getState().project.components.some((component) => component.id === instanceId)).toBe(true);
+
+    const board: any = await invokeWebMCPTool("component.add", { componentId: "esp32-s3" });
+    const sensor: any = await invokeWebMCPTool("component.add", { componentId: "bmp280" });
+    const connection: any = await invokeWebMCPTool("connection.connect", {
+      sourceComponentId: board.data.instanceId,
+      sourcePortId: "SDA",
+      targetComponentId: sensor.data.instanceId,
+      targetPortId: "SDA",
+    });
+    expect(connection.isError).not.toBe(true);
+    const wrongDisconnect: any = await invokeWebMCPTool("connection.disconnect", {
+      connectionId: connection.data.connectionId,
+      confirmConnectionId: "different-id",
+    });
+    expect(wrongDisconnect.isError).toBe(true);
+    expect(wrongDisconnect.data.code).toBe("CONFIRMATION_REQUIRED");
+    expect(useProjectStore.getState().project.connections.some((item) => item.id === connection.data.connectionId)).toBe(true);
+  });
+
   it("executes the real component lifecycle through WebMCP callbacks", async () => {
     const search: any = await invokeWebMCPTool("component.search", { query: "bmp280" });
     expect(search.data.some((definition: any) => definition.id === "bmp280")).toBe(true);
@@ -129,7 +237,7 @@ describe("WebMCP tools", () => {
     const instanceId = added.data.instanceId;
     expect(useProjectStore.getState().project.components.find((item) => item.id === instanceId)?.position).toEqual({ x: 160, y: 96 });
 
-    await invokeWebMCPTool("component.remove", { instanceId });
+    await invokeWebMCPTool("component.remove", { instanceId, confirmInstanceId: instanceId });
     expect(useProjectStore.getState().project.components).toHaveLength(0);
   });
 
@@ -167,19 +275,49 @@ describe("WebMCP tools", () => {
     expect(getCatalogComponent("esp32-s3")?.ports.find((port) => port.id === "GPIO1")).toMatchObject({ domain: "adc", description: expect.stringContaining("ADC1") });
     expect(getCatalogComponent("esp32-s3")?.ports.some((port) => port.id === "ADC1_CH0")).toBe(false);
     expect(resolveBoardPin(blueprintGraph, "compute-1", "1", new Map())).toEqual({ componentId: "compute-1", portId: "GPIO1" });
-    expect(getCatalogComponent("esp32-s3")?.ports.some((port) => port.id === "GPIO34")).toBe(false);
     await invokeWebMCPTool("validation.check");
     await invokeWebMCPTool("workspace.set_panel", { panel: "validation" });
-    await invokeWebMCPTool("simulation.set_input", { componentId: "capture-1", key: "pressed", value: true });
 
-    expect(useProjectStore.getState().project.components).toHaveLength(10);
+    expect(blueprintGraph.components).toHaveLength(10);
     expect(useValidationStore.getState().valid).toBe(true);
     expect(useWorkspaceStore.getState().bottomPanel).toBe("validation");
     expect(useWorkspaceStore.getState().bottomCollapsed).toBe(false);
     expect(useWebMCPStore.getState().activities.map((item) => item.name)).toEqual(expect.arrayContaining([
-      "project.apply_blueprint", "validation.check", "workspace.set_panel", "simulation.set_input",
+      "project.apply_blueprint", "validation.check", "workspace.set_panel",
     ]));
-    expect(useSimulationStore.getState().serialOutput).toContain("capture-1.pressed=true");
+  });
+
+  it("keeps validation.check graph-only when editable source is malformed", async () => {
+    const base = useProjectStore.getState().project;
+    const cleanProject = {
+      ...base,
+      components: [{ id: "board-1", definitionId: "arduino-uno-r3", position: { x: 0, y: 0 }, rotation: 0, properties: {} }],
+      connections: [],
+      firmwareTargets: [{
+        id: "firmware-1",
+        componentId: "board-1",
+        definitionId: "arduino-uno-r3",
+        language: "arduino",
+        boardFqbn: "arduino:avr:uno",
+        files: [{ name: "sketch.ino", content: "void setup() {}\nvoid loop() {}" }],
+      }],
+    };
+    useProjectStore.setState({ project: cleanProject, projects: [cleanProject], activeProjectId: cleanProject.id });
+    const cleanResult: any = await invokeWebMCPTool("validation.check");
+
+    const malformedProject = {
+      ...cleanProject,
+      firmwareTargets: cleanProject.firmwareTargets.map((target) => ({
+        ...target,
+        files: [{ ...target.files[0], content: "}\n// missing setup and loop" }],
+      })),
+    };
+    useProjectStore.setState({ project: malformedProject, projects: [malformedProject], activeProjectId: malformedProject.id });
+    const malformedResult: any = await invokeWebMCPTool("validation.check");
+
+    expect(malformedResult.isError).not.toBe(true);
+    expect(malformedResult.data).toEqual(cleanResult.data);
+    expect(malformedResult.data.codeIssues).toEqual([]);
   });
 
   it("registers every tool with the native WebMCP surface", async () => {
@@ -187,8 +325,8 @@ describe("WebMCP tools", () => {
     (document as any).modelContext = { registerTool };
     await registerWebMCPTools();
 
-    expect(WEBMCP_TOOL_COUNT).toBe(42);
-    expect(registerTool).toHaveBeenCalledTimes(42);
+    expect(WEBMCP_TOOL_COUNT).toBe(45);
+    expect(registerTool).toHaveBeenCalledTimes(45);
     expect(registerTool).toHaveBeenCalledTimes(getRegisteredToolNames().length);
     const calls = registerTool.mock.calls as any[];
     expect(calls.map(([definition]) => definition.name)).toEqual(getRegisteredToolNames());
@@ -205,6 +343,7 @@ describe("WebMCP tools", () => {
     expect(definitions.get("shopping.quote").annotations?.readOnlyHint).toBe(true);
     expect(definitions.get("project.delete").annotations?.destructiveHint).toBe(true);
     expect(definitions.get("project.clear").annotations?.destructiveHint).toBe(true);
+    expect(definitions.get("behavior.plan.write").inputSchema.required).toEqual(["plan", "expectedRevision"]);
   });
 
   it("does not expose an inbound postMessage mutation bridge", () => {
@@ -225,32 +364,32 @@ describe("WebMCP tools", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const pending = fetchJson("/api/simulation/run", { method: "POST", body: "{}", signal: controller.signal });
-    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/simulation/run"))).toBe(true));
-    const targetCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/simulation/run"));
+    const pending = fetchJson("/api/parts/search", { method: "POST", body: "{}", signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/parts/search"))).toBe(true));
+    const targetCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/parts/search"));
     expect(targetCall?.[1]?.signal).toBe(controller.signal);
 
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
-  it("executes all registered WebMCP tools through real state transitions", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/api/simulation/run")) throw new Error("backend is not connected");
-      const data = url.includes("/api/compile")
-        ? { success: true, artifact: "firmware.elf" }
-        : { status: "ok", simulated_ns: 2_000_000 };
-      return { ok: true, status: 200, json: async () => data } as Response;
-    });
-    class MockWebSocket {
-      onopen: null | (() => void) = null;
-      send = vi.fn();
-      close = vi.fn();
-      constructor() { queueMicrotask(() => this.onopen?.()); }
-    }
+  it("returns an applied mutation when cancellation arrives after commit", async () => {
+    const state = useProjectStore.getState();
+    state.addComponent("led");
+    const projectId = useProjectStore.getState().project.id;
+    const controller = new AbortController();
+
+    const pending = invokeWebMCPTool("project.clear", { projectId, confirmProjectId: projectId }, controller.signal);
+    queueMicrotask(() => controller.abort());
+    const result: any = await pending;
+
+    expect(result.isError).not.toBe(true);
+    expect(useProjectStore.getState().project.components).toHaveLength(0);
+  });
+
+  it("executes every registered tool, including the typed Behavior Plan and editable code flow", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ status: "ok" }) }) as Response);
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("WebSocket", MockWebSocket);
 
     const invoked = new Set<string>();
     const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -278,31 +417,48 @@ describe("WebMCP tools", () => {
     await call("component.inspect", { componentId: "esp32-s3" });
     const board = await call("component.add", { componentId: "esp32-s3", x: 10, y: 20 });
     const sensor = await call("component.add", { componentId: "bmp280", x: 310, y: 20 });
+    const button = await call("component.add", { componentId: "pushbutton", x: 610, y: 20 });
+    const led = await call("component.add", { componentId: "led", x: 910, y: 20 });
     const boardId = board.data.instanceId;
     const sensorId = sensor.data.instanceId;
+    const buttonId = button.data.instanceId;
+    const ledId = led.data.instanceId;
     await call("component.list_ports", { componentId: boardId });
     const connection = await call("connection.connect", { sourceComponentId: boardId, sourcePortId: "SDA", targetComponentId: sensorId, targetPortId: "SDA" });
     await call("connection.get_connections");
-    await call("connection.disconnect", { connectionId: connection.data.connectionId });
-    await call("firmware.write", { componentId: boardId, files: [{ name: "sketch.ino", content: "void setup(){} void loop(){}" }] });
+    await call("connection.disconnect", { connectionId: connection.data.connectionId, confirmConnectionId: connection.data.connectionId });
+    await call("behavior.get_capabilities");
+    const behaviorPlan = {
+      schemaVersion: 1,
+      id: "button-led-preview",
+      projectId: useProjectStore.getState().project.id,
+      name: "Button LED preview",
+      revision: 1,
+      rules: [{
+        id: "press-led",
+        enabled: true,
+        when: { type: "component.event", componentId: buttonId, definitionId: "pushbutton", eventId: "button.pressed" },
+        then: [{ componentId: ledId, definitionId: "led", actionId: "indicator.set", payload: { kind: "literal", value: { on: true } } }],
+      }],
+    };
+    await call("behavior.plan.write", { plan: behaviorPlan, expectedRevision: null });
+    await call("behavior.preview", { planId: behaviorPlan.id });
+    const invocation = await call("behavior.invoke", { componentId: buttonId, definitionId: "pushbutton", eventId: "button.pressed", payload: { pressed: true } });
+    expect(invocation.data.snapshot.components[ledId].primitives[0]).toMatchObject({ kind: "indicator", on: true });
+    await call("behavior.get_state");
+    const codeWrite = await call("code.write", { targetComponentId: boardId, language: "arduino", files: [{ name: "sketch.ino", content: "void setup(){} void loop(){}" }], expectedContentSha256: null });
+    await call("code.read", { targetComponentId: boardId });
+    await call("code.export", { targetComponentId: boardId });
+    await call("firmware.write", { componentId: boardId, files: [{ name: "sketch.ino", content: "void setup(){} void loop(){}" }], expectedContentSha256: codeWrite.data.document.contentSha256 });
     await call("firmware.read", { componentId: boardId });
     await call("firmware.check", { componentId: boardId });
-    await call("firmware.compile", { componentId: boardId, boardFqbn: "esp32:esp32:esp32s3" });
-    const browserRun = await call("simulation.run", { durationMs: 2 });
-    expect(browserRun.data.runtime).toBe("browser");
-    await call("simulation.get_state");
-    await call("simulation.set_input", { componentId: sensorId, key: "temperature", value: 25 });
-    await call("simulation.stop");
     await call("validation.check");
     await call("validation.explain_error", { code: "MISSING_GROUND" });
     const shopping = await call("shopping.search", {
       query: "esp32",
       quantity: 2,
       publication: AGENT_PUBLICATION,
-      listings: [
-        validAgentListing("esp32-s3", { alternatives: [{ catalogId: "arduino-uno-r3", title: "Arduino Uno R3", reason: "Compatible controller alternative for a simpler GPIO build.", resultId: "listing-arduino-uno-r3" }] }),
-        validAgentListing("arduino-uno-r3"),
-      ],
+      listings: [validAgentListing("esp32-s3", { alternatives: [{ catalogId: "arduino-uno-r3", title: "Arduino Uno R3", reason: "Compatible controller alternative for a simpler GPIO build.", resultId: "listing-arduino-uno-r3" }] }), validAgentListing("arduino-uno-r3")],
     });
     const shoppingResultId = shopping.data.results[0].id;
     await call("shopping.cart_add", { resultId: shoppingResultId, quantity: 2 });
@@ -316,200 +472,8 @@ describe("WebMCP tools", () => {
     await call("shopping.cart_remove", { resultId: useShoppingStore.getState().cart[0]?.resultId });
     await call("design.auto_layout");
     await call("project.get_graph");
-    await call("component.remove", { instanceId: sensorId });
+    await call("component.remove", { instanceId: sensorId, confirmInstanceId: sensorId });
 
     expect([...invoked].sort()).toEqual([...getRegisteredToolNames()].sort());
-    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
-
-  it("runs an agent-authored button-to-LED build and exposes failures in diagnostics", async () => {
-    const firmwareGenerated = resolve(process.cwd(), "../packages/firmware-harness/generated");
-    const wasmBytes = readFileSync(resolve(firmwareGenerated, "button-led.wasm"));
-    const wasmMetadata = readFileSync(resolve(firmwareGenerated, "button-led.wasm.json"));
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("button-led.wasm")) return new Response(wasmBytes, { status: 200, headers: { "content-type": "application/wasm" } });
-      if (url.endsWith("button-led.wasm.json")) return new Response(wasmMetadata, { status: 200, headers: { "content-type": "application/json" } });
-      throw new Error("backend is not connected");
-    }));
-    useShoppingStore.setState({ query: "", results: [], cart: [], budget: null, lastSearchAt: null, publicationError: null, undoStack: [] });
-
-    const board: any = await invokeWebMCPTool("component.add", { componentId: "esp32-devkit-v1", x: 40, y: 40 });
-    const button: any = await invokeWebMCPTool("component.add", { componentId: "pushbutton", x: 280, y: 40 });
-    const led: any = await invokeWebMCPTool("component.add", { componentId: "led", x: 520, y: 40 });
-    const boardId = board.data.instanceId;
-    const buttonId = button.data.instanceId;
-    const ledId = led.data.instanceId;
-
-    await invokeWebMCPTool("connection.connect", { sourceComponentId: boardId, sourcePortId: "GPIO18", targetComponentId: buttonId, targetPortId: "A" });
-    await invokeWebMCPTool("connection.connect", { sourceComponentId: boardId, sourcePortId: "GPIO19", targetComponentId: ledId, targetPortId: "IN" });
-    const source = "constexpr int BUTTON_PIN = 18; constexpr int LED_PIN = 19; void setup() { pinMode(BUTTON_PIN, INPUT_PULLUP); pinMode(LED_PIN, OUTPUT); } void loop() { bool pressed = digitalRead(BUTTON_PIN) == LOW; digitalWrite(LED_PIN, pressed); delay(10); }";
-    await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: source }] });
-    await invokeWebMCPTool("validation.check");
-    expect(useValidationStore.getState().valid).toBe(true);
-
-    await invokeWebMCPTool("simulation.set_input", { componentId: buttonId, key: "pressed", value: true });
-    const pressed: any = await invokeWebMCPTool("simulation.run", { durationMs: 50 });
-    expect(pressed.data.runtime).toBe("browser");
-    expect(pressed.data.harness.contract).toBe("button-led");
-    expect(pressed.data.harness.executionEngine).toBe("c-wasm");
-    expect(pressed.data.harness.abiVersion).toBe(2);
-    expect(pressed.data.harness.artifactSha256).toMatch(/^[0-9a-f]{64}$/i);
-    expect(pressed.data.harness.capabilities).toEqual(expect.arrayContaining(["compiled-c-wasm", "browser-contract", "deterministic-virtual-io"]));
-    expect(pressed.data.harness.capabilities).not.toContain("portable-c-abi");
-    expect(pressed.data.harness.note).toMatch(/compiled C\/WASM.*executed/i);
-    expect(pressed.data.outputs[`${ledId}:IN`]).toBe(true);
-    expect(useSimulationStore.getState().lastRun?.outputs[`${ledId}:IN`]).toBe(true);
-
-    await invokeWebMCPTool("simulation.set_input", { componentId: buttonId, key: "pressed", value: false });
-    const released: any = await invokeWebMCPTool("simulation.run", { durationMs: 50 });
-    expect(released.data.outputs[`${ledId}:IN`]).toBe(false);
-
-    const unsafeSource = source.replace("digitalWrite(LED_PIN, pressed)", "digitalWrite(LED_PIN, LOW)");
-    await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: unsafeSource }] });
-    expect(hasPortableButtonLedContract(useProjectStore.getState().project)).toBe(false);
-    const unsafeRun: any = await invokeWebMCPTool("simulation.run", { durationMs: 1 });
-    expect(unsafeRun.data.executionEngine).toBe("browser-interpreter");
-
-    const deadCodeSource = "constexpr int BUTTON_PIN = 18; constexpr int LED_PIN = 19; void setup() { pinMode(BUTTON_PIN, INPUT_PULLUP); pinMode(LED_PIN, OUTPUT); }\n#if 0\nvoid loop() { bool pressed = digitalRead(BUTTON_PIN) == LOW; digitalWrite(LED_PIN, pressed); }\n#endif";
-    await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: deadCodeSource }] });
-    expect(hasPortableButtonLedContract(useProjectStore.getState().project)).toBe(false);
-
-    const macroSource = "#define BUTTON_PIN 18\n#define LED_PIN 19\n#define digitalWrite(pin, value) digitalWrite(pin, LOW)\nvoid setup() { pinMode(BUTTON_PIN, INPUT_PULLUP); pinMode(LED_PIN, OUTPUT); }\nvoid loop() { bool pressed = digitalRead(BUTTON_PIN) == LOW; digitalWrite(LED_PIN, pressed); }";
-    await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: macroSource }] });
-    expect(hasPortableButtonLedContract(useProjectStore.getState().project)).toBe(false);
-
-    await invokeWebMCPTool("workspace.set_panel", { panel: "debug" });
-    const workspace: any = await invokeWebMCPTool("workspace.get_state");
-    expect(workspace.data.panel).toBe("debug");
-    expect(workspace.data.panels.debug.lastRun.outputs[`${ledId}:IN`]).toBe(false);
-
-    const badConnection: any = await invokeWebMCPTool("connection.connect", { sourceComponentId: boardId, sourcePortId: "GPIO18", targetComponentId: ledId, targetPortId: "GND" });
-    expect(badConnection.isError).toBe(true);
-    const badComponent: any = await invokeWebMCPTool("component.remove", { instanceId: "missing-component" });
-    expect(badComponent.isError).toBe(true);
-    const badCart: any = await invokeWebMCPTool("shopping.cart_add", { resultId: "missing-result", quantity: 1 });
-    expect(badCart.isError).toBe(true);
-
-    const noAgentShopping: any = await invokeWebMCPTool("shopping.search", { query: "pushbutton", quantity: 1 });
-    expect(noAgentShopping.isError).toBe(true);
-    expect(noAgentShopping.data.source).toBe("webmcp-agent-required");
-    expect(noAgentShopping.data.results).toHaveLength(0);
-
-    const unmatched: any = await invokeWebMCPTool("shopping.search", {
-      query: "mystery module",
-      publication: AGENT_PUBLICATION,
-      listings: [{ catalogId: "unknown-module", title: "Mystery module", exactMatch: false, offers: [] }],
-    });
-    expect(unmatched.isError).toBe(true);
-    expect(unmatched.data.results).toHaveLength(0);
-
-    const omittedMatch: any = await invokeWebMCPTool("shopping.search", {
-      query: "esp32",
-      publication: AGENT_PUBLICATION,
-      listings: [{ catalogId: "esp32-devkit-v1", title: "ESP32 DevKit", offers: [] }],
-    });
-    expect(omittedMatch.isError).toBe(true);
-    expect(omittedMatch.data.results).toHaveLength(0);
-
-    const misleadingMatch: any = await invokeWebMCPTool("shopping.search", {
-      query: "esp32",
-      publication: AGENT_PUBLICATION,
-      listings: [{ catalogId: "wrong-catalog-id", title: "ESP32 DevKit", exactMatch: true, offers: [] }],
-    });
-    expect(misleadingMatch.isError).toBe(true);
-    expect(misleadingMatch.data.results).toHaveLength(0);
-
-    await invokeWebMCPTool("firmware.write", { componentId: boardId, files: [{ name: "main.ino", content: "void setup() {" }] });
-    const diagnostics: any = await invokeWebMCPTool("firmware.check", { componentId: boardId });
-    expect(diagnostics.data.codeIssues.some((issue: any) => issue.code === "FIRMWARE_UNBALANCED_BRACES")).toBe(true);
-    const invalid: any = await invokeWebMCPTool("validation.check");
-    expect(invalid.data.valid).toBe(false);
-    const compile: any = await invokeWebMCPTool("firmware.compile", { componentId: boardId, boardFqbn: "esp32:esp32:esp32" });
-    expect(compile.data.preflight.balanced_braces).toBe(false);
-    expect(useValidationStore.getState().compile.status).toBe("error");
-
-    const shopping: any = await invokeWebMCPTool("shopping.search", {
-      query: "ESP32-S3",
-      quantity: 2,
-      publication: AGENT_PUBLICATION,
-      listings: [
-        validAgentListing("esp32-s3", { provenance: { source: "webmcp-agent", provider: "Digi-Key", agentId: "caller-controlled-spoof", publishedAt: AGENT_PUBLICATION.publishedAt }, alternatives: [{ catalogId: "arduino-uno-r3", title: "Arduino Uno R3", reason: "Lower-cost GPIO alternative for this simple build.", resultId: "listing-arduino-uno-r3" }] }),
-        validAgentListing("arduino-uno-r3"),
-      ],
-    });
-    expect(shopping.data.source).toBe("webmcp-agent");
-    expect(shopping.data.results[0].offers).toHaveLength(3);
-    expect(shopping.data.results[0].provenance.agentId).toBe("webmcp:local:local-development");
-    const resultId = shopping.data.results[0].id;
-    await invokeWebMCPTool("shopping.cart_add", { resultId, quantity: 2 });
-    await invokeWebMCPTool("shopping.cart_set_budget", { budget: 20 });
-    const quote: any = await invokeWebMCPTool("shopping.quote");
-    expect(quote.data.total).toBe(17);
-    expect(quote.data.overBudget).toBe(false);
-    await invokeWebMCPTool("shopping.cart_set_quantity", { resultId, quantity: 3 });
-    expect((await invokeWebMCPTool("shopping.quote") as any).data.overBudget).toBe(true);
-    await invokeWebMCPTool("shopping.cart_undo");
-    await invokeWebMCPTool("shopping.choose_alternative", { resultId, catalogId: "arduino-uno-r3" });
-    await invokeWebMCPTool("shopping.cart_reset", { requiredCatalogIds: ["esp32-s3"] });
-    expect((await invokeWebMCPTool("shopping.quote") as any).data.lines[0].quantity).toBe(1);
-    await invokeWebMCPTool("shopping.cart_remove", { resultId });
-    expect((await invokeWebMCPTool("shopping.quote") as any).data.lines).toHaveLength(0);
-  });
-
-  it("accepts a valid remote behavioral run and records a stopped remote result", async () => {
-    useSimulationStore.getState().reset();
-    vi.stubGlobal("fetch", vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        status: "completed",
-        runtime: "remote",
-        execution_mode: "behavioral",
-        session_id: "remote-session-1",
-        duration_ns: 5_000_000,
-        time_ns: 5_000_000,
-        outputs: {},
-        events: [],
-        programs: [{ componentId: "board-remote", writes: 0, executions: 1, sourceFiles: ["main.ino"] }],
-        resolved_nets: 1,
-        serial_output: "remote ok\n",
-        target_issues: [],
-        protocol_events: [],
-        device_states: [],
-        warnings: [],
-        unsupported_apis: [],
-        note: "remote test",
-      }),
-    })));
-
-    const board: any = await invokeWebMCPTool("component.add", { componentId: "esp32-devkit-v1" });
-    await invokeWebMCPTool("firmware.write", { componentId: board.data.instanceId, files: [{ name: "main.ino", content: "void setup(){} void loop(){}" }] });
-    const result: any = await invokeWebMCPTool("simulation.run", { durationMs: 5 });
-
-    expect(result.data.runtime).toBe("remote");
-    expect(result.isError).not.toBe(true);
-    expect(useSimulationStore.getState().running).toBe(false);
-    expect(useSimulationStore.getState().lastRun?.runtime).toBe("remote");
-    expect(useSimulationStore.getState().lastRun?.programs).toHaveLength(1);
-    expect(useSimulationStore.getState().remoteSessionId).toBe("remote-session-1");
-    expect(result.data).toEqual(useSimulationStore.getState().lastRun);
-  });
-
-  it("does not treat a compiler HTTP 200 success:false payload as a successful compile", async () => {
-    useSimulationStore.getState().reset();
-    const board: any = await invokeWebMCPTool("component.add", { componentId: "esp32-devkit-v1" });
-    await invokeWebMCPTool("firmware.write", { componentId: board.data.instanceId, files: [{ name: "main.ino", content: "void setup(){} void loop(){}" }] });
-    vi.stubGlobal("fetch", vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ success: false, error: "compiler failed" }),
-    })));
-
-    const result: any = await invokeWebMCPTool("firmware.compile", { componentId: board.data.instanceId });
-    expect(result.isError).toBe(true);
-    expect(useValidationStore.getState().compile.status).toBe("error");
-    expect(useSimulationStore.getState().serialOutput).toContain("compile failed");
-  });
-
 });

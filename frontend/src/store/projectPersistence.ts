@@ -7,7 +7,24 @@ import {
   type WorkspaceSnapshot,
 } from "@schematic/project-storage";
 import { getCurrentUserId, initAuth } from "../auth/session.ts";
-import { normalizeProject, useProjectStore, type HardwareGraph } from "./useProjectStore.ts";
+import {
+  enterWorkspaceRecovery,
+  getWorkspaceRecoveryError,
+  normalizeProject,
+  normalizeRecoveryWorkspace,
+  normalizeStoredWorkspace,
+  useProjectStore,
+  type HardwareGraph,
+} from "./useProjectStore.ts";
+import {
+  beginPendingPersistenceContext,
+  beginPersistenceRoom,
+  clearPersistenceGate,
+  completePersistenceRoom,
+  consumeExpectedPersistenceFallback,
+  getPersistenceGate,
+  type PersistenceContextToken,
+} from "./persistenceGate.ts";
 
 const ROOM_ID = "workspace";
 const SAVE_DELAY_MS = 500;
@@ -16,11 +33,15 @@ type Workspace = WorkspaceSnapshot<HardwareGraph>;
 
 interface PersistenceContext {
   key: string;
+  userId: string | null;
+  token: PersistenceContextToken;
   repository: ProjectRepository<HardwareGraph>;
   saver: ReturnType<typeof createDebouncedWorkspaceSaver<HardwareGraph>>;
   hydrated: boolean;
   applying: boolean;
   pendingBeforeHydration: boolean;
+  /** Ignore the synchronous room snapshot published by reloadForCurrentUser. */
+  ignoreStoreUntilHydrated: boolean;
   revision: number | null;
   error: string | null;
 }
@@ -106,11 +127,32 @@ function latestLocalStorageProjectUpdate(userId: string | null): number | null {
 }
 
 function applyWorkspace(workspace: Workspace, context: PersistenceContext): boolean {
-  const projects = workspace.projects.map((project) => normalizeProject(project));
-  if (!projects.length) return false;
-  const activeProjectId = projects.some((project) => project.id === workspace.activeProjectId)
-    ? workspace.activeProjectId
-    : projects[0].id;
+  let normalized;
+  try {
+    normalized = normalizeStoredWorkspace(workspace.projects, workspace.activeProjectId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Workspace recovery required: the durable room is invalid.";
+    let recovery;
+    try {
+      recovery = normalizeRecoveryWorkspace(workspace.projects, workspace.activeProjectId);
+    } catch (recoveryError) {
+      context.error = recoveryError instanceof Error ? recoveryError.message : message;
+      enterWorkspaceRecovery(context.error);
+      return false;
+    }
+    const { projects, activeProjectId } = recovery;
+    const project = projects.find((candidate) => candidate.id === activeProjectId) ?? projects[0];
+    enterWorkspaceRecovery(message, recovery);
+    context.error = message;
+    context.applying = true;
+    try {
+      useProjectStore.setState({ projects, activeProjectId, project });
+    } finally {
+      context.applying = false;
+    }
+    return true;
+  }
+  const { projects, activeProjectId } = normalized;
   const project = projects.find((candidate) => candidate.id === activeProjectId) ?? projects[0];
   context.applying = true;
   try {
@@ -122,7 +164,7 @@ function applyWorkspace(workspace: Workspace, context: PersistenceContext): bool
 }
 
 function scheduleSave(context: PersistenceContext) {
-  if (activeContext !== context || !context.hydrated) return;
+  if (activeContext !== context || !context.hydrated || getWorkspaceRecoveryError()) return;
   context.error = null;
   const save = context.saver.schedule(currentWorkspace(), {
     source: "save",
@@ -170,17 +212,20 @@ async function preserveCurrentWorkspace(
   else context.error = saved.error.message;
 }
 
-function makeContext(userId: string | null): PersistenceContext {
+function makeContext(userId: string | null, token: PersistenceContextToken, ignoreStoreUntilHydrated = false): PersistenceContext {
   const repository = new ProjectRepository<HardwareGraph>({
     namespace: { roomId: ROOM_ID, userId },
   });
   return {
     key: contextKey(userId),
+    userId,
+    token,
     repository,
     saver: createDebouncedWorkspaceSaver(repository, SAVE_DELAY_MS),
     hydrated: false,
     applying: false,
     pendingBeforeHydration: false,
+    ignoreStoreUntilHydrated,
     revision: null,
     error: null,
   };
@@ -192,11 +237,25 @@ async function hydrateForCurrentRoom(isCurrent: () => boolean = () => true): Pro
   const userId = getCurrentUserId();
   const key = contextKey(userId);
   if (activeContext?.key === key && activeContext.hydrated) return;
+  // A duplicate session notification while this exact room is still loading
+  // must join the existing hydration instead of resetting its generation.
+  if (activeContext?.key === key) return;
 
+  const roomChanged = Boolean(activeContext && activeContext.key !== key);
   activeContext?.saver.cancel();
-  const context = makeContext(userId);
+  const token = beginPersistenceRoom(key, userId);
+  const context = makeContext(userId, token, roomChanged);
   activeContext = context;
   emitPersistenceStatus();
+
+  const recoveryError = getWorkspaceRecoveryError();
+  if (recoveryError) {
+    context.error = recoveryError;
+    context.hydrated = true;
+    completePersistenceRoom(context.token, context.error);
+    emitPersistenceStatus();
+    return;
+  }
 
   const localStorageUpdatedAt = latestLocalStorageProjectUpdate(userId);
 
@@ -207,6 +266,7 @@ async function hydrateForCurrentRoom(isCurrent: () => boolean = () => true): Pro
   if (!loaded.ok) {
     context.error = loaded.error.message;
     context.hydrated = true;
+    completePersistenceRoom(context.token, context.error);
     emitPersistenceStatus();
     return;
   }
@@ -225,6 +285,7 @@ async function hydrateForCurrentRoom(isCurrent: () => boolean = () => true): Pro
       await preserveCurrentWorkspace(context, loaded.value.metadata.revision, isCurrent);
       if (!isCurrent() || generation !== hydrationGeneration || activeContext !== context) return;
       context.hydrated = true;
+      completePersistenceRoom(context.token, context.error);
       emitPersistenceStatus();
       if (context.pendingBeforeHydration) scheduleSave(context);
       return;
@@ -252,6 +313,7 @@ async function hydrateForCurrentRoom(isCurrent: () => boolean = () => true): Pro
     applyWorkspace(workspace, context);
   }
   context.hydrated = true;
+  completePersistenceRoom(context.token, context.error);
   emitPersistenceStatus();
   if (context.pendingBeforeHydration || !workspace) scheduleSave(context);
 }
@@ -262,11 +324,19 @@ export function startProjectPersistence(): () => void {
 
   const lifecycleGeneration = ++persistenceLifecycleGeneration;
   let disposed = false;
+  let sessionListenerInstalled = false;
+  beginPendingPersistenceContext();
   const isCurrent = () => !disposed && persistenceLifecycleGeneration === lifecycleGeneration;
   const unsubscribe = useProjectStore.subscribe(() => {
     const context = activeContext;
     if (!context || context.applying || !context.hydrated) {
-      if (context && !context.applying) context.pendingBeforeHydration = true;
+      if (context && !context.applying) {
+        // reloadForCurrentUser publishes one expected synchronous fallback
+        // immediately after a room event. Ignore only that marked projection;
+        // every later real edit during the same hydration remains eligible to
+        // win the reconciliation below.
+        if (!consumeExpectedPersistenceFallback()) context.pendingBeforeHydration = true;
+      }
       return;
     }
     scheduleSave(context);
@@ -284,15 +354,35 @@ export function startProjectPersistence(): () => void {
   document.addEventListener("visibilitychange", onVisibilityChange);
   const onSessionChange = () => {
     if (!isCurrent()) return;
+    const key = contextKey(getCurrentUserId());
+    // A repeated auth notification for the same subject while IndexedDB is
+    // still loading must not replace the real in-flight promise with the
+    // resolved promise returned by hydrateForCurrentRoom's no-op path.
+    if (activeContext?.key === key && !activeContext.hydrated) return;
     persistenceReady = hydrateForCurrentRoom(isCurrent);
     void persistenceReady;
   };
+  // Install the capture-phase listener before the first auth request finishes.
+  // A subject can change while the initial room's IndexedDB read is still
+  // pending; missing that event would let the old hydration preserve the new
+  // subject's synchronous fallback into the wrong room. The listener is
+  // idempotent for same-room announcements and the first hydrate call below
+  // joins any identical in-flight room.
+  sessionListenerInstalled = true;
+  window.addEventListener("schematic-session", onSessionChange, { capture: true });
   // Auth must settle before the repository namespace is selected. Otherwise a
   // slow Site session lookup can hydrate the anonymous room and overwrite the
   // authenticated room when the WebMCP registry starts writing immediately.
-  persistenceReady = initAuth().then(() => isCurrent() ? hydrateForCurrentRoom(isCurrent) : undefined);
-  void persistenceReady.then(() => {
-    if (isCurrent()) window.addEventListener("schematic-session", onSessionChange);
+  persistenceReady = initAuth().then(() => {
+    if (!isCurrent()) return;
+    const key = contextKey(getCurrentUserId());
+    // The capture listener may already have started this exact room while the
+    // auth request was settling. Preserve that real in-flight Promise instead
+    // of replacing it with hydrateForCurrentRoom's resolved same-room no-op.
+    if (activeContext?.key === key && !activeContext.hydrated) return;
+    const hydration = hydrateForCurrentRoom(isCurrent);
+    persistenceReady = hydration;
+    return hydration;
   });
 
   return () => {
@@ -300,7 +390,7 @@ export function startProjectPersistence(): () => void {
     unsubscribe();
     window.removeEventListener("pagehide", flushForPageLifecycle);
     document.removeEventListener("visibilitychange", onVisibilityChange);
-    window.removeEventListener("schematic-session", onSessionChange);
+    if (sessionListenerInstalled) window.removeEventListener("schematic-session", onSessionChange, { capture: true });
     // A stale StrictMode cleanup must not cancel the context belonging to a
     // newer mount. Its generation guard still invalidates this lifecycle's
     // hydration when the pending auth promise settles.
@@ -310,6 +400,7 @@ export function startProjectPersistence(): () => void {
     activeContext = null;
     hydrationGeneration += 1;
     persistenceReady = Promise.resolve();
+    clearPersistenceGate();
     emitPersistenceStatus();
   };
 }
@@ -317,6 +408,58 @@ export function startProjectPersistence(): () => void {
 /** Wait until the auth-scoped workspace has completed its first hydration. */
 export function waitForProjectPersistence(): Promise<void> {
   return persistenceReady;
+}
+
+/**
+ * Wait for the currently selected auth room, not merely the promise that was
+ * current when a caller started waiting. A session event can replace that
+ * promise while an agent call is already in flight; looping makes the caller
+ * join the newer room before it is allowed to mutate anything.
+ *
+ * `null` is returned when no persistence owner is mounted. That is the
+ * intentional in-memory/degraded-runtime mode used by isolated tests.
+ */
+export async function waitForCurrentProjectPersistence(): Promise<PersistenceContextToken | null> {
+  for (;;) {
+    const pending = persistenceReady;
+    await pending;
+    if (pending !== persistenceReady) continue;
+    const gate = getPersistenceGate();
+    if (!gate) return null;
+    if (gate.hydrated) return { generation: gate.generation, roomKey: gate.roomKey, userId: gate.userId };
+    // Do not spin on an already-resolved promise while an IndexedDB request is
+    // pending. Wait for the next meaningful persistence status transition or a
+    // replacement room generation instead.
+    const observedGeneration = gate.generation;
+    await new Promise<void>((resolve) => {
+      const onStatus = () => {
+        const latest = getPersistenceGate();
+        if (persistenceReady !== pending || latest?.generation !== observedGeneration || latest?.hydrated) {
+          statusListeners.delete(onStatus);
+          resolve();
+        }
+      };
+      statusListeners.add(onStatus);
+      onStatus();
+    });
+  }
+}
+
+/** Snapshot the room lease for an operation that may cross an await. */
+export function getProjectPersistenceContext(): PersistenceContextToken | null {
+  const gate = getPersistenceGate();
+  return gate ? { generation: gate.generation, roomKey: gate.roomKey, userId: gate.userId } : null;
+}
+
+/** Return true only when the captured room is still hydrated and current. */
+export function isCurrentProjectPersistenceContext(token: PersistenceContextToken | null): boolean {
+  const gate = getPersistenceGate();
+  if (!gate) return true;
+  return gate.hydrated
+    && Boolean(token)
+    && gate.generation === token?.generation
+    && gate.roomKey === token.roomKey
+    && gate.userId === token.userId;
 }
 
 /** Flush the current debounced write when an explicit Save action needs certainty. */
@@ -336,10 +479,13 @@ export function getProjectPersistenceStatus() {
   const hydrated = activeContext?.hydrated ?? false;
   const pending = activeContext?.saver.pending ?? false;
   const error = activeContext?.error ?? null;
+  const gate = getPersistenceGate();
   return {
     backend: "indexeddb" as const,
     roomId: ROOM_ID,
-    userId: getCurrentUserId(),
+    userId: activeContext?.userId ?? gate?.userId ?? getCurrentUserId(),
+    roomKey: activeContext?.key ?? gate?.roomKey ?? contextKey(getCurrentUserId()),
+    generation: activeContext?.token.generation ?? gate?.generation ?? 0,
     hydrated,
     pending,
     revision: activeContext?.revision ?? null,

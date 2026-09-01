@@ -134,11 +134,19 @@ function addI2cPullupIssue(
     severity: "warning",
     code: "MISSING_PULLUP",
     message: "I2C bus missing pull-up resistors (SDA/SCL require pullup).",
-    autoFix: { description: "Add 4.7k pull-ups", action: "insert_pullup", params: { value: 4700 } },
   });
 }
 
-/** Universal validator backed by the shared graph index and v1 Connection[] state. */
+/**
+ * Active validator backed by the shared graph index and v1 Connection[] state.
+ *
+ * This function intentionally validates the hardware graph only. Editable
+ * firmware/source is an artifact for the user to revise and export; reading
+ * its contents here would make a preview/check result look like a compiler
+ * verdict and could make an otherwise-valid graph appear invalid. Keep the
+ * standalone `validateFirmwareFiles` helper below for an explicit, legacy
+ * source-diagnostic caller, but never call it from this active path.
+ */
 export function validateProject(project: HardwareProject, lookup: ComponentDefLookup): ValidationResult {
   const index = createHardwareGraphIndex(project, lookup);
   const issues = index.diagnostics.map(diagnosticToIssue);
@@ -200,7 +208,6 @@ export function validateProject(project: HardwareProject, lookup: ComponentDefLo
         code: "VOLTAGE_MISMATCH",
         message: `Voltage ${voltageMismatch.nominal}V on ${voltageMismatch.from} exceeds ${voltageMismatch.maximum}V max on ${voltageMismatch.to}.`,
         affectedConnections: [connectionId],
-        autoFix: { description: "Insert level shifter", action: "insert_level_shifter", params: { connectionId } },
       });
     }
     if (source.domain === "rf" && target.domain === "rf") {
@@ -245,7 +252,6 @@ export function validateProject(project: HardwareProject, lookup: ComponentDefLo
       severity: "warning",
       code: "MISSING_GROUND",
       message: "No connected ground net found — add a GND connection.",
-      autoFix: { description: "Auto-connect GND", action: "add_ground" },
     });
   }
   if (project.components.length > 1 && !hasConnectedPower) {
@@ -255,11 +261,12 @@ export function validateProject(project: HardwareProject, lookup: ComponentDefLo
   addI2cAddressIssues(project, index, issues);
   addI2cPullupIssue(project, index, issues);
 
-  const codeIssues = project.firmwareTargets.flatMap((target) => validateFirmwareFiles(target.files));
   return {
-    valid: !issues.some((issue) => issue.severity === "error") && !codeIssues.some((issue) => issue.severity === "error"),
+    valid: !issues.some((issue) => issue.severity === "error"),
     issues,
-    codeIssues,
+    // Preserve the result field for callers compiled against the older shape,
+    // but keep active validation's source diagnostics explicitly empty.
+    codeIssues: [],
   };
 }
 
@@ -272,6 +279,10 @@ export interface CodeIssue {
   line?: number;
 }
 
+/**
+ * Legacy opt-in source diagnostics. This is deliberately not part of
+ * `validateProject` or the WebMCP `validation.check` workflow.
+ */
 export function validateFirmwareFiles(files: { name: string; content: string }[]): CodeIssue[] {
   const issues: CodeIssue[] = [];
   for (const file of files) {

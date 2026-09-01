@@ -1,120 +1,171 @@
-# Judge demo — under 3 minutes
+# Judge demo — Behavior Preview plus editable code
 
-> **Current legacy release flow:** this script documents the presently deployed
-> `simulation.run` demonstration. It is not the approved target architecture.
-> The replacement roadmap uses typed Behavior Plans for scripted outcome preview
-> and keeps Code-panel source editable and unexecuted; see
-> [TYPESCRIPT_WEB_SIMULATION_HANDOFF.md](TYPESCRIPT_WEB_SIMULATION_HANDOFF.md).
+Target: the published ChatGPT Site at
+[schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
 
-This script uses the supported ChatGPT Site path only. Open the authenticated
-[live Site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
-inside the ChatGPT in-app browser. Ask ChatGPT to use the Site's **native
-WebMCP** surface; do not use visual clicking as the agent interface. If the
-in-app browser does not expose native `modelContext`, say that the host
-capability is unavailable and do not present a compatibility shim as native
-discovery.
+This is a three-minute demo of the product's actual boundary. The model uses
+WebMCP to build a graph, declare a Behavior Plan, preview typed outcomes, and
+write ordinary source into Code. The preview is not firmware execution, and
+the source is not compiled or run by Schematic.
+
+Use the native WebMCP surface in the ChatGPT in-app browser. A local
+`window.__schematicTools` bridge is useful for tests but is not native-host
+evidence.
 
 ## 0:00–0:20 — Discover the contract
 
-Prompt: “Inspect the Schematic Site's native WebMCP tools and report the tool
-count. Read the current project graph.”
+Ask the agent:
 
-The agent calls `project.get_graph` and reports **42 tools**. Point out that
-the tool activity panel and the visible graph are driven by the same store
-actions.
+> Inspect the Schematic WebMCP surface. Report the count, the five behavior
+> tools, the three code tools, and whether any compiler or legacy runtime tools
+> are registered.
 
-## 0:20–0:55 — Build a real graph
+Expected result:
 
-Prompt: “Find an ESP32 DevKit, a pushbutton, and an LED. Add one of each to
-this project, inspect their ports, and connect the button to GPIO18 and the LED
-to GPIO19.”
+- exactly 45 tools;
+- `behavior.get_capabilities`, `behavior.plan.write`, `behavior.preview`,
+  `behavior.invoke`, and `behavior.get_state`;
+- `code.write`, `code.read`, and `code.export`;
+- `firmware.write`/`firmware.read` only as source compatibility aliases; and
+- no `firmware.compile` or `simulation.*` registration.
 
-Expected tool sequence:
+The UI should show the WebMCP count and the activity panel. Native discovery
+must be confirmed by the host, not inferred from a compatibility shim.
 
-1. `component.search` for `ESP32`, `pushbutton`, and `LED`.
-2. `component.add` for `esp32-devkit-v1`, `pushbutton`, and `led` (omit
-   coordinates for collision-aware placement, or provide finite pairs).
-3. `component.list_ports` for the three instance IDs.
-4. `connection.connect` for board `GPIO18 → button A` and board `GPIO19 → LED
-IN`.
-5. `validation.check` to show the typed validation result; continue only when
-   there are no blocking errors.
+## 0:20–0:55 — Build a small graph
 
-Read the returned instance IDs and endpoints aloud; the point is that the
-agent is manipulating a structured hardware graph, not guessing canvas
-coordinates.
+Use tools, not visual clicking, for the agent workflow:
 
-## 0:55–1:30 — Write the exact portable firmware
+1. Call `component.search` for an ESP32 or other board, `pushbutton`, and `led`.
+2. Call `component.add` for one board, button, and LED. Keep the returned
+   instance IDs; do not invent IDs.
+3. Call `component.list_ports` for each instance.
+4. Call `connection.connect` with the exact returned endpoint IDs. If the graph
+   rejects a connection, show the structured repair diagnostic instead of
+   claiming that the wire exists.
+5. Call `validation.check` and leave graph diagnostics visible.
 
-Prompt: “Write this exact button-to-LED sketch for the ESP32 board, then check
-the firmware.”
+The graph proves catalog identity, typed topology, and validation results. It
+does not prove electrical safety or that a physical board will work.
 
-Use one `main.ino` file with this source:
+## 0:55–1:35 — Declare and preview the outcome
 
-```cpp
-constexpr int BUTTON_PIN = 18;
-constexpr int LED_PIN = 19;
+Call `behavior.get_capabilities` and use the exact profile IDs, definition IDs,
+event IDs, and action IDs it returns. For instance IDs represented here as
+`<button-instance>`, `<led-instance>`, and `<definition-id>`, write this
+data-only plan:
 
-void setup() {
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-  pinMode(LED_PIN, OUTPUT);
-}
-
-void loop() {
-  bool pressed = digitalRead(BUTTON_PIN) == LOW;
-  digitalWrite(LED_PIN, pressed);
-  delay(10);
+```json
+{
+  "schemaVersion": 1,
+  "id": "button-led-preview",
+  "projectId": "<active-project-id>",
+  "name": "Button turns LED on",
+  "intent": "Show the requested button-to-indicator outcome",
+  "revision": 0,
+  "rules": [
+    {
+      "id": "on-press",
+      "enabled": true,
+      "when": {
+        "type": "component.event",
+        "componentId": "<button-instance>",
+        "definitionId": "<button-definition-id>",
+        "eventId": "button.pressed",
+        "payload": { "pressed": true }
+      },
+      "then": [
+        {
+          "componentId": "<led-instance>",
+          "definitionId": "<led-definition-id>",
+          "actionId": "indicator.set",
+          "payload": { "kind": "literal", "value": { "on": true } }
+        }
+      ]
+    }
+  ]
 }
 ```
 
-Call `firmware.write`, then `firmware.check`. Explain that this exact grammar
-is intentionally recognized to select a fixed precompiled portable C/WASM
-implementation. The matched sketch is not compiled into or executed by WASM;
-this is not a general C/C++ compiler.
+Call `behavior.plan.write`, then `behavior.preview` with the returned plan ID.
+Call `behavior.invoke` with:
 
-## 1:30–2:00 — Prove pressed and released behavior
-
-1. Call `simulation.set_input` with the button instance ID, key `pressed`, and
-   value `true`.
-2. Call `simulation.run` with `durationMs: 50`.
-3. Show the result's `executionEngine: "c-wasm"`, `contract: "button-led"`,
-   `abiVersion: 2`, 64-character `artifactSha256`, resolved board pins, and
-   LED output `true`.
-4. Set `pressed` to `false` and run again. Show the same ABI/hash metadata and
-   LED output `false`.
-
-The important claim is exact execution of the fixed C/WASM semantic contract
-with deterministic virtual I/O, not execution of arbitrary matched source, a
-screenshot, or a simulated compiler log.
-
-## 2:00–2:25 — Show an honest unsupported result
-
-Prompt: “Try this unsupported sketch and report the boundary; do not invent a
-binary.” Replace the board source temporarily with a sketch that calls an
-unsupported API, for example:
-
-```cpp
-void setup() { Wire.foo(); }
-void loop() {}
+```json
+{
+  "componentId": "<button-instance>",
+  "definitionId": "<button-definition-id>",
+  "eventId": "button.pressed",
+  "payload": { "pressed": true }
+}
 ```
 
-Call `firmware.write` and `simulation.run`. Show the structured
-`unsupported-api`/unsupported-API result and its `unsupportedApis` entry. Say:
-“The Site reports the unsupported contract explicitly. It does not pretend to
-compile or run an arbitrary sketch.”
+Call `behavior.get_state` and show the LED indicator projection, timeline, and
+snapshot hash. The expected explanation is:
 
-## 2:25–2:55 — Restore and persist
+> Scripted preview: the declared typed action changed the visual LED state. No
+> source code ran; wiring, electrical behavior, and hardware were not verified.
 
-Restore the exact button→LED source with `firmware.write`, then call
-`project.save` and `project.get_graph`. Reload the Site or switch away and back;
-call `project.list`/`project.get_graph` to show the project name, three
-components, two connections, and firmware target remain in the browser-local
-verified-user room.
+The same pattern can show `display.showText`, `buzzer.start`, `relay.set`,
+`servo.setAngle`, `motor.setSpeed`, or `sensor.setReading` when the selected
+catalog component has that exact profile. An unsupported action must fail
+explicitly without changing visual state.
 
-## 2:55–3:00 — Close with precise scope
+## 1:35–2:20 — Put normal code in the side panel
 
-“Schematic gives a ChatGPT agent a structured hardware graph and 42 native
-WebMCP operations. This release proves the exact button→LED C/WASM contract,
-uses a bounded TypeScript interpreter for other supported behavior, persists
-the project locally, and reports unsupported work explicitly. The Site API is
-same-origin and Site compilation is preflight-only.”
+Call `code.write` for the selected board. The content can be an ordinary
+multi-file Arduino/C++/Python response; it does not need to be reduced to the
+preview vocabulary:
+
+```json
+{
+  "targetComponentId": "<board-instance>",
+  "language": "arduino",
+  "files": [
+    {
+      "name": "sketch.ino",
+      "content": "void setup() {}\nvoid loop() {}\n"
+    }
+  ],
+  "origin": "ai-generated"
+}
+```
+
+Show the Code panel opening the editable document. Call `code.read` to show
+the revision, `contentSha256`, origin, preview-link status, and
+`inAppVerification: "not-performed"`. Edit the file manually, save it, and
+show that the source hash changes while the Behavior Preview snapshot remains
+plan-driven. A linked plan/code pair becomes `stale` after either side changes;
+the source is never silently overwritten.
+
+## 2:20–2:45 — Export the external handoff
+
+Call `code.export`. Show the JSON manifest containing:
+
+- project and behavior-relevant graph hashes;
+- target component, definition, and optional board FQBN;
+- source file contents and per-file SHA-256 values;
+- source hash, language, and declared dependencies;
+- preview-link provenance and graph diagnostics; and
+- explicit false claims for in-app build, execution, upload, and physical test.
+
+Say:
+
+> This is ready to carry to the user's external SDK, IDE, compiler, or board
+> workflow. Schematic has not built or tested it.
+
+## 2:45–3:00 — Close with limits
+
+Call `project.save` if needed, then summarize:
+
+- Behavior Plan is the source of truth for the visual outcome.
+- Code is an independently editable/exportable artifact.
+- Preview is deterministic typed projection, not source execution or electrical
+  simulation.
+- Plans and code persist in the verified user's local browser room; preview
+  sessions are ephemeral.
+- The product does not compile, upload, flash, or physically test in the Site.
+- `/api/compile` and `/api/simulation/*` are retired and must return 404 on the canonical ChatGPT Site route.
+
+Do not claim that a light turned on on real hardware, that generated firmware
+compiles, or that the graph is electrically correct. Those are external
+testing outcomes.

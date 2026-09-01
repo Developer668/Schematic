@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyProject, type HardwareDefinitionLookup, type HardwarePort, type HardwareProject } from "@schematic/hardware-graph";
-import { validateProject } from "../src";
+import { validateFirmwareFiles, validateProject } from "../src";
 
 const definitions: Record<string, { ports: HardwarePort[] }> = {
   board: {
@@ -68,6 +68,28 @@ describe("validation graph integration", () => {
     expect(result.issues.some((issue) => issue.code === "I2C_ADDRESS_COLLISION")).toBe(false);
   });
 
+  it("reports topology repair guidance without advertising synthetic automatic fixes", () => {
+    const result = validateProject(project({ mcu: "board", sensor: "target" }, [
+      wire("sda", ["mcu", "SDA"], ["sensor", "SDA"], "i2c"),
+      wire("scl", ["mcu", "SCL"], ["sensor", "SCL"], "i2c"),
+    ]), lookup);
+
+    expect(result.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      "MISSING_GROUND",
+      "MISSING_PULLUP",
+    ]));
+    expect(result.issues.every((issue) => !Object.prototype.hasOwnProperty.call(issue, "autoFix"))).toBe(true);
+    expect(new Set(result.issues.map((issue) => issue.id)).size).toBe(result.issues.length);
+
+    // Re-running validation is observational: it must not accumulate a second
+    // synthetic component or a second copy of any diagnostic.
+    const repeated = validateProject(project({ mcu: "board", sensor: "target" }, [
+      wire("sda", ["mcu", "SDA"], ["sensor", "SDA"], "i2c"),
+      wire("scl", ["mcu", "SCL"], ["sensor", "SCL"], "i2c"),
+    ]), lookup);
+    expect(repeated.issues.map((issue) => issue.id)).toEqual(result.issues.map((issue) => issue.id));
+  });
+
   it("returns clear errors for missing endpoints and mixed rails", () => {
     const result = validateProject(project({ mcu: "board", a: "target" }, [
       wire("removed", ["mcu", "GND"], ["removed-component", "GND"], "ground"),
@@ -82,5 +104,32 @@ describe("validation graph integration", () => {
       "MIXED_RAIL_NET",
     ]));
     expect(result.issues.find((issue) => issue.code === "MISSING_PORT")?.message).toContain("NOPE");
+  });
+
+  it("keeps active validation independent from editable firmware contents", () => {
+    const clean = project({ mcu: "board" }, []);
+    clean.firmwareTargets = [{
+      id: "fw-1",
+      componentId: "mcu",
+      definitionId: "board",
+      language: "arduino",
+      boardFqbn: "arduino:avr:uno",
+      files: [{ name: "sketch.ino", content: "void setup() {}\nvoid loop() {}" }],
+    }];
+    const malformed = structuredClone(clean);
+    malformed.firmwareTargets[0].files[0].content = "}\n// missing setup and loop";
+
+    const cleanResult = validateProject(clean, lookup);
+    const malformedResult = validateProject(malformed, lookup);
+    expect(malformedResult).toEqual(cleanResult);
+    expect(malformedResult.codeIssues).toEqual([]);
+
+    // The legacy helper remains opt-in and still detects source diagnostics;
+    // active graph validation must not call this helper implicitly.
+    expect(validateFirmwareFiles(malformed.firmwareTargets[0].files)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "FIRMWARE_UNBALANCED_BRACES" }),
+      expect.objectContaining({ code: "FIRMWARE_MISSING_SETUP" }),
+      expect.objectContaining({ code: "FIRMWARE_MISSING_LOOP" }),
+    ]));
   });
 });

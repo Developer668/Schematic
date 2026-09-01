@@ -6,7 +6,7 @@ import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
 import { getRegisteredToolNames } from "../webmcp/tools.ts";
 import LogoMark from "../components/LogoMark.tsx";
-import { apiUrl, getAuthHeaders } from "../auth/session.ts";
+import { apiUrl } from "../auth/session.ts";
 import { parseSchematicProjectFile, triggerDownloadVlx } from "../utils/vllxFile.ts";
 import {
   Palette,
@@ -37,7 +37,7 @@ export default function SettingsPage() {
   const { showGrid: lineGrid, setShowGrid: setLineGrid, snapToGrid: snapGrid, setSnapToGrid: setSnapGrid, libraryDensity, setLibraryDensity, reducedMotion, setReducedMotion } = useWorkspaceStore();
   const webmcpRegistration = useWebMCPStore((state) => state.registration);
   const [apiStatus, setApiStatus] = useState<"checking" | "ok" | "offline">("checking");
-  const [enginesStatus, setEnginesStatus] = useState<any>(null);
+  const [apiInfo, setApiInfo] = useState<{ version?: string; runtime?: string } | null>(null);
   const [notice, setNotice] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
   const [clearArmed, setClearArmed] = useState(false);
   const toolCount = getRegisteredToolNames().length;
@@ -57,24 +57,28 @@ export default function SettingsPage() {
   const checkApi = useCallback(async () => {
     setApiStatus("checking");
     try {
-      const request = async (force = false) => fetch(apiUrl("/api/engines"), { headers: await getAuthHeaders(force), credentials: "include" });
-      let response = await request();
-      if (response.status === 401) response = await request(true);
+      const response = await fetch(apiUrl("/api/health"), { credentials: "include" });
       if (!response.ok) throw new Error(`Backend returned ${response.status}`);
       const contentType = response.headers.get("content-type") ?? "";
       if (!contentType.includes("application/json")) {
         setApiStatus("offline");
-        setEnginesStatus(null);
-        setNotice({ kind: "info", text: "The remote backend is not connected. The browser behavioral runtime and local WebMCP tools remain available." });
+        setApiInfo(null);
+        setNotice({ kind: "info", text: "The optional same-origin API is not connected. Local projects, Behavior Preview, source editing, and WebMCP remain available." });
         return;
       }
-      const payload = await response.json();
+      const rawPayload: unknown = await response.json();
+      const payload = rawPayload && typeof rawPayload === "object"
+        ? {
+            ...(typeof (rawPayload as Record<string, unknown>).version === "string" ? { version: (rawPayload as Record<string, unknown>).version as string } : {}),
+            ...(typeof (rawPayload as Record<string, unknown>).runtime === "string" ? { runtime: (rawPayload as Record<string, unknown>).runtime as string } : {}),
+          }
+        : {};
       setApiStatus("ok");
-      setEnginesStatus(payload);
-      setNotice({ kind: "success", text: "Backend and engine status checked successfully." });
+      setApiInfo(payload);
+      setNotice({ kind: "success", text: "Same-origin API health checked successfully." });
     } catch (error) {
       setApiStatus("offline");
-      setEnginesStatus(null);
+      setApiInfo(null);
       setNotice({ kind: "error", text: `Backend check failed: ${(error as Error).message}` });
     }
   }, []);
@@ -104,7 +108,7 @@ export default function SettingsPage() {
   const handleClear = () => {
     if (!clearArmed) {
       setClearArmed(true);
-      setNotice({ kind: "info", text: "Clear is ready. Choose Confirm clear to remove this project's components, wires, and firmware." });
+      setNotice({ kind: "info", text: "Clear is ready. Choose Confirm clear to remove this project's components, wires, Behavior Plans, and editable source." });
       return;
     }
     clear();
@@ -266,7 +270,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/30">
                   <div>
                     <div className="text-xs font-medium flex items-center gap-1"><Globe size={12} /> Backend API</div>
-                      <div className="text-[11px] font-mono text-muted-foreground">{apiBaseUrl} · {apiBoundaryLabel} · browser runtime fallback enabled</div>
+                      <div className="text-[11px] font-mono text-muted-foreground">{apiBaseUrl} · {apiBoundaryLabel} · optional catalog and parts helpers</div>
                   </div>
                   <a href="/api/docs" target="_blank" className="text-xs px-2.5 py-1 rounded-lg bg-card border border-border hover:bg-muted inline-flex items-center gap-1">
                     Open <ExternalLink size={10} />
@@ -274,12 +278,12 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/30">
                   <div>
-                    <div className="text-xs font-medium flex items-center gap-1"><Zap size={12} /> Engines</div>
+                    <div className="text-xs font-medium flex items-center gap-1"><Zap size={12} /> API health</div>
                     <div className="text-[11px] text-muted-foreground">
-                      {enginesStatus ? `${Object.keys(enginesStatus).length} engines reported` : "Checking…"}
+                      {apiInfo ? `${apiInfo.runtime ?? "Site API"}${apiInfo.version ? ` · v${apiInfo.version}` : ""}` : "Checking…"}
                     </div>
                   </div>
-                  <a href="/api/engines" target="_blank" className="text-xs px-2.5 py-1 rounded-lg bg-card border border-border hover:bg-muted inline-flex items-center gap-1">
+                  <a href="/api/health" target="_blank" className="text-xs px-2.5 py-1 rounded-lg bg-card border border-border hover:bg-muted inline-flex items-center gap-1">
                     View <ExternalLink size={10} />
                   </a>
                 </div>
@@ -298,8 +302,8 @@ export default function SettingsPage() {
                   <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Frontend ↔ same-origin API boundary</li>
                   <li className="flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${webmcpRegistration.state === "native" ? "bg-emerald-500" : webmcpRegistration.state === "error" || webmcpRegistration.state === "unavailable" ? "bg-amber-500" : "bg-primary"}`} /> {webmcpStatus}</li>
                   <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Canvas world ↔ Project store live-sync</li>
-                  <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Right panel Code ↔ firmware.write</li>
-                  <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Bottom dock ↔ Simulation/Validation</li>
+                  <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Right panel Code ↔ code.write</li>
+                  <li className="flex items-center gap-1.5"><Check size={11} className="text-emerald-500" /> Bottom dock ↔ Preview/Validation</li>
                 </ul>
               </div>
 
@@ -328,8 +332,8 @@ export default function SettingsPage() {
                   <div className="text-[11px] text-muted-foreground">Wires</div>
                 </div>
                 <div className="rounded-xl bg-muted border border-border p-3">
-                  <div className="text-xl font-bold">{project.firmwareTargets.length}</div>
-                  <div className="text-[11px] text-muted-foreground">Firmware</div>
+                  <div className="text-xl font-bold">{project.codeDocuments?.length ?? project.firmwareTargets.length}</div>
+                  <div className="text-[11px] text-muted-foreground">Code docs</div>
                 </div>
               </div>
 
@@ -351,7 +355,7 @@ export default function SettingsPage() {
               </button>}
 
               <div className="text-[11px] text-muted-foreground leading-snug p-2 rounded-xl bg-muted/20 border border-border">
-                Exports include components, connections, and firmware source. Imports always open as a new project so the current project stays recoverable.
+                Exports include components, connections, Behavior Plans, and editable source. Imports always open as a new project so the current project stays recoverable.
               </div>
             </div>
           </div>
@@ -364,16 +368,16 @@ export default function SettingsPage() {
             </div>
             <div className="p-4 space-y-3 text-sm leading-snug">
               <p className="text-muted-foreground">
-                <b className="text-foreground">Schematic</b> is an agent-native virtual hardware workbench. Humans and AI compose, wire, program, validate and simulate heterogeneous hardware via <b className="text-foreground">WebMCP</b>.
+                <b className="text-foreground">Schematic</b> is an agent-native hardware planning workbench. Humans and AI compose, wire, write editable source, validate graphs, and preview typed outcomes via <b className="text-foreground">WebMCP</b>.
               </p>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="rounded-xl border border-border bg-muted/20 p-3">
                   <div className="font-semibold">Workspace</div>
-                  <div className="text-muted-foreground">Place components on the canvas, connect compatible ports, and keep firmware beside the hardware graph.</div>
+                  <div className="text-muted-foreground">Place components, connect compatible ports, preview a Behavior Plan, and keep editable source beside the graph.</div>
                 </div>
                 <div className="rounded-xl border border-border bg-muted/20 p-3">
                   <div className="font-semibold">Project files</div>
-                  <div className="text-muted-foreground">Portable .vlx exports include the graph and firmware source without changing your saved copy.</div>
+                  <div className="text-muted-foreground">Portable .vlx exports include the graph, Behavior Plans, and editable source without changing your saved copy.</div>
                 </div>
               </div>
               <div className="flex gap-2">

@@ -26,11 +26,6 @@ async function findHeadersFiles(directory) {
 const worker = await requiredFile("capability-fixtures/echo-worker.js");
 if (!worker.bytes.toString("utf8").includes("self.onmessage")) throw new Error("The built worker fixture is not the expected echo worker.");
 
-const wasmFixture = await requiredFile("capability-fixtures/answer.wasm.base64");
-const wasmBytes = Buffer.from(wasmFixture.bytes.toString("utf8").replace(/\s+/g, ""), "base64");
-if (!WebAssembly.validate(wasmBytes)) throw new Error("The built WASM fixture is invalid.");
-if (wasmBytes.byteLength >= 1024) throw new Error("The built WASM fixture is unexpectedly large.");
-
 const metadata = await requiredFile("components-metadata.json");
 if (metadata.bytes.byteLength < 64 * 1024) throw new Error("The built component metadata asset is unexpectedly small.");
 const parsedMetadata = JSON.parse(metadata.bytes.toString("utf8"));
@@ -46,4 +41,4 @@ await rm(resolve(clientRoot, "_headers"), { force: true });
 const headersFiles = await findHeadersFiles(clientRoot);
 if (headersFiles.length > 0) throw new Error(`The Site archive must not contain _headers artifacts: ${headersFiles.join(", ")}`);
 
-console.log("Verified Site static assets: worker, WASM, metadata JSON, social preview PNG; removed generated _headers and verified none remain.");
+console.log("Verified Site static assets: worker, metadata JSON, social preview PNG; removed generated _headers and verified none remain.");

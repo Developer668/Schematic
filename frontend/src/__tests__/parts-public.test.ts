@@ -59,6 +59,16 @@ describe("keyless public parts discovery", () => {
     expect(body.handoff.nextAction).toMatch(/browsing-agent/i);
   });
 
+  it("rejects an oversized public response even when Content-Length lies low", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("x".repeat(512 * 1024 + 1), { status: 200, headers: { "content-length": "1" } })));
+    const response = await partsSearch(await requestFor("oversized-public-response"), authEnv);
+    const body = await response.json() as any;
+    expect(body.results).toEqual([]);
+    expect(body.code).toBe("PUBLIC_SOURCE_DEGRADED");
+    expect(body.attempts[0]).toMatchObject({ source: "jlcsearch", status: "error" });
+    expect(body.attempts[0].message).toContain("524288-byte limit");
+  });
+
   it("returns a safe handoff after the per-room burst limit", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ components: [] }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);

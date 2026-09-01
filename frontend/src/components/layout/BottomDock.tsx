@@ -1,18 +1,25 @@
 import { useState, useRef, useEffect } from "react";
-import { useSimulationStore } from "../../store/useSimulationStore.ts";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
 import { useWebMCPStore } from "../../store/useWebMCPStore.ts";
-import { useValidationStore } from "../../store/useValidationStore.ts";
+import { isPreviewRunning, useBehaviorPreviewStore } from "../../behavior/useBehaviorPreviewStore.ts";
+import type { PreviewDiagnostic, PreviewSnapshot } from "../../behavior/previewTypes.ts";
 import { getRegisteredToolNames } from "../../webmcp/tools.ts";
 import ValidationPanel from "../validation/ValidationPanel.tsx";
-import { Terminal, ChevronDown, Trash2 } from "lucide-react";
+import { Terminal, ChevronDown, Trash2, Pause, Play, RotateCcw, Clock3, Activity, AlertTriangle } from "lucide-react";
 
 export default function BottomDock({ collapsed, onToggleCollapse, height }: { collapsed: boolean; onToggleCollapse: () => void; height: number }) {
   const tab = useWorkspaceStore((state) => state.bottomPanel);
   const setTab = useWorkspaceStore((state) => state.setBottomPanel);
-  const { running, serialOutput, pinStates, engineStatus, lastRun } = useSimulationStore();
-  const { compile, codeIssues } = useValidationStore();
+  const previewStatus = useBehaviorPreviewStore((state) => state.status);
+  const snapshot = useBehaviorPreviewStore((state) => state.snapshot);
+  const previewDiagnostics = useBehaviorPreviewStore((state) => state.diagnostics);
+  const preparationStatus = useBehaviorPreviewStore((state) => state.preparationStatus);
+  const previewDurationMs = useBehaviorPreviewStore((state) => state.durationMs);
+  const pausePreview = useBehaviorPreviewStore((state) => state.pausePreview);
+  const startPreview = useBehaviorPreviewStore((state) => state.startPreview);
+  const resetPreview = useBehaviorPreviewStore((state) => state.resetPreview);
+  const seekPreview = useBehaviorPreviewStore((state) => state.seekPreview);
   const project = useProjectStore((s) => s.project);
   const toolNames = getRegisteredToolNames();
 
@@ -21,7 +28,7 @@ export default function BottomDock({ collapsed, onToggleCollapse, height }: { co
       <div className="h-8 border-t border-border bg-card flex items-center px-2 gap-1 shrink-0 text-xs">
         <button type="button" onClick={() => { setTab("webmcp"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">WebMCP</button>
         <button type="button" onClick={() => { setTab("terminal"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">Terminal</button>
-        <button type="button" onClick={() => { setTab("debug"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">Debug</button>
+        <button type="button" onClick={() => { setTab("debug"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">Preview</button>
         <button type="button" onClick={() => { setTab("validation"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">Problems</button>
         <button type="button" onClick={onToggleCollapse} className="ml-auto w-6 h-6 rounded border border-border hover:bg-muted flex items-center justify-center" aria-label="Expand bottom panel" title="Expand bottom panel"><ChevronDown size={12} className="rotate-180" /></button>
       </div>
@@ -34,20 +41,20 @@ export default function BottomDock({ collapsed, onToggleCollapse, height }: { co
         <div className="flex items-center gap-0">
           <TabBtn active={tab === "webmcp"} onClick={() => setTab("webmcp")}>WebMCP</TabBtn>
           <TabBtn active={tab === "terminal"} onClick={() => setTab("terminal")}>Terminal</TabBtn>
-          <TabBtn active={tab === "debug"} onClick={() => setTab("debug")}>Debug</TabBtn>
+          <TabBtn active={tab === "debug"} onClick={() => setTab("debug")}>Preview</TabBtn>
           <TabBtn active={tab === "validation"} onClick={() => setTab("validation")}>Problems</TabBtn>
         </div>
         <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
           <span className="hidden sm:inline">{project.components.length} comps · {project.connections.length} wires</span>
-          <span className="font-mono text-[9px] uppercase tracking-wide">{running ? "running" : "idle"}</span>
+          <span className="font-mono text-[9px] uppercase tracking-wide">{previewStatus}</span>
           <button type="button" onClick={onToggleCollapse} className="w-6 h-6 rounded hover:bg-muted flex items-center justify-center" aria-label="Collapse bottom panel" title="Collapse bottom panel"><ChevronDown size={12} /></button>
         </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-auto bg-card">
         {tab === "webmcp" && <WebMCPCLI toolNames={toolNames} />}
-        {tab === "terminal" && <TerminalTab running={running} serialOutput={serialOutput} />}
-        {tab === "debug" && <DebugTab pinStates={pinStates} engineStatus={engineStatus} project={project} compile={compile} codeIssues={codeIssues} serialOutput={serialOutput} lastRun={lastRun} />}
+        {tab === "terminal" && <TerminalTab status={previewStatus} snapshot={snapshot} />}
+        {tab === "debug" && <PreviewTimeline status={previewStatus} preparationStatus={preparationStatus} snapshot={snapshot} diagnostics={previewDiagnostics} durationMs={previewDurationMs} onPause={() => void pausePreview()} onPlay={() => void startPreview({ durationMs: previewDurationMs })} onReset={() => void resetPreview()} onSeek={(timeMs) => void seekPreview(timeMs)} />}
         {tab === "validation" && <div className="p-2"><ValidationPanel embedded /></div>}
       </div>
     </div>
@@ -166,6 +173,7 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
         <input
           ref={inputRef}
           value={input}
+          aria-label="WebMCP command"
           onChange={(e) => { setInput(e.target.value); const tok = e.target.value.split(" ")[0]; setFilter(tok); }}
           onKeyDown={(e) => {
             if (e.key === "Enter") void run();
@@ -190,60 +198,77 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
   );
 }
 
-function TerminalTab({ running, serialOutput }: { running: boolean; serialOutput: string }) {
-  const [local, setLocal] = useState("");
+function TerminalTab({ status, snapshot }: { status: string; snapshot: PreviewSnapshot | null }) {
   return (
     <div className="h-full flex flex-col font-mono text-xs">
       <div className="flex items-center justify-between px-2 py-1.5 border-b border-border bg-muted/20 text-xs font-sans">
-        <span className="flex items-center gap-1.5"><Terminal size={12} /> Serial log</span>
-        <span className="text-muted-foreground">{running ? "Streaming" : "Idle"} · {serialOutput.length} chars</span>
+        <span className="flex items-center gap-1.5"><Terminal size={12} /> Preview session log</span>
+        <span className="text-muted-foreground">{status} · {snapshot?.sessionLog.length ?? 0} entries</span>
       </div>
-      <div className="flex-1 overflow-auto p-2 bg-[#0a0a0a] text-zinc-100 text-xs">
-        {serialOutput ? <pre className="whitespace-pre-wrap break-words text-[11px]">{serialOutput}</pre> : <div className="text-zinc-500 text-xs">No output yet — run simulation.</div>}
+      <div className="flex-1 overflow-auto p-2 bg-[#0a0a0a] text-zinc-100 text-xs" role="log" aria-label="Preview session log">
+        {!snapshot || snapshot.sessionLog.length === 0 ? <div className="text-zinc-500 text-xs">No preview actions yet — choose Preview behavior or trigger a typed event.</div> : snapshot.sessionLog.map((entry) => (
+          <div key={entry.sequence} className="mb-2 border-b border-zinc-800 pb-2 last:border-0">
+            <div className="flex items-center gap-2"><span className={entry.outcome === "accepted" ? "text-emerald-400" : "text-red-300"}>{entry.outcome === "accepted" ? "✓" : "!"}</span><span className="text-zinc-300">{entry.kind}</span><span className="ml-auto text-[10px] text-zinc-500">{entry.logicalTimeMs} ms · #{entry.sequence}</span></div>
+            <pre className="ml-4 mt-1 whitespace-pre-wrap break-words text-[11px] text-zinc-400">{JSON.stringify(entry.request, null, 2)}{entry.diagnosticCodes.length ? `\n${entry.diagnosticCodes.join(", ")}` : ""}</pre>
+          </div>
+        ))}
       </div>
-      <div className="border-t border-zinc-800 bg-zinc-900 flex items-center gap-2 px-2 py-1.5">
-        <span className="text-zinc-500">$</span>
-        <input value={local} onChange={(e) => setLocal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && local.trim()) { useSimulationStore.getState().appendSerial(`[note] ${local}\n`); setLocal(""); } }} placeholder="Add a note to the local log" aria-label="Add a note to the local serial log" className="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-400 focus:outline-none" />
-      </div>
+      <div className="border-t border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[11px] leading-snug text-zinc-400">Source code execution: none · accepted and rejected typed actions are replayable.</div>
     </div>
   );
 }
 
-function DebugTab({ pinStates, engineStatus, project, compile, codeIssues, serialOutput, lastRun }: any) {
+function PreviewTimeline({
+  status,
+  preparationStatus,
+  snapshot,
+  diagnostics,
+  durationMs,
+  onPause,
+  onPlay,
+  onReset,
+  onSeek,
+}: {
+  status: string;
+  preparationStatus: "ready" | "partial" | null;
+  snapshot: PreviewSnapshot | null;
+  diagnostics: readonly PreviewDiagnostic[];
+  durationMs: number;
+  onPause: () => void;
+  onPlay: () => void;
+  onReset: () => void;
+  onSeek: (timeMs: number) => void;
+}) {
+  const maxTime = Math.max(durationMs, ...(snapshot?.events ?? []).map((event) => event.logicalTimeMs ?? 0), snapshot?.logicalTimeMs ?? 0);
+  const currentTime = Math.min(maxTime, Math.max(0, snapshot?.logicalTimeMs ?? 0));
+  const isPlaying = isPreviewRunning(status);
   return (
-    <div className="p-2 space-y-2 text-xs">
-      <div className="grid grid-cols-2 gap-2">
-        <div className="border border-border rounded p-2">
-          <div className="font-medium mb-1">Engines</div>
-          {Object.entries(engineStatus).map(([k, v]: any) => (
-            <div key={k} className="flex justify-between py-1 border-b border-border last:border-0 text-xs">
-              <span className="font-mono">{k}</span>
-              <span className={`text-[11px] px-1 rounded border ${v.enabled ? "bg-emerald-500 text-white border-emerald-600" : "bg-muted border-border"}`}>{v.status}</span>
-            </div>
-          ))}
-        </div>
-        <div className="border border-border rounded p-2">
-          <div className="font-medium mb-1">Pin States <span className="text-muted-foreground font-normal">({Object.keys(pinStates).length})</span></div>
-          {Object.keys(pinStates).length === 0 ? <div className="text-muted-foreground py-4 text-center border border-dashed border-border rounded text-xs">No activity</div> : (
-            <div className="space-y-1 max-h-32 overflow-auto">
-              {Object.entries(pinStates).map(([k, v]: any) => (
-                <div key={k} className="flex justify-between font-mono text-xs px-1.5 py-1 rounded bg-muted border border-border"><span className="truncate">{k}</span><span>{String(v)}</span></div>
-              ))}
-            </div>
-          )}
-        </div>
+    <div className="h-full overflow-auto p-2 space-y-2 text-xs">
+      <div className="preview-timeline-header flex items-start justify-between gap-3 rounded border border-amber-300/50 bg-amber-50/70 p-2 dark:border-amber-800/60 dark:bg-amber-950/20">
+        <div><div className="flex items-center gap-1.5 font-medium"><Activity size={12} /> Behavior Preview <span className="preview-status-dot" aria-hidden="true" /></div><p className="mt-1 text-[11px] leading-snug text-muted-foreground">Scripted outcome · no code ran · wiring and hardware not verified.</p></div>
+        <span className="shrink-0 rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[10px] uppercase">{status}</span>
       </div>
-      <div className="border border-border rounded p-2">
-        <div className="font-medium mb-1">Project</div>
-        <pre className="text-[11px] bg-muted p-2 rounded border border-border overflow-auto">{JSON.stringify({ id: project.id, components: project.components.length, connections: project.connections.length }, null, 2)}</pre>
+      {preparationStatus === "partial" && <div className="rounded border border-amber-400/60 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200"><strong>Partial plan:</strong> unsupported rules or actions were skipped. Review the preparation diagnostics below before treating this preview as the intended complete outcome.</div>}
+      <div className="flex flex-wrap items-center gap-1.5 rounded border border-border bg-muted/20 p-2">
+        <button type="button" onClick={isPlaying ? onPause : onPlay} className="secondary-button !h-7 !px-2" aria-label={isPlaying ? "Pause preview" : "Play preview"}>{isPlaying ? <Pause size={11} /> : <Play size={11} />}{isPlaying ? "Pause" : "Play"}</button>
+        <button type="button" onClick={onReset} className="secondary-button !h-7 !px-2" aria-label="Reset preview"><RotateCcw size={11} /> Reset</button>
+        <span className="ml-auto font-mono text-[10px] text-muted-foreground"><Clock3 size={10} className="mr-1 inline" />{currentTime} / {maxTime} ms</span>
+        <label className="sr-only" htmlFor="preview-time-seek">Preview time</label>
+        <input id="preview-time-seek" type="range" min={0} max={maxTime} step={1} value={currentTime} onChange={(event) => onSeek(Number(event.target.value))} className="w-full accent-[hsl(var(--accent))]" />
       </div>
-      <div className="border border-border rounded p-2">
-        <div className="font-medium mb-1">Firmware runtime</div>
-        <div className="flex items-center justify-between text-xs"><span className="text-muted-foreground">Compile</span><span className="font-mono">{compile.status}</span></div>
-        {compile.boardFqbn && <div className="mt-1 font-mono text-[10px] text-muted-foreground">{compile.boardFqbn}</div>}
-        <div className="mt-1 text-xs text-muted-foreground">{codeIssues.length} source diagnostic(s) · serial {serialOutput.length} chars</div>
-        {lastRun && <div className="mt-2 rounded border border-border bg-muted/20 p-2 text-[11px]"><div className="flex justify-between"><span className="text-muted-foreground">Last run</span><span className="font-mono">{lastRun.connectionCheck?.status === "completed" && lastRun.codeExecution?.status === "unavailable" ? "checks-complete · execution-unavailable" : lastRun.status}</span></div>{lastRun.connectionCheck?.status === "completed" && lastRun.codeExecution?.status === "unavailable" && <div className="mt-1 text-muted-foreground">Runtime status: {lastRun.status}</div>}<div className="mt-1 text-muted-foreground">{lastRun.programs.length} firmware target(s) · {lastRun.events.length} signal event(s) · {lastRun.resolvedNets} net(s)</div>{lastRun.connectionCheck && <div className="mt-1 text-emerald-700 dark:text-emerald-300">Connection checks complete · {lastRun.connectionCheck.connectionsChecked} wire(s) checked</div>}{lastRun.codeExecution?.status === "unavailable" && <div role="status" className="mt-1 text-amber-700 dark:text-amber-300">Browser code execution is unavailable. Edit/export the source and test it on the actual hardware.</div>}<div className="mt-1 leading-snug text-muted-foreground">{lastRun.note}</div></div>}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Session</div><div className="space-y-1 text-[11px] text-muted-foreground"><div className="flex justify-between"><span>Time</span><span className="font-mono text-foreground">{currentTime} ms</span></div><div className="flex justify-between"><span>Actions</span><span className="font-mono text-foreground">{snapshot?.sessionLog.length ?? 0}</span></div><div className="flex justify-between"><span>Sequence</span><span className="font-mono text-foreground">{snapshot?.sequence ?? 0}</span></div><div className="flex justify-between"><span>Source</span><span className="font-mono text-foreground">none</span></div></div></div>
+        <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Hashes</div><div className="space-y-1 break-all font-mono text-[10px] text-muted-foreground"><div>snapshot · {snapshot?.snapshotSha256 ?? "—"}</div><div>session · {snapshot?.sessionLogSha256 ?? "—"}</div></div></div>
       </div>
+      <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Claims</div><div className="grid gap-x-3 gap-y-1 text-[11px] text-muted-foreground sm:grid-cols-2"><Claim label="Source code read" value={snapshot?.claims?.sourceCodeRead} /><Claim label="Source code executed" value={snapshot?.claims?.sourceCodeExecuted} /><Claim label="Source code compiled" value={snapshot?.claims?.sourceCodeCompiled} /><Claim label="Hardware uploaded" value={snapshot?.claims?.hardwareUploaded} /><Claim label="Wiring verified" value={snapshot?.claims?.physicalWiringVerified} /><Claim label="Physical behavior verified" value={snapshot?.claims?.physicalBehaviorVerified} /></div></div>
+      <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Timeline</div>{!snapshot || snapshot.events.length === 0 ? <div className="text-[11px] text-muted-foreground">No accepted or rejected typed events yet.</div> : <div className="max-h-28 space-y-1 overflow-auto">{snapshot.events.slice(-40).map((event) => <div key={`${event.sequence}-${event.logicalTimeMs}`} className="flex items-start gap-2 rounded bg-muted/30 px-2 py-1 text-[11px]"><span className="shrink-0 font-mono text-muted-foreground">{event.logicalTimeMs ?? 0} ms</span><span className="min-w-0 flex-1 truncate">{event.actionId ?? event.eventId ?? event.kind ?? "event"}{event.message ? ` · ${event.message}` : ""}</span><span className={`shrink-0 font-mono ${event.outcome === "rejected" ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>{event.outcome ?? "—"}</span></div>)}</div>}</div>
+      <div className="rounded border border-border p-2"><div className="mb-1 flex items-center gap-1.5 font-medium"><AlertTriangle size={12} /> Diagnostics <span className="font-mono text-[10px] text-muted-foreground">{diagnostics.length}</span></div>{diagnostics.length === 0 ? <div className="text-[11px] text-muted-foreground">No Behavior Plan diagnostics.</div> : <div className="space-y-1">{diagnostics.slice(0, 20).map((diagnostic, index) => <div key={`${diagnostic.code}-${index}`} className={`rounded border px-2 py-1 text-[11px] ${diagnostic.severity === "error" ? "border-red-300/60 bg-red-50/70 text-red-800 dark:border-red-800 dark:bg-red-950/20 dark:text-red-200" : "border-border bg-muted/20 text-muted-foreground"}`}><span className="font-mono">{diagnostic.code}</span> · {diagnostic.message}</div>)}</div>}</div>
+      {snapshot && <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Component outcomes</div><div className="max-h-24 space-y-1 overflow-auto">{Object.entries(snapshot.components).map(([componentId, projection]) => <div key={componentId} className="flex items-start gap-2 rounded bg-muted/30 px-2 py-1 text-[11px]"><span className="font-mono text-muted-foreground">{componentId}</span><span>{projection.accessibleSummary}</span></div>)}</div></div>}
     </div>
   );
+}
+
+function Claim({ label, value }: { label: string; value: boolean | undefined }) {
+  const state = value === undefined ? "—" : value ? "Yes" : "No";
+  return <div className="flex items-center justify-between gap-2"><span>{label}</span><span className={`font-mono ${value === false ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{state}</span></div>;
 }

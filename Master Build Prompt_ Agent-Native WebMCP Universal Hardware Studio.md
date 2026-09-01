@@ -1,5 +1,7 @@
 # Master Build Prompt: Agent-Native WebMCP Universal Hardware Studio
 
+> **Historical specification — superseded 2026-08-31.** [ADR-001](docs/ADR-001-BEHAVIOR-PLAN-PREVIEW.md) defines the current product: typed Behavior Plan outcome previews plus editable source for external SDK/hardware workflows. Compiler, emulator, simulation, upload, and physical-test requirements below are not current ChatGPT Site capabilities or release commitments.
+
 You are the principal engineer responsible for implementing and shipping this project. Work directly in the current repository. Your responsibility is to produce a complete, working, tested, deployable product—not a plan, architecture document, mockup, scaffold, or partial proof of concept.
 
 Do not ask me routine implementation questions. Inspect the existing repository, source code, official documentation, examples, tests, licenses, and current APIs, then make sound engineering decisions yourself. Only stop for a secret or credential that cannot be obtained from the environment. When something is difficult, debug it and continue. Do not replace working systems merely to use a preferred framework.

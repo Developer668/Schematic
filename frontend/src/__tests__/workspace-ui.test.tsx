@@ -15,7 +15,7 @@ vi.mock("../components/editor/MonacoWorkspace.tsx", () => ({ default: () => <div
 vi.mock("../components/LogoMark.tsx", () => ({ default: () => <span data-testid="logo" /> }));
 vi.mock("../utils/vllxFile.ts", () => ({ triggerDownloadVlx: vi.fn() }));
 vi.mock("../webmcp/tools.ts", () => ({
-  getRegisteredToolNames: () => ["simulation.run"],
+  getRegisteredToolNames: () => ["behavior.get_state"],
   invokeWebMCPTool: vi.fn(async () => ({ isError: false })),
 }));
 vi.mock("../auth/session.ts", () => ({
@@ -27,7 +27,7 @@ vi.mock("../auth/session.ts", () => ({
 import { BrowserRouter } from "react-router-dom";
 import StudioPage from "../pages/StudioPage.tsx";
 import RightPanel from "../components/layout/RightPanel.tsx";
-import { nextComponentPosition, useProjectStore } from "../store/useProjectStore.ts";
+import { MAX_PROJECTS_PER_WORKSPACE, nextComponentPosition, useProjectStore } from "../store/useProjectStore.ts";
 import { useSelectionStore } from "../store/useSelectionStore.ts";
 
 let root: Root | undefined;
@@ -119,15 +119,15 @@ describe("workspace UI", () => {
     expect(useProjectStore.getState().projects[0]?.id).toBe(secondId);
   });
 
-  it("shows simulation support truth on every visible catalog result", () => {
+  it("shows explicit preview support truth on every visible catalog result", () => {
     const container = studio();
     const catalogResults = container.querySelectorAll("button.component-list-item");
-    const supportLabels = container.querySelectorAll("[aria-label^='Simulation support:']");
+    const supportLabels = container.querySelectorAll("[aria-label^='Preview support:']");
 
     expect(catalogResults.length).toBeGreaterThan(0);
     expect(supportLabels).toHaveLength(catalogResults.length);
-    expect(Array.from(supportLabels).some((label) => label.getAttribute("aria-label")?.includes("Behavioral model"))).toBe(true);
-    expect(Array.from(supportLabels).some((label) => label.getAttribute("aria-label")?.includes("Validation only"))).toBe(true);
+    expect(Array.from(supportLabels).some((label) => label.getAttribute("aria-label")?.includes("Preview mapped"))).toBe(true);
+    expect(Array.from(supportLabels).some((label) => label.getAttribute("aria-label")?.includes("No scripted preview"))).toBe(true);
   });
 
   it("keeps project names unique and adds an explicit copy suffix", () => {
@@ -265,5 +265,28 @@ describe("workspace UI", () => {
     expect(copyButtons).toHaveLength(0);
     expect(container.querySelector("button[aria-label*='Copy' i]")).toBeNull();
     expect(container.querySelector("[aria-label='Copy project JSON']")).toBeNull();
+  });
+
+  it("surfaces a workspace-capacity error when creating a project from the menu", () => {
+    while (useProjectStore.getState().projects.length < MAX_PROJECTS_PER_WORKSPACE) useProjectStore.getState().createProject();
+    try {
+      const container = studio();
+      const selector = container.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']");
+      act(() => selector?.click());
+      const createButton = Array.from(container.querySelectorAll<HTMLButtonElement>("[role='menu'][aria-label='Projects'] button"))
+        .find((button) => button.textContent?.includes("New"));
+      expect(createButton).toBeTruthy();
+      act(() => createButton?.click());
+      expect(container.querySelector("[role='alert']")?.textContent).toContain("Creating a project blocked");
+      expect(useProjectStore.getState().projects).toHaveLength(MAX_PROJECTS_PER_WORKSPACE);
+    } finally {
+      act(() => {
+        let state = useProjectStore.getState();
+        for (const project of state.projects.slice(1)) state.deleteProject(project.id);
+        state = useProjectStore.getState();
+        state.switchProject(state.projects[0]?.id ?? state.activeProjectId);
+        state.clear();
+      });
+    }
   });
 });

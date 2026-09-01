@@ -1,139 +1,173 @@
 # ChatGPT Site release and operations runbook
 
-This runbook is for the production ChatGPT Site project and the canonical live
-URL:
+Status: release procedure; publication must be verified by the release agent.
 
-<https://schematic-hardware-workspace.decipherer71.chatgpt.site>
+Canonical Site URL:
+[schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
 
-The release unit is the `chatgpt-site` package plus the shared `frontend`,
-`packages/*`, `functions/api/_runtime.ts`, and checked-in C/WASM artifact. The
-Site is the primary product path; the standalone Vite/FastAPI and native-engine
-paths are reference-only.
+Sites project ID: `appgprj_6a913ce4a58881918a47ea49fa0ca505`
+
+Hosting configuration:
+[`chatgpt-site/.openai/hosting.json`](../chatgpt-site/.openai/hosting.json)
+
+The release unit is the `chatgpt-site` wrapper plus its shared frontend,
+`packages/*` dependencies, and same-origin API route. The product path is
+Behavior Preview plus editable code. It does not compile, parse, execute,
+upload, flash, or physically test source. The standalone Vite/FastAPI app and
+legacy runtime/toolchain packages are development or historical boundaries, not
+evidence of Site capability.
 
 ## 1. Prepare a release
 
 From the repository root:
 
 ```bash
-node --version                 # must be v22.13.0 or newer for the Site
+node --version                 # v22.13.0 or newer
 pnpm --version                 # pnpm 9 or newer
 git status --short
 git rev-parse HEAD
 ```
 
-Before publishing, configure `SCHEMATIC_SESSION_SECRET` in the Site's
-server-side environment. It must be a strong random value of at least 32
-characters. Generate a value outside the repository, for example with
-`openssl rand -base64 48`, and place it only in the platform's secret
-configuration. Never commit it, paste it into a ticket, put it in a `VITE_*`
-variable, or print it in a build log. The safe template is
+Keep `SCHEMATIC_SESSION_SECRET` server-only, random, and at least 32 characters.
+Generate it outside the repository, for example:
+
+```bash
+openssl rand -base64 48
+```
+
+Set `SCHEMATIC_AUTH_MODE=chatgpt-sites` and retain platform identity
+verification. Never commit the secret, put it in `VITE_*`, print it in logs,
+or use local development auth in a hosted Site. See
 [`chatgpt-site/.env.example`](../chatgpt-site/.env.example).
 
-Keep `SCHEMATIC_AUTH_MODE=chatgpt-sites` and platform identity verification
-enabled. Local development mode is for a local process only and is not an
-acceptable production fallback.
+## 2. Install, check, and build
 
-## 2. Install, build, and check
-
-Use the lockfiles and verify the checked-in browser artifact before every
-publish:
+Use the lockfiles and inspect the exact source revision before publishing:
 
 ```bash
 pnpm run install:clean
-pnpm run verify
 git diff --check
+pnpm --filter @schematic/frontend typecheck
+pnpm --filter @schematic/frontend test -- --run
+pnpm run verify:behavior-preview
+npm --prefix chatgpt-site run verify
 ```
 
-The Site build verifies the release WASM and metadata; it does not rebuild the
-portable C module. If the portable C source or harness header changes, rebuild
-deliberately with:
+The static behavior release gate is safe to run in CI: it checks the
+`@schematic/behavior` dependency boundary, active Site import closure, exact
+catalog bindings, 45-tool registration, active client/server import boundaries,
+forbidden endpoint references, truthful preview claims, and initial bundle
+boundaries. It does not make live HTTP requests or load/run user source; live
+retired-route 404 checks are separate.
+
+Build the Site explicitly when publishing:
 
 ```bash
-pnpm --filter @schematic/firmware-harness build:wasm:required
-pnpm --filter @schematic/firmware-harness verify:wasm
+npm --prefix chatgpt-site run build
 ```
 
-Review the resulting artifact metadata and hash as release inputs. Do not
-publish a build that has silently replaced the artifact, omitted its metadata,
-or reports an arbitrary firmware compile as successful.
+The build creates the Site artifact and runs the checked-in asset verification.
+Do not infer publication from a local build. Record the commit and build
+metadata that the release agent actually submits.
 
-## 3. Publish
+## 3. Publish the canonical project
 
-1. Confirm the full gate above is green and record the source revision with the
-   Site release notes.
-2. Push that exact revision to the Site project's source repository, package
-   the Site build, and save a new version in project
-   `appgprj_6a913ce4a58881918a47ea49fa0ca505`.
-3. Deploy the saved version without changing the canonical URL. Record the
-   source commit and Site version; never record source credentials, secrets, or
-   session tokens.
-4. Run production acceptance in the ChatGPT in-app browser, not only against a
-   local server or compatibility shim. Open public access only after the same
-   version passes the private acceptance run.
+1. Confirm the source revision, focused checks, Site verification, and
+   `git diff --check` are green.
+2. Push the reviewed commit to the repository according to the repository
+   owner's normal GitHub process.
+3. In the Sites publishing flow, select project
+   `appgprj_6a913ce4a58881918a47ea49fa0ca505` and publish the intended Site
+   build. Keep the canonical URL unchanged.
+4. Record the deployed revision/version without recording secrets or bearer
+   tokens.
+5. Perform the acceptance checklist below in the ChatGPT in-app browser. A
+   local polyfill, local preview, or build artifact is not proof of native host
+   behavior.
 
-If the Site editor cannot publish the intended revision, stop at the build
-gate and investigate the editor/project state. Do not switch the hosted Site
-to local development auth or a different API origin to bypass a failed check.
+This repository documentation intentionally does not assert that the latest
+commit is live. Publication status, deployed version, and native WebMCP
+discovery must be verified by the release agent after publishing.
 
 ## 4. Roll back safely
 
-Use the last known-good Site version when the owner console exposes version
-selection:
+If a previously accepted Site version is available in the owner console:
 
-1. Stop publishing new revisions and identify the last accepted source/build
-   revision.
-2. Restore that Site version through the Sites version controls.
-3. Re-run the live health, auth, WebMCP, persistence, and button→LED checks.
-4. Record what was rolled back and why, without recording secrets or session
-   tokens.
+1. Stop publishing new revisions and identify the last accepted commit/version.
+2. Restore that Site version through the Sites controls.
+3. Repeat live health, auth, WebMCP, persistence, Behavior Preview, and code
+   handoff checks.
+4. Record the rollback reason and restored revision, never credentials or
+   session tokens.
 
-If a prior Site version cannot be restored directly, check out the last
-known-good source revision in a separate working directory, rerun the entire
-release gate, and publish it as a new revision. Never roll back by deleting
-`SCHEMATIC_SESSION_SECRET`, disabling identity verification, or pointing the
-Site at an unreviewed API origin.
+If version restore is unavailable, prepare the last known-good source in a
+separate worktree, run the complete release gate, and publish it as a new
+version. Do not disable identity verification, delete the session secret, or
+point the Site at an unreviewed origin.
 
 ## 5. Production acceptance
 
-Perform this checklist after each publish. A failed or host-dependent check is
-an acceptance failure until it is recorded and resolved.
+Run every check against the published URL in the ChatGPT in-app browser.
 
-| Check                                            | Expected result                                                                                                                                                                     |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unauthenticated `/studio`, `/parts`, `/settings` | Redirects to ChatGPT sign-in.                                                                                                                                                       |
-| Authenticated `/api/auth/session`                | Returns `authenticated: true`, a short-lived session, and the ChatGPT Site environment. Never expose the token in logs.                                                             |
-| `GET /api/health`                                | HTTP 200 with `api_boundary: "same-origin"`.                                                                                                                                        |
-| `GET /api/docs`                                  | HTTP 200 JSON describing the Site API routes and limitations.                                                                                                                       |
-| Native WebMCP discovery                          | In the ChatGPT in-app browser, the native surface lists exactly 42 tools. A polyfill or `window.__schematicTools` is not evidence of native discovery.                              |
-| Graph mutation                                   | Native tools search/add a board, button, and LED, inspect ports, connect typed endpoints, and return structured results.                                                            |
-| Exact fixed C/WASM contract                      | A recognized source/graph pair selects the fixed precompiled implementation; the matched sketch itself is not executed by WASM. Pressed and released `simulation.run` results report `executionEngine: "c-wasm"`, contract `button-led`, ABI `2`, a 64-hex-character artifact hash, and LED `true`/`false` outputs. |
-| Unsupported source                               | A sketch outside the exact contract returns an explicit unsupported result/API list; no fake binary or silent success.                                                              |
-| Compile boundary                                 | Site `firmware.compile` returns source/target preflight or unavailable; it does not claim arbitrary binary compilation.                                                             |
-| Save/reload                                      | `project.save` followed by reload or project switch preserves the graph, connections, and firmware in the verified-user browser-local room.                                         |
-| Parts boundary                                   | First `shopping.search` returns bounded no-key candidates and/or a strict `schematic.parts.lookup.v1` handoff; `shopping.get_state` exposes pending handoff/discovery while results/cart stay empty. A second call publishes only after trusted WebMCP auth and canonical, recent, HTTPS listing validation; there is no purchase or checkout action. |
-| Engine boundary                                  | Behavioral runtime is reported only where its model contract applies; native compiler/simulator paths are unavailable or unsupported on the Site.                                   |
-| Transport boundary                               | Raw WebSocket is unavailable on the Site; browser runtime or same-origin HTTP simulation remains usable.                                                                            |
+| Check | Expected result |
+| --- | --- |
+| Unauthenticated `/studio`, `/parts`, `/settings` | Redirects to ChatGPT sign-in. |
+| Authenticated `/api/auth/session` | Returns an authenticated short-lived Schematic session; bearer tokens never appear in logs. |
+| `GET /api/health` | HTTP 200 with `api_boundary: "same-origin"`. |
+| `GET /api/docs` | HTTP 200 JSON listing health, catalog, import, parts, and identity limits. |
+| Native WebMCP discovery | The ChatGPT host exposes exactly 45 registered tools. Local shims are not evidence of native discovery. |
+| Tool inventory | Five `behavior.*` tools and three `code.*` tools are present; `firmware.write/read` are compatibility aliases; `firmware.compile` and all `simulation.*` names are absent. |
+| Graph workflow | Search/add a board, button, and LED; inspect ports; connect valid endpoints; return structured errors for invalid wiring. |
+| Behavior workflow | Discover capabilities, write a button→LED Behavior Plan, preview it, invoke `button.pressed`, and observe the LED visual projection. |
+| Preview truth | Result says scripted/typed preview; `sourceCodeExecuted`, `sourceCodeCompiled`, `hardwareUploaded`, and physical-verification claims remain false. |
+| Code workflow | Write ordinary editable source, read it back, edit it in Monaco, and export the handoff manifest. No source is parsed or run. |
+| Conflict/staleness | A wrong expected content hash preserves existing code; manual code edits or plan/graph changes make an old link stale. |
+| Save/reload | Plans and code documents survive reload in the same verified-user browser room; the preview session and snapshot are recreated, not persisted. |
+| Project isolation | Switching projects cannot leak plans, code documents, or preview snapshots between projects. |
+| Retired API paths | `/api/compile`, `/api/simulation/state`, `/api/simulation/step`, and `/api/simulation/ws` return 404. |
+| Capability probes | `/capabilities` reports browser-local probe results; it does not imply source build or hardware support. |
+| Parts boundary | Public discovery remains untrusted; only a trusted, current, canonical listing publication can enter shopping state. No purchase or checkout action exists. |
 
-## 6. Incident triage
+## 6. Evidence to record
 
-- **Session is unauthenticated:** check the Site identity headers and the
-  server-side secret configuration. Do not accept caller-provided user IDs.
-- **Every tool is rejected:** verify the Site is authenticated and that the
-  in-app browser exposes native `modelContext`; distinguish host absence from
-  an application registration error.
-- **WASM run is unavailable:** inspect the returned artifact/hash error and run
-  `verify:wasm`. Do not silently switch the claim to arbitrary C/C++ execution.
-- **Run returns interpreter/unsupported:** inspect the source grammar and
-  catalog model contract. This is expected for code outside the narrow
-  button→LED contract or for unmodeled devices.
-- **Project appears missing:** confirm the same verified user and browser
-  storage context. Browser-local persistence is not a cross-device backup.
-- **Parts appear without agent provenance:** treat as a release blocker; the
-  UI must not synthesize listings or retailer links. Public discovery candidates
-  are never verified listings, and publication failures should surface their
-  structured code (`AUTH_REQUIRED`, `STALE_PUBLICATION`,
-  `NON_HTTPS_OFFER`, or `NON_CANONICAL_CATALOG_ID`).
+For each accepted publication, keep a release note containing:
 
-See [CHATGPT_SITE_PROGRESS.md](CHATGPT_SITE_PROGRESS.md) for the concise current
-checklist, [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the timed judge flow, and
-[ARCHITECTURE.md](../ARCHITECTURE.md) for the production/reference boundary.
+- Git commit, Site project ID, deployed Site version, and verification timestamp;
+- native WebMCP discovery count and host context;
+- `planSha256`, `projectSha256`, `registrySha256`, `sessionLogSha256`, and
+  `snapshotSha256` from the Behavior Preview fixture where available;
+- code document `contentSha256`, per-file hashes, and exported manifest hash;
+- the exact preview claims showing no source execution/build/upload/physical
+  verification; and
+- the result of the retired-route 404 checks.
+
+Hashes identify the data and provenance of a run. They are not correctness
+proofs and do not mean that source compiles or hardware works.
+
+## 7. Incident triage
+
+- **Unauthenticated session:** inspect Site identity headers and server-only
+  secret configuration. Never accept a caller-supplied user ID.
+- **Native tools unavailable:** distinguish host absence from registration
+  failure. A compatibility bridge can help local tests but cannot satisfy native
+  acceptance.
+- **Plan blocked:** inspect exact component IDs, profile versions, event/action
+  IDs, payload diagnostics, and current graph hash. Unsupported actions must
+  remain explicit; do not guess a profile.
+- **Preview appears stale:** compare plan/project/registry hashes and recreate
+  the session after a graph, plan, or project change. Code-only edits should not
+  alter the preview snapshot.
+- **Code write conflict:** re-read the document and retry with the current
+  `contentSha256`; never force an overwrite without an explicit user decision.
+- **Project appears missing:** confirm the same verified identity and browser
+  storage context. Local persistence is not a cloud backup.
+- **Retired endpoint responds:** treat it as a release blocker. The Site route
+  must return 404 for compile and legacy runtime paths.
+- **Shopping data appears verified without provenance:** treat it as a release
+  blocker. Discovery candidates are never cart listings.
+
+See [ARCHITECTURE.md](../ARCHITECTURE.md),
+[TYPESCRIPT_WEB_SIMULATION_HANDOFF.md](TYPESCRIPT_WEB_SIMULATION_HANDOFF.md),
+[DEMO_SCRIPT.md](DEMO_SCRIPT.md), and
+[CHATGPT_SITE_PROGRESS.md](CHATGPT_SITE_PROGRESS.md) for the architecture,
+agent handoff, timed flow, and current release checklist.

@@ -1,52 +1,92 @@
-# ChatGPT Site browser capability spike
+# ChatGPT Site browser capability probes
 
-The Site now includes a non-product acceptance route at `/capabilities`. It exercises only browser-local primitives required by the browser-first release direction:
+Status: non-product browser acceptance route (repository checked 2026-08-31)
+
+Canonical Site:
+[schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
+
+Sites project ID: `appgprj_6a913ce4a58881918a47ea49fa0ca505`.
+Whether the current revision is published must be checked by the release agent;
+this file documents the probe route, not deployment success.
+
+The route `/capabilities` exercises browser primitives that the Site may use for
+local storage and static assets. It is an acceptance aid, not a hardware
+runtime and not an assertion that source code can be built or run in-browser.
+
+## What the route probes
+
+[`app/capabilities/CapabilityHarness.tsx`](app/capabilities/CapabilityHarness.tsx)
+checks:
 
 - a same-origin classic Web Worker;
-- a 37-byte WebAssembly module that returns `42`;
-- the existing `components-metadata.json` catalog as a larger static asset (currently over 64 KiB);
-- IndexedDB write/read in the `capability-spike` room and `local-browser` user namespace;
-- Cache Storage write/read for the worker fixture;
+- the static `components-metadata.json` catalog asset;
+- IndexedDB write/read in the isolated `capability-spike` room and
+  `local-browser` namespace;
+- Cache Storage write/read for the worker fixture; and
 - a Blob URL round-trip with a download filename.
 
-No compiler, simulator, backend, API credential, or large WASM toolchain asset is included in this spike. The existing same-origin API routes are unchanged and remain optional compatibility routes for the core browser path.
+The route does not compile, parse, execute, upload, flash, or physically test
+the editable source in Schematic. It does not drive the Behavior Plan preview.
+The probe database is separate from project storage and must not overwrite user
+projects.
 
-## Probe semantics
-
-Each row reports one of these states:
+## Probe result semantics
 
 - **pass** — the browser API ran and the expected invariant was observed;
 - **fail** — the API was present but the invariant or fixture request failed;
-- **blocked** — the API is unavailable in the current context, usually because the runtime lacks the API or requires a secure context;
-- **pending** — the probe needs a second page load, as with IndexedDB persistence before and after reload.
+- **blocked** — the API is unavailable or requires a secure context; and
+- **pending** — the probe needs a second page load, as with persistence after a
+  reload.
 
-IndexedDB is only a persistence pass after clicking “Run browser probes” and then reloading the page. The harness uses a separate database (`schematic-sites-capability-spike-v1`) so it cannot overwrite Schematic projects.
+IndexedDB is a persistence pass only after clicking “Run browser probes” and
+then reloading the page. A local pass does not prove that a published Site has
+the same browser policy or host permissions.
 
-## Local verification
+## Local checks
 
-Verified locally without deployment:
+From the repository root:
 
-- the static worker fixture is present and contains no network, WebSocket, or dynamic-code execution;
-- the small WASM fixture validates in Node and is below 1 KiB;
-- the capability page contains all six browser probes and no compile/simulation API call;
-- `npm run build` runs `scripts/verify-build-assets.mjs`, which checks the built worker, WASM, metadata JSON, and preview PNG, removes Vinext's generated client `_headers`, and verifies none remain in the Site archive;
-- the project-storage package has unit coverage for repository and migration behavior;
-- the Site TypeScript/build checks can compile the new route and package alias once the existing Site build prerequisites are available.
+```bash
+npm --prefix chatgpt-site run lint
+npm --prefix chatgpt-site run typecheck
+npm --prefix chatgpt-site run test
+npm --prefix chatgpt-site run build
+```
 
-Known local-preview blocker: with Vinext `1.0.0-beta.3`, `vinext start` currently routes these public asset requests through the catch-all HTML page instead of serving `dist/client` files. Treat the deterministic build-artifact check as authoritative until the preview static-file routing is fixed; this does not affect the checked-in asset outputs.
+The Site test fixture confirms the capability page has all five probes and does
+not call `/api/compile` or `/api/simulation`. The build verification checks the
+worker, metadata JSON, and preview PNG, removes the generated `_headers`
+artifact and verifies none remain, and rejects
+WebAssembly compilation/instantiation in the capability harness. These
+checks do not load user source or establish native WebMCP discovery.
 
-Not verifiable in the current non-browser local process:
+## Live acceptance
 
-- actual `Worker` creation;
-- IndexedDB persistence across a real page reload;
-- Cache Storage availability and secure-context behavior;
-- browser Blob download behavior;
-- ChatGPT Sites’ published runtime policy for large static assets;
-- Web Serial/WebUSB permissions;
-- real browser memory limits for future compiler bundles.
+The release agent must open the published URL in the ChatGPT in-app browser and
+record:
 
-The first five items must be run at `/capabilities` in the published Site before treating the Site capability track as accepted. Record the result with the deployed Site version; a local build alone is not production acceptance.
+- the deployed commit/version and timestamp;
+- each probe result and any secure-context/permission limitation;
+- whether IndexedDB survives the required reload; and
+- that the route is isolated from the main project repository.
 
-## Release assumptions
+The release agent must separately test the product's 45 native WebMCP tools,
+Behavior Plan preview, editable Code handoff, local project persistence, and
+retired-route 404 behavior. A capability probe pass cannot be substituted for
+those checks.
 
-The core Site remains browser-first and does not require `/api/compile`, `/api/simulation`, Python, native subprocesses, a database, or a queue. IndexedDB is device-local storage; it is not cross-device synchronization or a cloud backup. Compiler and simulator workers must be added later behind the same browser capability gates and must remain lazy-loaded static assets.
+## Product boundary and future work
+
+The core Site uses typed Behavior Plans and checked-in visual profiles for
+preview. Editable code is a durable, hash-addressed artifact for later external
+SDK, IDE, compiler, or hardware use. No in-app compiler, MCU emulator, source
+interpreter, uploader, or physical test is part of this release.
+
+Legacy runtime/toolchain files may remain dormant in the repository, but the
+active Site import closure must not pull them. Do not add a dynamic source
+loader, remote execution route, or hidden SDK call to this probe page.
+
+See [`../docs/CHATGPT_SITE_RUNBOOK.md`](../docs/CHATGPT_SITE_RUNBOOK.md),
+[`../docs/CHATGPT_SITE_PROGRESS.md`](../docs/CHATGPT_SITE_PROGRESS.md), and
+[`../docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md`](../docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md)
+for release gates, implementation details, and handoff contracts.

@@ -15,10 +15,19 @@ export interface AuthSession {
 
 const SESSION_EVENT = "schematic-session";
 let cachedSession: AuthSession | null | undefined;
-let sessionRequest: Promise<AuthSession | null> | null = null;
+type SessionRequest = {
+  id: number;
+  epoch: number;
+  promise: Promise<AuthSession | null>;
+};
+
+let sessionRequest: SessionRequest | null = null;
 let authReadyPromise: Promise<AuthSession | null> | null = null;
 let cachedSessionExpiresAt = 0;
 const SESSION_REFRESH_SKEW_MS = 30_000;
+let requestSequence = 0;
+let latestRequestId = 0;
+let sessionEpoch = 0;
 
 function isLocalHost() {
   return typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
@@ -90,35 +99,104 @@ function announceSession() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(SESSION_EVENT));
 }
 
-export async function getAuthSession(force = false, signal?: AbortSignal): Promise<AuthSession | null> {
-  if (signal?.aborted) throw new DOMException("The auth session request was aborted", "AbortError");
-  const sessionFresh = !cachedSession?.token || !cachedSessionExpiresAt || cachedSessionExpiresAt - Date.now() > SESSION_REFRESH_SKEW_MS;
-  if (!force && cachedSession !== undefined && sessionFresh) return cachedSession;
-  if (!force && sessionRequest) return sessionRequest;
+function authAbortError() {
+  return new DOMException("The auth session request was aborted", "AbortError");
+}
 
-  sessionRequest = (async () => {
+/**
+ * A caller may stop waiting for auth, but it must not stop the shared refresh.
+ * In particular, passing a caller's signal to fetch would let one cancelled
+ * WebMCP/UI request poison every other consumer of the cached session.
+ */
+function raceWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(authAbortError());
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(authAbortError());
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
+function startSessionRequest(): SessionRequest {
+  const requestId = ++requestSequence;
+  const epoch = sessionEpoch;
+  latestRequestId = requestId;
+
+  const promise = (async () => {
+    let resolvedSession: AuthSession | null;
+    let resolvedExpiresAt = 0;
     try {
-      const response = await fetch(authUrl("/api/auth/session"), { credentials: "include", headers: { Accept: "application/json" }, signal });
+      // Deliberately do not pass a caller AbortSignal here. This request is
+      // shared by all consumers and must finish so it can safely update the
+      // cache even when its first waiter has gone away.
+      const response = await fetch(authUrl("/api/auth/session"), { credentials: "include", headers: { Accept: "application/json" } });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(`Session endpoint returned HTTP ${response.status}`);
       const session = normalizeSession(payload);
-      cachedSession = session ?? localDevelopmentSession();
-      cachedSessionExpiresAt = session?.token && session.expiresIn ? Date.now() + session.expiresIn * 1000 : 0;
+      resolvedSession = session ?? localDevelopmentSession();
+      resolvedExpiresAt = session?.token && session.expiresIn ? Date.now() + session.expiresIn * 1000 : 0;
     } catch {
       // The local session is a development-only convenience. Production never
       // turns a failed auth request into an authenticated browser identity.
-      cachedSession = localDevelopmentSession();
-      cachedSessionExpiresAt = 0;
+      resolvedSession = localDevelopmentSession();
+      resolvedExpiresAt = 0;
     }
-    announceSession();
+
+    // A force refresh can overtake an older request. Only the newest response
+    // in the current auth epoch may mutate the shared cache or notify hooks.
+    // An epoch change (signOut) also makes an in-flight response unusable.
+    if (requestId === latestRequestId && epoch === sessionEpoch) {
+      cachedSession = resolvedSession;
+      cachedSessionExpiresAt = resolvedExpiresAt;
+      announceSession();
+      return cachedSession ?? null;
+    }
+
+    if (epoch !== sessionEpoch) return cachedSession ?? null;
+    // A caller waiting on an overtaken request must observe the winning
+    // refresh, never an identity that was deliberately refused cache access.
+    const newerRequest = sessionRequest;
+    if (newerRequest && newerRequest.id > requestId) return newerRequest.promise;
     return cachedSession ?? null;
   })();
 
-  try {
-    return await sessionRequest;
-  } finally {
-    sessionRequest = null;
-  }
+  const request: SessionRequest = { id: requestId, epoch, promise };
+  sessionRequest = request;
+  // Keep cleanup tied to this request, not whichever newer force refresh is
+  // currently in the shared slot. The rejection handler also prevents an
+  // unhandled cleanup promise if a future implementation lets this reject.
+  void promise.then(
+    () => {
+      if (sessionRequest?.id === requestId) sessionRequest = null;
+    },
+    () => {
+      if (sessionRequest?.id === requestId) sessionRequest = null;
+    },
+  );
+  return request;
+}
+
+export async function getAuthSession(force = false, signal?: AbortSignal): Promise<AuthSession | null> {
+  if (signal?.aborted) throw authAbortError();
+  const sessionFresh = !cachedSession?.token || !cachedSessionExpiresAt || cachedSessionExpiresAt - Date.now() > SESSION_REFRESH_SKEW_MS;
+  if (!force && cachedSession !== undefined && sessionFresh) return cachedSession;
+  const request = !force && sessionRequest ? sessionRequest : startSessionRequest();
+  return raceWithAbort(request.promise, signal);
 }
 
 export function initAuth() {
@@ -189,6 +267,11 @@ export function authLogoutUrl(returnTo = "/") {
 }
 
 export function signOut() {
+  // Invalidate any shared request that is still in flight. Its eventual
+  // response may finish for its original caller, but cannot restore auth into
+  // the cache after the user has explicitly signed out.
+  sessionEpoch += 1;
+  latestRequestId = ++requestSequence;
   cachedSession = null;
   sessionRequest = null;
   authReadyPromise = null;

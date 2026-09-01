@@ -1,5 +1,6 @@
-import { jsonResponse, optionsResponse, requireApiIdentity } from "../_runtime";
+import { jsonResponse, optionsResponse, requireApiIdentity } from "../_catalog-runtime";
 import { publicSourcesEnabled, searchPublicParts, type PublicPartCandidate, type PublicSourceAttempt } from "./public";
+import { readBoundedResponseText } from "./bounded-response";
 
 type ProviderConfig = {
   id: string;
@@ -80,6 +81,7 @@ const DEFAULT_PUBLIC_SOURCE_ORDER = ["jlcsearch", "adafruit", "web-search"];
 const DEFAULT_PROVIDER_ORDER = ["mouser", "digikey", "element14", "adafruit"];
 const MAX_QUERY_LENGTH = 240;
 const MAX_RESULTS = 24;
+const MAX_PROVIDER_RESPONSE_BYTES = 512 * 1024;
 const providerCache = new Map<string, { expiresAt: number; body: PartsSearchBody; status: number }>();
 
 function envString(env: PartsEnv, key: string) {
@@ -270,7 +272,7 @@ async function callProvider(provider: ProviderConfig, query: string, quantity: n
       init.body = JSON.stringify({ query, quantity, limit: MAX_RESULTS });
     }
     const response = await fetch(endpoint, init);
-    const bodyText = await response.text();
+    const bodyText = await readBoundedResponseText(response, MAX_PROVIDER_RESPONSE_BYTES);
     if (!response.ok) return { status: "error" as const, candidates: [] as ProviderCandidate[], message: `HTTP ${response.status}${bodyText ? `: ${bodyText.slice(0, 160)}` : ""}` };
     let body: unknown;
     try { body = JSON.parse(bodyText); } catch { return { status: "error" as const, candidates: [] as ProviderCandidate[], message: "Provider returned non-JSON data" }; }

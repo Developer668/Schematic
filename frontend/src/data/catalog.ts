@@ -1,6 +1,5 @@
 import type { HardwarePort } from "@schematic/hardware-graph";
 import metadata from "../../public/components-metadata.json";
-import { inferModelContract, type ComponentModelContract } from "../simulation/modelContract.ts";
 
 export type CatalogCategory =
   | "board"
@@ -25,6 +24,13 @@ export interface CatalogProperty {
   description?: string;
 }
 
+/** Exact, checked-in Behavior Preview binding for one catalog definition. */
+export interface CatalogBehaviorBinding {
+  profileId: string;
+  profileVersion: number;
+  variant?: string;
+}
+
 export interface CatalogComponent {
   id: string;
   title: string;
@@ -34,12 +40,13 @@ export interface CatalogComponent {
   description?: string;
   ports: HardwarePort[];
   models: Record<string, { engine: string; file: string; fidelity: string; verified: boolean }>;
-  model: ComponentModelContract;
   thumbnail?: string;
   tags?: string[];
   tagName?: string;
   properties?: CatalogProperty[];
   defaultValues?: Record<string, unknown>;
+  /** Optional by design: absent means the shared registry resolves catalog-only. */
+  behavior?: CatalogBehaviorBinding;
 }
 
 type RawComponent = {
@@ -53,6 +60,20 @@ type RawComponent = {
   tagName?: string;
   properties?: CatalogProperty[];
   defaultValues?: Record<string, unknown>;
+};
+
+// Behavior support is opt-in and exact. Do not widen this map from category,
+// tags, title, or fuzzy text: those heuristics are suitable for catalog
+// discovery, never for granting a component executable preview behavior.
+const EXPLICIT_BEHAVIOR_BINDINGS: Readonly<Record<string, CatalogBehaviorBinding>> = {
+  pushbutton: { profileId: "momentary-input", profileVersion: 1 },
+  led: { profileId: "digital-indicator", profileVersion: 1 },
+  lcd1602: { profileId: "text-display", profileVersion: 1 },
+  buzzer: { profileId: "buzzer", profileVersion: 1 },
+  relay: { profileId: "relay", profileVersion: 1 },
+  servo: { profileId: "rotary-actuator", profileVersion: 1 },
+  "stepper-motor": { profileId: "motor", profileVersion: 1, variant: "stepper" },
+  "ntc-temperature-sensor": { profileId: "numeric-sensor", profileVersion: 1, variant: "temperature" },
 };
 
 function port(id: string, domain: HardwarePort["domain"], direction: HardwarePort["direction"] = "bidirectional"): HardwarePort {
@@ -706,9 +727,8 @@ function defaultPorts(item: RawComponent): HardwarePort[] {
   if (/(button|switch|motion|pir|trigger|sensor|receiver)/.test(text)) return [...POWER, port("OUT", "gpio", "output")];
   if (/(led|buzzer|relay|motor|solenoid|speaker|neopixel)/.test(text)) return [...POWER, port("IN", "gpio", "input")];
   const n = Math.max(item.pinCount && item.pinCount > 0 ? item.pinCount : 2, 2);
-  // Unknown parts remain placeable with an explicitly generic pin map.  Their
-  // model contract is validation-only, so these pins cannot be mistaken for a
-  // device-specific simulation model.
+  // Unknown parts remain placeable with an explicitly generic pin map. These
+  // inferred ports grant no Behavior Preview capability by themselves.
   return Array.from({ length: Math.min(n, 12) }, (_, i) => port(`P${i + 1}`, "gpio"));
 }
 
@@ -725,19 +745,19 @@ function fromRaw(item: RawComponent): CatalogComponent {
     description: item.description,
     ports,
     models: {},
-    model: inferModelContract({ id: item.id, title, category, description: item.description, tags, ports, models: {} }),
     thumbnail: item.thumbnail,
     tags,
     tagName: item.tagName,
     properties: item.properties,
     defaultValues: item.defaultValues,
+    ...(EXPLICIT_BEHAVIOR_BINDINGS[item.id] ? { behavior: EXPLICIT_BEHAVIOR_BINDINGS[item.id] } : {}),
   };
 }
 
 const loaded = (metadata.components as RawComponent[]).map(fromRaw);
 // The metadata JSON is the single catalog source consumed by both the
-// frontend build and the backend package. Port/model contracts are derived
-// deterministically from each entry; there is no second frontend-only list.
+// frontend build and the backend package. Ports are derived deterministically;
+// typed preview support is granted only by the exact behavior binding above.
 export const catalog: CatalogComponent[] = loaded;
 
 /** O(1) definition lookup for graph, editor, inspector, and WebMCP operations. */

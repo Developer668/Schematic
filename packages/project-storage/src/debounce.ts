@@ -23,33 +23,40 @@ export function createDebouncedWorkspaceSaver<TProject>(
       clearTimeout(timer);
       timer = undefined;
     }
-    if (running) return running;
-    if (!latest) return null;
+    let lastResult: StorageResult<StoredWorkspace<TProject>> | null = null;
+    // Multiple flush callers may enter concurrently. Only the caller that
+    // observes no running task claims `latest`; the others await that task and
+    // continue until the queue is genuinely drained.
+    while (running || latest) {
+      if (running) {
+        lastResult = await running;
+        continue;
+      }
 
-    const job = latest;
-    latest = undefined;
-    const currentWaiters = waiters;
-    waiters = [];
-    let task: Promise<StorageResult<StoredWorkspace<TProject>>>;
-    task = repository.saveWorkspace(job.workspace, job.options)
-      .then((result) => {
-        if (running === task) running = undefined;
-        currentWaiters.forEach((resolve) => resolve(result));
-        return result;
-      })
-      .catch((error: unknown) => {
-        const result = failure<StoredWorkspace<TProject>>(storageError(
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      const job = latest!;
+      latest = undefined;
+      const currentWaiters = waiters;
+      waiters = [];
+      const task = repository.saveWorkspace(job.workspace, job.options)
+        .catch((error: unknown) => failure<StoredWorkspace<TProject>>(storageError(
           "unknown",
           "save",
           error instanceof Error ? error.message : "The debounced save failed.",
           { retryable: true },
-        ));
-        if (running === task) running = undefined;
-        currentWaiters.forEach((resolve) => resolve(result));
-        return result;
-      });
-    running = task;
-    return running;
+        )))
+        .then((result) => {
+          currentWaiters.forEach((resolve) => resolve(result));
+          return result;
+        });
+      running = task;
+      lastResult = await task;
+      if (running === task) running = undefined;
+    }
+    return lastResult;
   };
 
   const schedule = (

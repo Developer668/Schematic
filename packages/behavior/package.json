@@ -1,0 +1,23 @@
+{
+  "name": "@schematic/behavior",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./canonicalize": "./src/canonicalize.ts"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@schematic/hardware-graph": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

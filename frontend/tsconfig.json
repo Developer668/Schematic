@@ -22,6 +22,8 @@
     "paths": {
       "@/*": ["src/*"],
       "@schematic/hardware-graph": ["../packages/hardware-graph/src"],
+      "@schematic/behavior": ["../packages/behavior/src/index.ts"],
+      "@schematic/behavior/canonicalize": ["../packages/behavior/src/canonicalize.ts"],
       "@schematic/validation": ["../packages/validation/src"],
       "@schematic/component-format": ["../packages/component-format/src"],
       "@schematic/firmware-harness": ["../packages/firmware-harness/src/index.ts"],

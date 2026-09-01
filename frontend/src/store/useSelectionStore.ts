@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getCurrentUserId } from "../auth/session.ts";
 
 interface SelectionState {
   selectedIds: string[];
@@ -10,15 +11,32 @@ interface SelectionState {
 }
 
 const selectionChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("schematic-selection-sync") : null;
+const MAX_SELECTION_IDS = 200;
+const MAX_SELECTION_ID_LENGTH = 200;
+
+function validSelectionId(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_SELECTION_ID_LENGTH;
+}
+
+function normalizeSelection(value: unknown): Pick<SelectionState, "selectedIds" | "activeComponentId"> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { selectedIds: [], activeComponentId: null };
+  const state = value as Record<string, unknown>;
+  const selectedIds = Array.isArray(state.selectedIds)
+    ? [...new Set(state.selectedIds.filter(validSelectionId))].slice(0, MAX_SELECTION_IDS)
+    : [];
+  const activeComponentId = validSelectionId(state.activeComponentId) && selectedIds.includes(state.activeComponentId) ? state.activeComponentId : null;
+  return { selectedIds, activeComponentId };
+}
 
 function publishSelection(state: Pick<SelectionState, "selectedIds" | "activeComponentId">) {
-  selectionChannel?.postMessage({ type: "selection:update", state: { selectedIds: state.selectedIds, activeComponentId: state.activeComponentId } });
+  selectionChannel?.postMessage({ type: "selection:update", roomId: getCurrentUserId(), state: normalizeSelection(state) });
 }
 
 export const useSelectionStore = create<SelectionState>((set) => ({
   selectedIds: [],
   activeComponentId: null,
   select(id) {
+    if (!validSelectionId(id)) return;
     set((state) => {
       const next = { selectedIds: [...new Set([...state.selectedIds, id])], activeComponentId: id };
       publishSelection(next);
@@ -26,6 +44,7 @@ export const useSelectionStore = create<SelectionState>((set) => ({
     });
   },
   deselect(id) {
+    if (!validSelectionId(id)) return;
     set((state) => {
       const selectedIds = state.selectedIds.filter((x) => x !== id);
       const next = { selectedIds, activeComponentId: selectedIds[0] ?? null };
@@ -34,7 +53,7 @@ export const useSelectionStore = create<SelectionState>((set) => ({
     });
   },
   setActive(id) {
-    const next = { activeComponentId: id, selectedIds: id ? [id] : [] };
+    const next = normalizeSelection({ activeComponentId: id, selectedIds: id ? [id] : [] });
     set(next);
     publishSelection(next);
   },
@@ -46,5 +65,10 @@ export const useSelectionStore = create<SelectionState>((set) => ({
 }));
 
 selectionChannel?.addEventListener("message", (event) => {
-  if (event.data?.type === "selection:update" && event.data.state) useSelectionStore.setState(event.data.state);
+  if (event.data?.type !== "selection:update" || !event.data.state || (event.data.roomId ?? null) !== getCurrentUserId()) return;
+  useSelectionStore.setState(normalizeSelection(event.data.state));
 });
+
+if (typeof window !== "undefined") {
+  window.addEventListener("schematic-session", () => useSelectionStore.setState({ selectedIds: [], activeComponentId: null }));
+}

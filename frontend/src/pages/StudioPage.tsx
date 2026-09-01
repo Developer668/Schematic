@@ -5,37 +5,36 @@ import RightPanel from "../components/layout/RightPanel.tsx";
 import BottomDock from "../components/layout/BottomDock.tsx";
 import ImportDialog from "../components/import/ImportDialog.tsx";
 import { useComponentCatalogStore } from "../store/useComponentCatalogStore.ts";
-import { useProjectStore } from "../store/useProjectStore.ts";
-import { useSimulationStore } from "../store/useSimulationStore.ts";
+import { useProjectStore, WorkspaceCapacityError } from "../store/useProjectStore.ts";
 import { useValidationStore, validateProject } from "../store/useValidationStore.ts";
-import { getRegisteredToolNames, invokeWebMCPTool } from "../webmcp/tools.ts";
+import { getRegisteredToolNames } from "../webmcp/tools.ts";
 import { triggerDownloadVlx } from "../utils/vllxFile.ts";
 import { useThemeStore } from "../store/useThemeStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
+import { isPreviewRunning, PREVIEW_DISCLAIMER, useBehaviorPreviewStore } from "../behavior/useBehaviorPreviewStore.ts";
 import { catalog, categories as allCategories, getCatalogComponent, type CatalogComponent } from "../data/catalog.ts";
 import ComponentArtwork from "../components/ComponentArtwork.tsx";
 import LogoMark from "../components/LogoMark.tsx";
 import { useAuth, signOut, getCurrentUserId } from "../auth/session.ts";
 import { getProjectPersistenceStatus, subscribeProjectPersistenceStatus } from "../store/projectPersistence.ts";
-import { Search, X, Settings, Download, Trash2, Play, Square, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User, Menu, Save, AlertTriangle } from "lucide-react";
+import { Search, X, Settings, Download, Trash2, Play, Pause, RotateCcw, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User, Menu, Save, AlertTriangle } from "lucide-react";
 
 const LIBRARY_PAGE_SIZE = 60;
 
-function simulationSupportPresentation(definition: CatalogComponent) {
-  const fidelity = Object.values(definition.models).find((model) => model.fidelity)?.fidelity;
-  const support = definition.model.support;
-  const presentation = support === "behavioral"
-    ? { label: "Behavioral model", executable: true, detail: "Runs in the bounded browser behavioral runtime." }
-    : support === "engine-backed"
-      ? { label: "Engine-backed", executable: true, detail: "Runs with its assigned simulation engine." }
-      : support === "visual"
-        ? { label: "Visual only", executable: false, detail: "Placement and artwork are available; executable behavior is not." }
-        : { label: "Validation only", executable: false, detail: "Wiring and metadata checks are available; executable device behavior is not." };
-
+function previewSupportPresentation(definition: CatalogComponent) {
+  const binding = definition.behavior;
+  if (binding) {
+    const variant = binding.variant ? ` (${binding.variant})` : "";
+    return {
+      label: "Preview mapped",
+      executable: true,
+      detail: `Exact typed profile ${binding.profileId}:v${binding.profileVersion}${variant}. The visual outcome is scripted; source code is not run.`,
+    };
+  }
   return {
-    ...presentation,
-    fidelity,
-    detail: [presentation.detail, fidelity ? `Model fidelity: ${fidelity}.` : "", definition.model.reason ?? ""].filter(Boolean).join(" "),
+    label: "No scripted preview",
+    executable: false,
+    detail: "No exact Behavior Profile is registered for this catalog definition. Placement, graph validation, and editable source remain available.",
   };
 }
 
@@ -79,7 +78,14 @@ function UserRoomBadge() {
 export default function StudioPage() {
   const { results, search, setCategory, category } = useComponentCatalogStore();
   const { addComponent, project, projects, activeProjectId, clear, createProject, duplicateProject, switchProject, deleteProject, renameProject } = useProjectStore();
-  const running = useSimulationStore((state) => state.running);
+  const previewStatus = useBehaviorPreviewStore((state) => state.status);
+  const previewSnapshot = useBehaviorPreviewStore((state) => state.snapshot);
+  const startPreview = useBehaviorPreviewStore((state) => state.startPreview);
+  const pausePreview = useBehaviorPreviewStore((state) => state.pausePreview);
+  const resetPreview = useBehaviorPreviewStore((state) => state.resetPreview);
+  const previewError = useBehaviorPreviewStore((state) => state.error);
+  const previewAnnouncement = useBehaviorPreviewStore((state) => state.announcement);
+  const running = isPreviewRunning(previewStatus);
   const { theme, toggle } = useThemeStore();
   const libraryDensity = useWorkspaceStore((state) => state.libraryDensity);
   const bottomCollapsed = useWorkspaceStore((state) => state.bottomCollapsed);
@@ -173,23 +179,24 @@ export default function StudioPage() {
     setRunError("");
     setRunNotice("");
     try {
-      // Topology checks are independent from firmware execution. Always run
-      // them before the optional browser/remote runtime so a missing board
-      // model never hides useful wiring feedback.
+      // Graph validation is independent from Behavior Preview. Keep its
+      // diagnostics visible, but never pass source code to the preview path.
       const validation = validateProject(useProjectStore.getState().project);
       useValidationStore.getState().setResult(validation);
-      const result = await invokeWebMCPTool("simulation.run", { durationMs: 1000 });
-      if (result?.isError) setRunError(result.content?.[0]?.text ?? "Simulation failed");
-      else if (result?.data?.codeExecution?.status === "unavailable") setRunNotice(result.data.note ?? result.data.codeExecution.physicalHardwareNextStep ?? "Browser firmware execution is unavailable. Source export and physical-board testing remain available.");
-      else if (validation.issues.some((issue) => issue.severity === "error")) setRunNotice(`Connection checks completed with ${validation.issues.filter((issue) => issue.severity === "error").length} error(s). See Problems; code editing and export remain available.`);
+      const result = await startPreview({ durationMs: 1_000 });
+      if (result?.status === "blocked") {
+        setRunError(result.message ?? "Behavior Preview could not start");
+        return;
+      }
+      if (validation.issues.some((issue) => issue.severity === "error")) setRunNotice(`Preview started with ${validation.issues.filter((issue) => issue.severity === "error").length} graph issue(s). See Problems; the scripted outcome does not verify wiring.`);
     } catch (error) {
-      setRunError(`Simulation failed: ${(error as Error).message}`);
+      setRunError(`Behavior Preview failed: ${(error as Error).message}`);
     }
   };
 
   const doStop = async () => {
-    try { await invokeWebMCPTool("simulation.stop"); }
-    catch (error) { setRunError(`Could not stop simulation: ${(error as Error).message}`); }
+    setRunError("");
+    await pausePreview();
   };
 
   const handleSearch = (v: string) => { setQuery(v); search(v); };
@@ -212,8 +219,39 @@ export default function StudioPage() {
 
   const commitProjectRename = () => {
     if (!editingProjectId) return;
-    if (editingProjectName.trim()) renameProject(editingProjectId, editingProjectName);
+    if (editingProjectName.trim()) {
+      try {
+        renameProject(editingProjectId, editingProjectName);
+      } catch (cause) {
+        projectMutationError("Renaming the project", cause);
+      }
+    }
     cancelProjectRename();
+  };
+
+  const projectMutationError = (action: string, cause: unknown) => {
+    const message = cause instanceof Error ? cause.message : "The project was not changed.";
+    setRunError(`${action} ${cause instanceof WorkspaceCapacityError ? "blocked" : "failed"}: ${message}`);
+  };
+
+  const createProjectFromMenu = () => {
+    setRunError("");
+    try {
+      createProject(`Project ${projects.length + 1}`);
+      setShowProjectMenu(false);
+    } catch (cause) {
+      projectMutationError("Creating a project", cause);
+    }
+  };
+
+  const duplicateProjectFromMenu = () => {
+    setRunError("");
+    try {
+      duplicateProject();
+      setShowProjectMenu(false);
+    } catch (cause) {
+      projectMutationError("Duplicating the project", cause);
+    }
   };
 
   const manufacturers = useMemo(() => {
@@ -355,8 +393,8 @@ export default function StudioPage() {
                   ))}
                 </div>
                 <div className="flex gap-1 border-t border-border bg-muted/20 p-1.5">
-                  <button type="button" onClick={() => { createProject(`Project ${projects.length + 1}`); setShowProjectMenu(false); }} className="flex flex-1 items-center justify-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] hover:bg-muted"><Plus size={11} /> New</button>
-                  <button type="button" onClick={() => { duplicateProject(); setShowProjectMenu(false); }} className="flex flex-1 items-center justify-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] hover:bg-muted"><Copy size={11} /> Duplicate</button>
+                  <button type="button" onClick={createProjectFromMenu} className="flex flex-1 items-center justify-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] hover:bg-muted"><Plus size={11} /> New</button>
+                  <button type="button" onClick={duplicateProjectFromMenu} className="flex flex-1 items-center justify-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] hover:bg-muted"><Copy size={11} /> Duplicate</button>
                   <button
                     type="button"
                     disabled={projects.length <= 1}
@@ -366,9 +404,13 @@ export default function StudioPage() {
                         setDeleteProjectArmedId(currentProjectId);
                         return;
                       }
-                      const deleted = deleteProject(deleteProjectArmedId);
-                      setDeleteProjectArmedId(null);
-                      if (deleted) setShowProjectMenu(false);
+                      try {
+                        const deleted = deleteProject(deleteProjectArmedId);
+                        setDeleteProjectArmedId(null);
+                        if (deleted) setShowProjectMenu(false);
+                      } catch (cause) {
+                        projectMutationError("Deleting the project", cause);
+                      }
                     }}
                     className={`flex items-center justify-center gap-1 rounded border px-2 py-1.5 text-[11px] text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 ${deleteProjectArmed ? "border-red-500/40 bg-red-500/10" : "border-border hover:bg-red-50 dark:hover:bg-red-950/20"}`}
                     aria-label={deleteProjectArmed ? `Confirm deletion of ${project.name}` : `Delete ${project.name}`}
@@ -382,6 +424,7 @@ export default function StudioPage() {
 
         <div className="flex min-w-0 shrink items-center justify-end gap-1.5">
           <span className="status-pill hidden lg:inline-flex"><Wifi size={11} /> WebMCP · {toolNames.length}</span>
+          {previewSnapshot && <span className="status-pill preview-disclaimer-pill hidden xl:inline-flex" title={PREVIEW_DISCLAIMER}><span className="preview-status-dot" aria-hidden="true" /> Preview · no code</span>}
           <Link to="/parts" className="workspace-icon-button md:hidden" aria-label="Open parts desk" title="Open parts desk">
             <ShoppingCart size={12} strokeWidth={1.8} />
           </Link>
@@ -389,14 +432,15 @@ export default function StudioPage() {
             <ShoppingCart size={12} strokeWidth={1.8} /> Parts
           </Link>
           {running ? (
-            <button type="button" onClick={doStop} className="run-button is-running">
-              <Square size={9} className="fill-white" /> Stop
+            <button type="button" onClick={doStop} className="run-button is-running" aria-label="Pause behavior preview">
+              <Pause size={10} className="fill-white" /> Pause preview
             </button>
           ) : (
-            <button type="button" onClick={doRun} className="run-button">
-              <Play size={9} className="fill-current" /> Run
+            <button type="button" onClick={doRun} className="run-button" aria-label={previewStatus === "paused" ? "Resume behavior preview" : "Preview behavior"}>
+              <Play size={9} className="fill-current" /> {previewStatus === "paused" ? "Resume preview" : "Preview behavior"}
             </button>
           )}
+          {previewSnapshot && <button type="button" onClick={() => void resetPreview()} className="workspace-icon-button hidden sm:grid" aria-label="Reset behavior preview" title="Reset preview"><RotateCcw size={12} /></button>}
           <UserRoomBadge />
           <div className="relative z-[60]" ref={overflowMenuRef}>
             <button type="button" onClick={() => setShowOverflowMenu((open) => !open)} aria-haspopup="menu" aria-expanded={showOverflowMenu} aria-label="Open workspace menu" title="More workspace actions" className="workspace-icon-button">
@@ -407,7 +451,7 @@ export default function StudioPage() {
                 <button type="button" role="menuitem" onClick={() => { toggle(); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><ThemeIcon theme={theme} /> {theme === "dark" ? "Use light theme" : "Use dark theme"}</button>
                 <Link role="menuitem" to="/settings" onClick={() => setShowOverflowMenu(false)} className="flex items-center gap-2 rounded px-2.5 py-2 text-xs hover:bg-muted"><Settings size={13} /> Settings</Link>
                 <button type="button" role="menuitem" onClick={() => { setShowImport(true); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><Download size={13} /> Import design</button>
-                <button type="button" role="menuitem" onClick={() => { triggerDownloadVlx(project.name); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><Download size={13} /> Export project + firmware source</button>
+                <button type="button" role="menuitem" onClick={() => { triggerDownloadVlx(project.name); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><Download size={13} /> Export project + editable source</button>
                 <div className="my-1 border-t border-border" />
                 <button type="button" role="menuitem" onClick={() => { setLeftCollapsed((value) => !value); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><PanelLeft size={13} /> {leftCollapsed ? "Show components" : "Hide components"}</button>
                 <button type="button" role="menuitem" onClick={() => { setRightCollapsed((value) => !value); setShowOverflowMenu(false); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs hover:bg-muted"><PanelRight size={13} /> {rightCollapsed ? "Show code panel" : "Hide code panel"}</button>
@@ -415,15 +459,30 @@ export default function StudioPage() {
                 <button type="button" role="menuitem" onClick={() => {
                   const currentProjectId = useProjectStore.getState().activeProjectId;
                   if (clearWorkspaceArmedId !== currentProjectId) { setClearWorkspaceArmedId(currentProjectId); return; }
-                  clear();
-                  setClearWorkspaceArmedId(null);
-                  setShowOverflowMenu(false);
+                  try {
+                    clear();
+                    setClearWorkspaceArmedId(null);
+                    setShowOverflowMenu(false);
+                  } catch (cause) {
+                    projectMutationError("Clearing the project", cause);
+                  }
                 }} className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs text-red-600 dark:text-red-400 ${clearWorkspaceArmed ? "bg-red-500/10" : "hover:bg-red-50 dark:hover:bg-red-950/20"}`}><Trash2 size={13} /> {clearWorkspaceArmed ? "Confirm clear project" : "Clear project"}</button>
               </div>
             )}
           </div>
         </div>
       </header>
+
+      {persistenceStatus.error && (
+        <div className="z-30 flex shrink-0 items-start gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200" role="alert">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <span>
+            {persistenceStatus.error.includes("Workspace recovery")
+              ? `${persistenceStatus.error} Your projects remain visible and exportable. Switch projects from the Projects menu, then use the confirmed Clear or Delete action to reduce the room; other edits stay blocked until it fits.`
+              : `Device save failed: ${persistenceStatus.error}`}
+          </span>
+        </div>
+      )}
 
       <main aria-label="Studio workspace layout" className="relative flex flex-1 overflow-hidden min-h-0">
         {!leftCollapsed && <button type="button" className="absolute inset-0 z-20 bg-background/70 backdrop-blur-[1px] md:hidden" onClick={() => setLeftCollapsed(true)} aria-label="Close component library" />}
@@ -450,7 +509,7 @@ export default function StudioPage() {
                   className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:border-foreground/30 focus:outline-none focus:ring-2 focus:ring-ring/10"
                 />
                 {query ? (
-                  <button type="button" onClick={() => handleSearch("")} className="absolute right-1 top-1/2 -translate-y-1/2 h-4 w-4 grid place-items-center rounded hover:bg-muted text-muted-foreground" aria-label="Clear component search">
+                  <button type="button" onClick={() => handleSearch("")} className="absolute right-0.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded hover:bg-muted text-muted-foreground" aria-label="Clear component search">
                     <X size={10} strokeWidth={1.8} />
                   </button>
                 ) : (
@@ -499,7 +558,7 @@ export default function StudioPage() {
                 ) : (
                   visibleResults.map((c) => {
                     const dot = c.category === "board" || c.category === "display" ? "bg-blue-500" : "bg-zinc-400";
-                    const simulationSupport = simulationSupportPresentation(c);
+                    const previewSupport = previewSupportPresentation(c);
                     return (
                       <button
                         key={c.id}
@@ -521,13 +580,12 @@ export default function StudioPage() {
                             <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{c.ports.length}</span>
                           </div>
                           <span
-                            className={`mt-1 inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-px text-[9px] font-medium leading-4 ${simulationSupport.executable ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}
-                            aria-label={`Simulation support: ${simulationSupport.label}${simulationSupport.fidelity ? `, fidelity ${simulationSupport.fidelity}` : ""}`}
-                            title={simulationSupport.detail}
+                            className={`mt-1 inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-px text-[9px] font-medium leading-4 ${previewSupport.executable ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}
+                            aria-label={`Preview support: ${previewSupport.label}`}
+                            title={previewSupport.detail}
                           >
-                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${simulationSupport.executable ? "bg-emerald-500" : "bg-amber-500"}`} aria-hidden="true" />
-                            <span className="truncate">{simulationSupport.label}</span>
-                            {simulationSupport.fidelity && <span className="truncate opacity-70">· {simulationSupport.fidelity}</span>}
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${previewSupport.executable ? "bg-emerald-500" : "bg-amber-500"}`} aria-hidden="true" />
+                            <span className="truncate">{previewSupport.label}</span>
                           </span>
                         </div>
                         <span className="component-add">+</span>
@@ -564,7 +622,8 @@ export default function StudioPage() {
           )}
           <div className="relative min-h-0 flex-1">
             <HardwareCanvas key={project.id} onBrowseComponents={() => { setLeftCollapsed(false); window.setTimeout(() => searchInputRef.current?.focus(), 0); }} />
-            {runError && <div className="run-error" role="alert">{runError}</div>}
+            {(runError || previewError || (previewStatus === "blocked" ? previewAnnouncement : "")) && <div className="run-error" role="alert">{runError || previewError || previewAnnouncement}</div>}
+            {previewSnapshot && <div role="status" className="preview-disclaimer absolute left-3 right-3 top-3 z-10 flex items-start gap-2 rounded-md border border-amber-300/70 bg-amber-50/95 px-3 py-2 text-xs leading-snug text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/85 dark:text-amber-100"><span className="preview-status-dot mt-1" aria-hidden="true" /> <span>{PREVIEW_DISCLAIMER}</span></div>}
             {runNotice && <div role="status" className="absolute bottom-3 left-3 right-3 z-10 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/80 dark:text-amber-100">{runNotice}</div>}
           </div>
           {!bottomCollapsed && <div role="separator" aria-orientation="horizontal" aria-label="Resize bottom panel" aria-valuemin={140} aria-valuemax={360} aria-valuenow={Math.round(bottomHeight)} tabIndex={0} onPointerDown={onResizeStart} onKeyDown={(event) => { if (event.key === "ArrowUp") { event.preventDefault(); setBottomHeight(bottomHeight + 16); } if (event.key === "ArrowDown") { event.preventDefault(); setBottomHeight(bottomHeight - 16); } if (event.key === "Home") { event.preventDefault(); setBottomHeight(140); } if (event.key === "End") { event.preventDefault(); setBottomHeight(360); } }} className="flex h-2 shrink-0 cursor-row-resize items-center justify-center bg-border/40 hover:bg-foreground/20 focus-visible:bg-accent/10">
@@ -635,7 +694,7 @@ export default function StudioPage() {
         <span className="hidden sm:inline">· {toolNames.length} tools</span>
         <span className="hidden md:inline">· room {getCurrentUserId()?.slice(0, 8) || "global"} • device-local</span>
         <span className="hidden lg:inline">· WebMCP scoped to your room • <span className="text-emerald-600 dark:text-emerald-400">agent can place on your behalf</span></span>
-        <span className="ml-auto">{running ? "running" : "idle"}</span>
+        <span className="ml-auto">{running ? "previewing" : previewStatus}</span>
       </footer>
     </div>
   );

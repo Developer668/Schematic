@@ -1,5 +1,7 @@
 # Demo 1 — ESP32 Temperature Warning (15s)
 
+> **Historical runtime demo — superseded 2026-08-31.** [ADR-001](../../docs/ADR-001-BEHAVIOR-PLAN-PREVIEW.md) defines the current product path. The compiler/simulation commands below are retained only as historical context and are not available on the canonical ChatGPT Site. Use a typed Behavior Plan and `behavior.preview`/`behavior.invoke` for scripted outcomes; keep generated source as an editable external-use artifact.
+
 **Prompt:** “Build me an ESP32 temperature warning system with an OLED and buzzer.”
 
 Agent does (via WebMCP, no screenshots):

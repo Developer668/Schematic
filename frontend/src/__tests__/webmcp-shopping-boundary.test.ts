@@ -106,9 +106,21 @@ describe("WebMCP shopping trust boundary", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps the registry at exactly 42 tools and preserves instance-port wiring", async () => {
-    expect(WEBMCP_TOOL_COUNT).toBe(42);
-    expect(getRegisteredToolNames()).toHaveLength(42);
+  it("keeps the registry at exactly 45 tools and preserves instance-port wiring", async () => {
+    expect(WEBMCP_TOOL_COUNT).toBe(45);
+    expect(getRegisteredToolNames()).toHaveLength(45);
+    expect(getRegisteredToolNames()).toEqual(expect.arrayContaining([
+      "behavior.get_capabilities",
+      "behavior.plan.write",
+      "behavior.preview",
+      "behavior.invoke",
+      "behavior.get_state",
+      "code.write",
+      "code.read",
+      "code.export",
+    ]));
+    expect(getRegisteredToolNames().some((name) => name.startsWith("simulation."))).toBe(false);
+    expect(getRegisteredToolNames()).not.toContain("firmware.compile");
     const board: any = await invokeWebMCPTool("component.add", { componentId: "esp32-devkit-v1" });
     const led: any = await invokeWebMCPTool("component.add", { componentId: "led" });
     const ports: any = await invokeWebMCPTool("component.list_ports", { componentId: board.data.instanceId });
@@ -222,5 +234,53 @@ describe("WebMCP shopping trust boundary", () => {
     expect(stale.isError).toBe(true);
     expect(stale.data.code).toBe("STALE_PUBLICATION");
     expect(useShoppingStore.getState().results).toEqual([]);
+  });
+
+  it("rejects empty, control-character, and oversized queries before state or network mutation", async () => {
+    useShoppingStore.getState().setQuery("unchanged query");
+    const fetchMock = vi.mocked(fetch);
+    const callsBefore = fetchMock.mock.calls.length;
+
+    for (const query of ["   ", "ESP32\nS3", "x".repeat(241)]) {
+      const result: any = await invokeWebMCPTool("shopping.search", { query, quantity: 1 });
+      expect(result.isError).toBe(true);
+      expect(result.data.code).toBe("INVALID_SEARCH_REQUEST");
+      expect(useShoppingStore.getState().query).toBe("unchanged query");
+    }
+
+    expect(fetchMock.mock.calls).toHaveLength(callsBefore);
+  });
+
+  it("rejects oversized nested publication fields without publishing partial state", async () => {
+    const result: any = await invokeWebMCPTool("shopping.search", {
+      query: "ESP32-S3",
+      listings: [listing({
+        alternatives: [{ catalogId: "led", title: "LED", reason: "x".repeat(501) }],
+      })],
+      publication: publication(),
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.data.code).toBe("MALFORMED_LISTING");
+    expect(useShoppingStore.getState().results).toEqual([]);
+    expect(useShoppingStore.getState().cart).toEqual([]);
+  });
+
+  it("rejects unbounded cart reset IDs before iterating, mutating, or echoing them", async () => {
+    const before = useShoppingStore.getState().cart;
+    const result: any = await invokeWebMCPTool("shopping.cart_reset", {
+      requiredCatalogIds: Array.from({ length: 501 }, (_, index) => `catalog-${index}`),
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.data.code).toBe("INVALID_CART_REQUEST");
+    expect(useShoppingStore.getState().cart).toEqual(before);
+
+    const longId: any = await invokeWebMCPTool("shopping.cart_reset", {
+      requiredCatalogIds: ["x".repeat(121)],
+    });
+    expect(longId.isError).toBe(true);
+    expect(longId.data.code).toBe("INVALID_CART_REQUEST");
+    expect(JSON.stringify(longId)).not.toContain("x".repeat(121));
   });
 });

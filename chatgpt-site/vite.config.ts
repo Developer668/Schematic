@@ -32,10 +32,11 @@ export default defineConfig(async () => {
     resolve: {
       alias: {
         "@": path.resolve(__dirname),
+        "@schematic/behavior/canonicalize": path.resolve(__dirname, "../packages/behavior/src/canonicalize.ts"),
+        "@schematic/behavior": path.resolve(__dirname, "../packages/behavior/src/index.ts"),
         "@schematic/hardware-graph": path.resolve(__dirname, "../packages/hardware-graph/src"),
         "@schematic/validation": path.resolve(__dirname, "../packages/validation/src"),
         "@schematic/component-format": path.resolve(__dirname, "../packages/component-format/src"),
-        "@schematic/firmware-harness": path.resolve(__dirname, "../packages/firmware-harness/src/index.ts"),
         "@schematic/project-storage": path.resolve(__dirname, "../packages/project-storage/src"),
         "@schematic/session": path.resolve(__dirname, "../functions/_auth.ts"),
       },

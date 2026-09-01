@@ -6,10 +6,8 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "predev": "pnpm --filter @schematic/firmware-harness verify:wasm",
     "dev": "vinext dev",
-    "prebuild": "node scripts/clean-build.mjs && pnpm --filter @schematic/firmware-harness verify:wasm",
-    "build": "vinext build",
+    "build": "node scripts/clean-build.mjs && vinext build",
     "postbuild": "node scripts/verify-build-assets.mjs",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",

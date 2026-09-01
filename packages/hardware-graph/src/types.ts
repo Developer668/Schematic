@@ -212,7 +212,6 @@ export interface ValidationIssue {
   message: string;
   affectedConnections?: string[];
   affectedComponents?: string[];
-  autoFix?: { description: string; action: string; params?: Record<string, unknown> };
 }
 
 /** Optional source-level diagnostics returned alongside hardware issues. */

@@ -3,20 +3,26 @@
  * Per HardwareWebMCP.md: don't expose 100 tiny tools, expose powerful semantic ones.
  * Human click and AI call share same underlying Zustand functions.
  */
-import { layoutComponentPositions, useProjectStore, type HardwareGraph } from "../store/useProjectStore.ts";
-import { useSimulationStore } from "../store/useSimulationStore.ts";
+import { layoutComponentPositions, MAX_PROJECTS_PER_WORKSPACE, MAX_WORKSPACE_SERIALIZED_BYTES, WorkspaceCapacityError, useProjectStore, type HardwareGraph } from "../store/useProjectStore.ts";
 import { useSelectionStore } from "../store/useSelectionStore.ts";
 import { useWorkspaceStore, type BottomPanel } from "../store/useWorkspaceStore.ts";
-import { useValidationStore, validateFirmwareFiles, validateProject } from "../store/useValidationStore.ts";
+import { useValidationStore, validateProject } from "../store/useValidationStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
-import { createShoppingHandoff, useShoppingStore, type AgentPublication, type PartOffer, type ShoppingDiscovery, type ShoppingResult } from "../store/useShoppingStore.ts";
-import { flushProjectPersistence, getProjectPersistenceStatus, waitForProjectPersistence } from "../store/projectPersistence.ts";
-import { runFirmwareRuntime } from "../simulation/runtime.ts";
-import { hasPortableButtonLedContract, PortableHarnessUnavailableError, runPortableButtonLedHarness } from "../simulation/portableHarness.ts";
+import { createShoppingHandoff, MAX_SHOPPING_QUERY_LENGTH, useShoppingStore, type AgentPublication, type PartOffer, type ShoppingDiscovery, type ShoppingResult } from "../store/useShoppingStore.ts";
+import {
+  flushProjectPersistence,
+  getProjectPersistenceContext,
+  getProjectPersistenceStatus,
+  isCurrentProjectPersistenceContext,
+  waitForProjectPersistence,
+} from "../store/projectPersistence.ts";
+import { PersistenceNotReadyError, type PersistenceContextToken } from "../store/persistenceGate.ts";
 import { getCatalogComponent, searchCatalog } from "../data/catalog.ts";
-import { isBoardDefinition, resolveFirmwareBinding } from "../data/hardware.ts";
+import { isBoardDefinition } from "../data/hardware.ts";
 import { apiUrl, getAuthHeaders, getAuthSession, waitForAuth } from "../auth/session.ts";
 import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.json";
+import { behaviorToolDefinitions } from "./behaviorTools.ts";
+import { getBehaviorState, readCode, writeCode } from "../application/behaviorCommands.ts";
 
 type ToolAnnotations = {
   readOnlyHint?: boolean;
@@ -26,7 +32,7 @@ type ToolAnnotations = {
   untrustedContentHint?: boolean;
 };
 
-type ToolExecutionContext = { signal?: AbortSignal };
+type ToolExecutionContext = { signal?: AbortSignal; persistenceContext?: PersistenceContextToken | null };
 
 type ToolDef = {
   name: string;
@@ -49,13 +55,55 @@ type TrustedToolContext = {
   environment: string;
 };
 
-function toolFailure(code: string, message: string, data: Record<string, unknown> = {}) {
+const MAX_TOOL_IDENTIFIER_LENGTH = 200;
+const SHA256_PATTERN = /^[0-9a-fA-F]{64}$/;
+const GRAPH_VALIDATION_NOTICE = "Static graph checks only; physical wiring, hardware behavior, and editable source remain unverified.";
+
+function boundedToolIdentifier(value: unknown) {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && value.length <= MAX_TOOL_IDENTIFIER_LENGTH
+    && !hasShoppingControlCharacters(value);
+}
+
+function validSha256(value: unknown) {
+  return value === null || (typeof value === "string" && SHA256_PATTERN.test(value));
+}
+
+function toolFailure(code: string, message: string, data: Record<string, unknown> = {}, retryable = false) {
   return {
     content: [{ type: "text", text: message }],
     isError: true,
-    error: { code, message, retryable: false },
+    error: { code, message, retryable },
     data: { code, ...data },
   };
+}
+
+function workspaceCapacityFailure(action: string, cause: unknown) {
+  if (!(cause instanceof WorkspaceCapacityError)) return null;
+  const state = useProjectStore.getState();
+  return toolFailure(
+    "WORKSPACE_CAPACITY",
+    `${action} was blocked: ${cause.message}`,
+    {
+      scope: "workspace",
+      projectCount: state.projects.length,
+      maxProjects: MAX_PROJECTS_PER_WORKSPACE,
+      maxSerializedBytes: MAX_WORKSPACE_SERIALIZED_BYTES,
+      unchanged: true,
+      hint: "Delete an unused project or export the room before retrying.",
+    },
+  );
+}
+
+function persistenceNotReadyFailure(cause: unknown) {
+  if (!(cause instanceof PersistenceNotReadyError)) return null;
+  return toolFailure(
+    "PERSISTENCE_NOT_READY",
+    cause.message,
+    { unchanged: true, hint: "Wait for the active account room to finish loading, then re-read the project before retrying." },
+    true,
+  );
 }
 
 async function persistProjectMutation(action: string, projectId: string) {
@@ -122,16 +170,6 @@ function cloneProject(source: unknown): HardwareGraph {
   return JSON.parse(JSON.stringify(source)) as HardwareGraph;
 }
 
-function base64FromHex(hex: string) {
-  const normalized = hex.trim();
-  if (!/^(?:[0-9a-f]{2})*$/i.test(normalized)) return undefined;
-  let binary = "";
-  for (let index = 0; index < normalized.length; index += 2) {
-    binary += String.fromCharCode(Number.parseInt(normalized.slice(index, index + 2), 16));
-  }
-  return btoa(binary);
-}
-
 function abortError() {
   try {
     return new DOMException("The WebMCP tool call was aborted", "AbortError");
@@ -154,6 +192,12 @@ function executionSignal(value: unknown): AbortSignal | undefined {
   if (isAbortSignal(value)) return value;
   if (value && typeof value === "object" && isAbortSignal((value as { signal?: unknown }).signal)) return (value as { signal: AbortSignal }).signal;
   return undefined;
+}
+
+function persistenceContextStillCurrent(context: PersistenceContextToken | null | undefined) {
+  // Direct unit/degraded-runtime calls do not have a mounted persistence
+  // owner, so they intentionally retain the in-memory behaviour.
+  return context === undefined || isCurrentProjectPersistenceContext(context);
 }
 
 /**
@@ -201,210 +245,6 @@ export async function fetchJson(path: string, init?: RequestInit): Promise<ApiJs
     if (init?.signal?.aborted || (e instanceof Error && e.name === "AbortError")) throw e;
     return { response: null, data: null, available: false, error: (e as Error).message };
   }
-}
-
-export function browserCompilePreflight(files: { name: string; content: string }[], boardFqbn: string) {
-  const source = files.map((file) => file.content).join("\n");
-  let depth = 0;
-  for (const character of source) {
-    if (character === "{") depth += 1;
-    if (character === "}") depth -= 1;
-  }
-  const balancedBraces = depth === 0;
-  const hasSketchFile = files.some((file) => /\.ino$/i.test(file.name));
-  return {
-    success: false,
-    available: false,
-    mode: "browser-preflight",
-    board_fqbn: boardFqbn,
-    source_files: files.map((file) => file.name),
-    preflight: { balanced_braces: balancedBraces, has_sketch_file: hasSketchFile },
-    error: balancedBraces
-      ? "Binary compilation is unavailable on this static deployment."
-      : "Source preflight found unbalanced braces.",
-    hint: balancedBraces
-      ? "Connect the Schematic backend with arduino-cli to produce a firmware artifact."
-      : "Fix the source syntax, then connect the Schematic backend for binary compilation.",
-    simulation_ready: balancedBraces && hasSketchFile,
-    browser_runtime: { available: balancedBraces && hasSketchFile, supports: ["setup", "loop", "digitalRead", "digitalWrite", "analogRead", "analogWrite", "delay", "Serial", "Wire", "SPI"] },
-  };
-}
-
-const DEGRADED_RUN_STATUSES = new Set(["no-firmware", "invalid-target", "unsupported-api"]);
-
-function runTopologyCheck(project: HardwareGraph, inputs: Record<string, boolean | number>, durationMs: number) {
-  // Resolve the graph without executing firmware. This gives every run path
-  // the same wiring/protocol baseline, including a backend that declines an
-  // unsupported board model.
-  return runFirmwareRuntime({ ...project, firmwareTargets: [] }, inputs, durationMs);
-}
-
-function summarizeValidation(result: ReturnType<typeof validateProject>) {
-  return {
-    valid: result.valid,
-    issueCount: result.issues.length,
-    errorCount: result.issues.filter((issue) => issue.severity === "error").length,
-    warningCount: result.issues.filter((issue) => issue.severity === "warning").length,
-    codeIssueCount: result.codeIssues.length,
-  } satisfies import("../simulation/runtime.ts").RuntimeValidationSummary;
-}
-
-function enrichRunResult(
-  runtime: import("../simulation/runtime.ts").RuntimeResult,
-  topology: import("../simulation/runtime.ts").RuntimeResult,
-  validation: ReturnType<typeof validateProject>,
-) {
-  const codeExecution = runtime.codeExecution ?? {
-    status: runtime.programs.length > 0 ? runtime.unsupportedApis.length > 0 ? "partial" as const : "executed" as const : "unavailable" as const,
-    ...(runtime.programs.length === 0 ? { reason: "The runtime did not execute firmware for this target." } : {}),
-    physicalHardwareNextStep: "Export the source, compile it with the board’s normal toolchain, and test it on the actual hardware.",
-  };
-  const connectionCheck = runtime.connectionCheck ?? topology.connectionCheck;
-  const unavailableNote = codeExecution.status === "unavailable"
-    ? "Connection topology was checked, but browser firmware execution is unavailable for this board/model. Your source remains editable and exportable; compile and test it on the actual hardware."
-    : runtime.note;
-  return {
-    ...runtime,
-    resolvedNets: runtime.resolvedNets || topology.resolvedNets,
-    ...(connectionCheck ? { connectionCheck } : {}),
-    codeExecution,
-    validation: summarizeValidation(validation),
-    note: unavailableNote,
-  } satisfies import("../simulation/runtime.ts").RuntimeResult;
-}
-
-async function runBrowserSimulation(project: ReturnType<typeof useProjectStore.getState>["project"], inputs: Record<string, boolean | number>, durationMs: number) {
-  const boundedDurationMs = Math.max(0, Math.min(Number.isFinite(durationMs) ? durationMs : 1000, 86_400_000));
-  const topology = runTopologyCheck(project, inputs, boundedDurationMs);
-  let portable;
-  try {
-    portable = await runPortableButtonLedHarness(project, inputs, boundedDurationMs);
-  } catch (error) {
-    if (!(error instanceof PortableHarnessUnavailableError)) throw error;
-    const runtime: import("../simulation/runtime.ts").RuntimeResult = {
-      ...topology,
-      status: "unsupported-api",
-      runtime: "browser",
-      durationMs: boundedDurationMs,
-      events: [],
-      programs: [],
-      targetIssues: [{ componentId: error.componentId, code: error.code, message: error.message }],
-      unsupportedApis: [...new Set([...topology.unsupportedApis, "compiled-c-wasm"])],
-      note: "Connection topology was checked, but browser firmware execution is unavailable because the verified C/WASM artifact could not be loaded. Your source remains editable and exportable; compile and test it on the actual hardware.",
-      codeExecution: {
-        status: "unavailable",
-        reason: "The verified C/WASM artifact could not be loaded in this browser.",
-        physicalHardwareNextStep: "Export the source, compile it with the board’s normal toolchain, and test it on the actual hardware.",
-      },
-    };
-    return finalizeBrowserSimulation(project, runtime, boundedDurationMs);
-  }
-  const runtime: import("../simulation/runtime.ts").RuntimeResult = portable
-    ? {
-        status: "completed" as const,
-        runtime: "browser" as const,
-        executionEngine: "c-wasm" as const,
-        abiVersion: portable.abiVersion,
-        ...(portable.artifactSha256 ? { artifactSha256: portable.artifactSha256 } : {}),
-        durationMs: portable.durationMs,
-        outputs: portable.outputs,
-        events: portable.events,
-        programs: [{ componentId: portable.boardId, writes: portable.events.length, executions: portable.steps, sourceFiles: portable.sourceFiles }],
-        resolvedNets: topology.resolvedNets,
-        serialOutput: "",
-        targetIssues: [],
-        protocolEvents: [],
-        deviceStates: [],
-        warnings: [],
-        unsupportedApis: [],
-        connectionCheck: topology.connectionCheck,
-        codeExecution: {
-          status: "executed",
-          physicalHardwareNextStep: "The source remains available for export and testing with the target board’s toolchain.",
-        },
-        note: portable.note,
-      }
-    : runFirmwareRuntime(project, inputs, boundedDurationMs);
-  return finalizeBrowserSimulation(project, runtime, boundedDurationMs, portable);
-}
-
-function finalizeBrowserSimulation(
-  project: ReturnType<typeof useProjectStore.getState>["project"],
-  runtime: import("../simulation/runtime.ts").RuntimeResult,
-  boundedDurationMs: number,
-  portable?: Awaited<ReturnType<typeof runPortableButtonLedHarness>>,
-) {
-  const timeNs = BigInt(Math.round(boundedDurationMs * 1_000_000));
-  const outputs = runtime.outputs;
-  const simulation = useSimulationStore.getState();
-  simulation.setTime(timeNs);
-  for (const [portId, value] of Object.entries(outputs)) simulation.setPin(portId, value);
-  simulation.setLastRun(runtime);
-  const trace = runtime.events.slice(0, 8).map((event) => `${event.endpoint}=${event.value}`).join("  ");
-  simulation.appendSerial(`[${project.name}] browser ${runtime.executionEngine ?? "runtime"} · t=${timeNs}ns${trace ? `  ${trace}` : ""}\n${runtime.serialOutput}`);
-  simulation.stop();
-  return {
-    ...runtime,
-    time_ns: timeNs.toString(),
-    snapshot: runtime.outputs,
-    ...(portable ? { harness: portable } : {}),
-  };
-}
-
-function normalizeRemoteRun(result: any, topology?: import("../simulation/runtime.ts").RuntimeResult): import("../simulation/runtime.ts").RuntimeResult {
-  const events = Array.isArray(result?.events) ? result.events.flatMap((event: any) => {
-    const value = event?.value;
-    if (typeof value !== "boolean" && typeof value !== "number") return [];
-    return [{
-      timeMs: Number(event?.timeMs ?? 0),
-      endpoint: String(event?.endpoint ?? `${event?.deviceId ?? event?.controllerId ?? "device"}:${event?.operation ?? event?.kind ?? "event"}`),
-      value,
-      reason: String(event?.reason ?? `${event?.kind ?? "event"}${event?.operation ? ` ${event.operation}` : ""}`),
-    }];
-  }) : [];
-  const programs = Array.isArray(result.programs) ? result.programs : [];
-  const unsupportedApis = Array.isArray(result.unsupported_apis) ? result.unsupported_apis : [];
-  const rawConnectionCheck = result?.connectionCheck ?? result?.connection_check;
-  const connectionCheck = rawConnectionCheck && typeof rawConnectionCheck === "object"
-    ? {
-        status: "completed" as const,
-        connectionsChecked: Number(rawConnectionCheck.connectionsChecked ?? rawConnectionCheck.connections_checked ?? 0),
-        resolvedNets: Number(rawConnectionCheck.resolvedNets ?? rawConnectionCheck.resolved_nets ?? result.resolved_nets ?? 0),
-        note: String(rawConnectionCheck.note ?? "The browser resolved connected nets and ran available protocol checks independently of firmware execution."),
-      }
-    : topology?.connectionCheck;
-  const rawCodeExecution = result?.codeExecution ?? result?.code_execution;
-  const rawStatus = rawCodeExecution?.status;
-  const codeExecution = rawCodeExecution && ["executed", "partial", "unavailable"].includes(rawStatus)
-    ? {
-        status: rawStatus as "executed" | "partial" | "unavailable",
-        ...(rawCodeExecution.reason ? { reason: String(rawCodeExecution.reason) } : {}),
-        physicalHardwareNextStep: String(rawCodeExecution.physicalHardwareNextStep ?? rawCodeExecution.physical_hardware_next_step ?? "Export the source, compile it with the board’s normal toolchain, and test it on the actual hardware."),
-      }
-    : {
-        status: programs.length > 0 ? unsupportedApis.length > 0 ? "partial" as const : "executed" as const : "unavailable" as const,
-        ...(programs.length === 0 ? { reason: "The remote runtime did not execute firmware for this target." } : {}),
-        physicalHardwareNextStep: "Export the source, compile it with the board’s normal toolchain, and test it on the actual hardware.",
-      };
-  return {
-    status: result.status,
-    runtime: "remote",
-    executionEngine: "remote",
-    durationMs: Number(result.duration_ms ?? Number(result.duration_ns ?? 0) / 1_000_000),
-    outputs: result.outputs ?? {},
-    events,
-    programs,
-    resolvedNets: Number(result.resolved_nets ?? topology?.resolvedNets ?? 0),
-    serialOutput: String(result.serial_output ?? ""),
-    targetIssues: Array.isArray(result.target_issues) ? result.target_issues : [],
-    protocolEvents: Array.isArray(result.protocol_events) ? result.protocol_events : [],
-    deviceStates: Array.isArray(result.device_states) ? result.device_states : [],
-    warnings: Array.isArray(result.warnings) ? result.warnings : [],
-    unsupportedApis,
-    note: String(result.note ?? "Remote behavioral simulation completed."),
-    ...(connectionCheck ? { connectionCheck } : {}),
-    codeExecution,
-  };
 }
 
 function normalizeShoppingResults(raw: unknown, _query: string, quantity: number): ShoppingResult[] {
@@ -491,7 +331,13 @@ function normalizeShoppingDiscovery(raw: unknown): ShoppingDiscovery | null {
     const title = String(item.title ?? "").trim();
     const partNumber = String(item.partNumber ?? "").trim();
     const verificationUrl = String(item.verificationUrl ?? "").trim();
-    if (!source || !id || !sourcePartId || !title || !partNumber || item.verificationRequired !== true) return [];
+    if (!source
+      || !shoppingText(id, 160)
+      || !shoppingText(sourcePartId, 160)
+      || !shoppingText(title, 240)
+      || !shoppingText(partNumber, 160)
+      || !shoppingText(verificationUrl, 2_000)
+      || item.verificationRequired !== true) return [];
     try {
       const url = new URL(verificationUrl);
       if (url.protocol !== "https:") return [];
@@ -505,9 +351,9 @@ function normalizeShoppingDiscovery(raw: unknown): ShoppingDiscovery | null {
       id,
       source,
       sourcePartId,
-      title: title.slice(0, 240),
+      title,
       ...(item.manufacturer ? { manufacturer: String(item.manufacturer).trim().slice(0, 120) } : {}),
-      partNumber: partNumber.slice(0, 120),
+      partNumber,
       ...(item.package ? { package: String(item.package).trim().slice(0, 100) } : {}),
       ...(item.description ? { description: String(item.description).trim().slice(0, 300) } : {}),
       stock,
@@ -548,6 +394,8 @@ type ShoppingPublicationIssue = {
 
 const SHOPPING_MAX_LISTINGS = 24;
 const SHOPPING_MAX_OFFERS = 3;
+const SHOPPING_MAX_ALTERNATIVES = 3;
+const SHOPPING_MAX_PUBLICATION_BYTES = 128 * 1024;
 const SHOPPING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SHOPPING_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
@@ -593,6 +441,16 @@ function shoppingPublicationIssues(listings: unknown, publication: unknown): Sho
   const provider = publicationObject?.provider;
   const publishedAt = publicationObject?.publishedAt;
 
+  try {
+    if (new TextEncoder().encode(JSON.stringify({ listings, publication })).byteLength > SHOPPING_MAX_PUBLICATION_BYTES) {
+      issues.push({ code: "MALFORMED_PUBLICATION", message: `Shopping publication data may contain at most ${SHOPPING_MAX_PUBLICATION_BYTES} bytes.` });
+      return issues;
+    }
+  } catch {
+    issues.push({ code: "MALFORMED_PUBLICATION", message: "Shopping publication must be finite JSON data." });
+    return issues;
+  }
+
   if (!publicationObject || !shoppingText(provider, 120) || !shoppingText(publishedAt, 80)) {
     issues.push({ code: "MALFORMED_PUBLICATION", message: "Publication must contain non-empty provider and publishedAt strings." });
     return issues;
@@ -619,6 +477,8 @@ function shoppingPublicationIssues(listings: unknown, publication: unknown): Sho
       || !shoppingText(listing.catalogId, 120)
       || !shoppingText(listing.title)
       || !shoppingText(listing.partNumber, 160)
+      || (listing.manufacturer !== undefined && !shoppingText(listing.manufacturer, 160))
+      || (listing.matchNote !== undefined && !shoppingText(listing.matchNote, 500))
       || !Number.isInteger(listing.requestedQuantity)
       || Number(listing.requestedQuantity) < 1
       || Number(listing.requestedQuantity) > 999
@@ -627,6 +487,20 @@ function shoppingPublicationIssues(listings: unknown, publication: unknown): Sho
       || listing.offers.length > SHOPPING_MAX_OFFERS) {
       issues.push({ code: "MALFORMED_LISTING", message: `Listing ${listingIndex + 1} is missing a strictly typed required field or has an invalid offer count.`, listingIndex });
       return;
+    }
+    if (listing.alternatives !== undefined) {
+      if (!Array.isArray(listing.alternatives) || listing.alternatives.length > SHOPPING_MAX_ALTERNATIVES || listing.alternatives.some((rawAlternative) => {
+        const alternative = rawAlternative && typeof rawAlternative === "object" && !Array.isArray(rawAlternative) ? rawAlternative as Record<string, unknown> : null;
+        return !alternative
+          || !shoppingText(alternative.catalogId, 120)
+          || !getCatalogComponent(alternative.catalogId)
+          || !shoppingText(alternative.title, 240)
+          || !shoppingText(alternative.reason, 500)
+          || (alternative.resultId !== undefined && !shoppingText(alternative.resultId, 160));
+      })) {
+        issues.push({ code: "MALFORMED_LISTING", message: `Listing ${listingIndex + 1} contains invalid or oversized alternatives.`, listingIndex });
+        return;
+      }
     }
     const listingId = listing.id as string;
     const catalogId = listing.catalogId as string;
@@ -662,6 +536,8 @@ function shoppingPublicationIssues(listings: unknown, publication: unknown): Sho
         || typeof offer.currency !== "string"
         || !/^[A-Z]{3}$/.test(offer.currency)
         || typeof offer.url !== "string"
+        || offer.url.length > 2_000
+        || (offer.availability !== undefined && !shoppingText(offer.availability, 160))
         || !shoppingText(offer.fetchedAt, 80)
         || !shoppingText(offer.provider, 120)) {
         issues.push({ code: "MALFORMED_LISTING", message: `Offer ${offerIndex + 1} in listing ${listingIndex + 1} is not strict JSON listing data.`, listingIndex, offerIndex });
@@ -701,14 +577,37 @@ function shoppingError(code: string, message: string, data: Record<string, unkno
   };
 }
 
+function publicProjectGraph(graph: HardwareGraph) {
+  const {
+    firmwareTargets,
+    codeDocuments,
+    legacyBehaviorData: _legacyBehaviorData,
+    simulation: _retiredSimulationConfig,
+    ...publicGraph
+  } = graph;
+  const fileMetadata = (files: readonly { name: string; content: string }[]) => files.map((file) => ({
+    name: file.name,
+    byteLength: new TextEncoder().encode(file.content).byteLength,
+  }));
+  return {
+    ...publicGraph,
+    firmwareTargets: firmwareTargets.map(({ compiledArtifact: _compiledArtifact, files, ...target }) => ({ ...target, files: fileMetadata(files) })),
+    ...(codeDocuments ? {
+      codeDocuments: codeDocuments.map(({ files, ...document }) => ({ ...document, files: fileMetadata(files) })),
+    } : {}),
+    sourceAccess: "Source contents are excluded. Use code.read for one explicit source document.",
+  };
+}
+
 const tools: ToolDef[] = [
+  ...behaviorToolDefinitions,
   {
     name: "project.get_graph",
-    description: "Get the current hardware project graph (components, connections, firmware)",
+    description: "Get the current hardware graph and source-document metadata. Source contents and quarantined legacy data are excluded; use code.read for source.",
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true },
     execute: async () => {
-      const g = useProjectStore.getState().getGraph();
+      const g = publicProjectGraph(useProjectStore.getState().getGraph());
       return { content: [{ type: "text", text: JSON.stringify(g, null, 2) }], data: g };
     },
   },
@@ -728,7 +627,14 @@ const tools: ToolDef[] = [
     description: "Create and activate a new empty hardware project saved in this browser",
     inputSchema: { type: "object", properties: { name: { type: "string" } } },
     execute: async ({ name }) => {
-      const projectId = useProjectStore.getState().createProject(name ?? "Untitled");
+      let projectId: string;
+      try {
+        projectId = useProjectStore.getState().createProject(name ?? "Untitled");
+      } catch (cause) {
+        const failure = workspaceCapacityFailure("Creating a project", cause);
+        if (failure) return failure;
+        throw cause;
+      }
       const created = useProjectStore.getState().project;
       return { content: [{ type: "text", text: `Created project ${created.name}` }], data: { projectId, name: created.name } };
     },
@@ -749,7 +655,14 @@ const tools: ToolDef[] = [
     description: "Duplicate a saved project and activate the copy",
     inputSchema: { type: "object", properties: { projectId: { type: "string" }, name: { type: "string" } } },
     execute: async ({ projectId, name }) => {
-      const duplicateId = useProjectStore.getState().duplicateProject(projectId, name);
+      let duplicateId: string | null;
+      try {
+        duplicateId = useProjectStore.getState().duplicateProject(projectId, name);
+      } catch (cause) {
+        const failure = workspaceCapacityFailure("Duplicating the project", cause);
+        if (failure) return failure;
+        throw cause;
+      }
       if (!duplicateId) return { content: [{ type: "text", text: `Unknown project ${projectId ?? ""}` }], isError: true };
       const duplicate = useProjectStore.getState().projects.find((project) => project.id === duplicateId);
       return { content: [{ type: "text", text: `Duplicated project as ${duplicate?.name ?? duplicateId}` }], data: { projectId: duplicateId, name: duplicate?.name } };
@@ -835,21 +748,34 @@ const tools: ToolDef[] = [
   },
   {
     name: "project.apply_blueprint",
-    description: "Create a complete hardware design in one live operation; supported blueprint: meta-glasses",
-    inputSchema: { type: "object", properties: { blueprintId: { type: "string", enum: ["meta-glasses"] }, replace: { type: "boolean", default: true } }, required: ["blueprintId"] },
-    execute: async ({ blueprintId, replace = true }) => {
+    description: "Create a complete hardware design as a new project by default. Replacing the active project requires replace=true and its exact id in confirmProjectId.",
+    inputSchema: { type: "object", properties: { blueprintId: { type: "string", enum: ["meta-glasses"] }, replace: { type: "boolean", default: false }, confirmProjectId: { type: "string" } }, required: ["blueprintId"] },
+    annotations: { destructiveHint: true },
+    execute: async ({ blueprintId, replace = false, confirmProjectId }) => {
       const blueprint = BLUEPRINTS[blueprintId];
       if (!blueprint) return { content: [{ type: "text", text: `Unknown blueprint ${blueprintId}` }], isError: true };
       const current = useProjectStore.getState().project;
-      if (!replace && current.components.length > 0) return { content: [{ type: "text", text: "Blueprint not applied — the workspace is not empty and replace=false" }], isError: true };
       const project = cloneProject(blueprint);
-      useProjectStore.getState().loadProject(project);
-      useSelectionStore.getState().setActive(project.components.find((component) => isBoardDefinition(getCatalogComponent(component.definitionId)))?.id ?? null);
-      useSimulationStore.getState().reset();
+      try {
+        if (replace) {
+          if (confirmProjectId !== current.id) return toolFailure("CONFIRMATION_REQUIRED", "Replacing a project with a blueprint requires confirmProjectId to exactly match the active project id.", { activeProjectId: current.id });
+          useProjectStore.getState().loadProject(project);
+        } else {
+          useProjectStore.getState().importProject(project);
+        }
+      } catch (cause) {
+        const failure = workspaceCapacityFailure("Applying a blueprint", cause);
+        if (failure) return failure;
+        throw cause;
+      }
+      const applied = useProjectStore.getState().project;
+      useSelectionStore.getState().setActive(applied.components.find((component) => isBoardDefinition(getCatalogComponent(component.definitionId)))?.id ?? null);
       useValidationStore.getState().clear();
+      const persisted = await persistProjectMutation("Blueprint application", applied.id);
+      if ("failure" in persisted) return persisted.failure;
       return {
-        content: [{ type: "text", text: `Applied ${blueprintId}: ${project.components.length} components, ${project.connections.length} connections` }],
-        data: { blueprintId, name: project.name, components: project.components.length, connections: project.connections.length, firmwareTargets: project.firmwareTargets.length },
+        content: [{ type: "text", text: `${replace ? "Replaced the active project with" : "Created a new project from"} ${blueprintId}: ${applied.components.length} components, ${applied.connections.length} connections` }],
+        data: { blueprintId, projectId: applied.id, replaced: replace, name: applied.name, components: applied.components.length, connections: applied.connections.length, firmwareTargets: applied.firmwareTargets.length, ...persisted },
       };
     },
   },
@@ -860,10 +786,10 @@ const tools: ToolDef[] = [
     annotations: { readOnlyHint: true },
     execute: async () => {
       const workspace = useWorkspaceStore.getState();
-      const simulation = useSimulationStore.getState();
       const validation = useValidationStore.getState();
       const selection = useSelectionStore.getState();
-        const state = {
+      const behavior = await getBehaviorState();
+      const state = {
         project: { id: useProjectStore.getState().activeProjectId, name: useProjectStore.getState().project.name },
         projects: useProjectStore.getState().projects.map((project) => ({ id: project.id, name: project.name, active: project.id === useProjectStore.getState().activeProjectId })),
         selection: { activeComponentId: selection.activeComponentId, selectedIds: selection.selectedIds },
@@ -873,9 +799,8 @@ const tools: ToolDef[] = [
         rightPanelWidth: workspace.rightPanelWidth,
         panels: {
           webmcp: { activities: useWebMCPStore.getState().activities.slice(0, 12) },
-          terminal: { running: simulation.running, serialOutput: simulation.serialOutput.slice(-2000) },
-          debug: { timeNs: simulation.timeNs.toString(), pinStates: simulation.pinStates, engineStatus: simulation.engineStatus, remoteSessionId: simulation.remoteSessionId, lastRun: simulation.lastRun },
-          validation: { valid: validation.valid, issues: validation.issues, codeIssues: validation.codeIssues, compile: validation.compile, checkedAt: validation.checkedAt },
+          behavior: behavior.ok ? behavior.data : { status: "unavailable", error: behavior.error },
+          validation: { valid: validation.valid, issues: validation.issues, checkedAt: validation.checkedAt },
         },
       };
       return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }], data: state };
@@ -912,25 +837,41 @@ const tools: ToolDef[] = [
       type: "object",
       properties: {
         query: { type: "string", description: "Search text" },
-        category: { type: "string", enum: ["board", "sensor", "actuator", "display", "power", "logic", "communication", ""] },
-        domain: { type: "string", enum: ["gpio", "i2c", "spi", "uart", "power", "rf", ""] },
+        category: { type: "string", enum: ["board", "sensor", "actuator", "display", "power", "logic", "communication", "mechanical", "rf", "custom", "analog", "passive", ""] },
+        domain: { type: "string", enum: ["power", "power_output", "ground", "gpio", "adc", "pwm", "i2c", "spi", "uart", "usb", "ethernet", "can", "pcie", "csi", "hdmi", "displayport", "rf", "mechanical", "optical", ""] },
       },
     },
     annotations: { readOnlyHint: true },
     execute: async ({ query, category, domain }) => {
       const res = searchCatalog(query ?? "", { category: category || undefined, domain: domain || undefined });
-      return { content: [{ type: "text", text: JSON.stringify(res.map((r) => ({ id: r.id, title: r.title, category: r.category, ports: r.ports.length, model: { support: r.model.support, family: r.model.family, modelId: r.model.modelId } })), null, 2) }], data: res };
+      const publicResults = res.map((component) => {
+        const { models: _legacyModels, ...catalogData } = component;
+        return {
+          ...catalogData,
+          preview: component.behavior
+            ? { mapped: true, profileId: component.behavior.profileId, profileVersion: component.behavior.profileVersion, ...(component.behavior.variant ? { variant: component.behavior.variant } : {}) }
+            : { mapped: false },
+        };
+      });
+      return { content: [{ type: "text", text: JSON.stringify(publicResults.map((component) => ({ id: component.id, title: component.title, category: component.category, ports: component.ports.length, preview: component.preview })), null, 2) }], data: publicResults };
     },
   },
   {
     name: "component.inspect",
-    description: "Inspect a component definition by id — returns ports, models, fidelity checklist, electrical specs",
+    description: "Inspect a component definition by id — returns ports, exact typed-preview mapping, and catalog metadata",
     inputSchema: { type: "object", properties: { componentId: { type: "string", description: "Catalog id, e.g. bmp280" } }, required: ["componentId"] },
     annotations: { readOnlyHint: true },
     execute: async ({ componentId }) => {
       const def = getCatalogComponent(componentId);
       if (!def) return { content: [{ type: "text", text: `Unknown component ${componentId}` }], isError: true };
-      return { content: [{ type: "text", text: JSON.stringify(def, null, 2) }], data: def };
+      const { models: _legacyModels, ...catalogData } = def;
+      const inspected = {
+        ...catalogData,
+        preview: def.behavior
+          ? { mapped: true, profileId: def.behavior.profileId, profileVersion: def.behavior.profileVersion, ...(def.behavior.variant ? { variant: def.behavior.variant } : {}) }
+          : { mapped: false },
+      };
+      return { content: [{ type: "text", text: JSON.stringify(inspected, null, 2) }], data: inspected };
     },
   },
   {
@@ -963,9 +904,11 @@ const tools: ToolDef[] = [
   },
   {
     name: "component.remove",
-    description: "Remove a component instance from the project",
-    inputSchema: { type: "object", properties: { instanceId: { type: "string" } }, required: ["instanceId"] },
-    execute: async ({ instanceId }) => {
+    description: "Remove a component instance and its connections after confirming the exact instance id",
+    inputSchema: { type: "object", properties: { instanceId: { type: "string" }, confirmInstanceId: { type: "string" } }, required: ["instanceId", "confirmInstanceId"] },
+    annotations: { destructiveHint: true },
+    execute: async ({ instanceId, confirmInstanceId }) => {
+      if (instanceId !== confirmInstanceId) return toolFailure("CONFIRMATION_REQUIRED", "Removing a component requires confirmInstanceId to exactly match instanceId.", { instanceId });
       const exists = useProjectStore.getState().project.components.some((component) => component.id === instanceId);
       if (!exists) return { content: [{ type: "text", text: `Unknown component instance ${instanceId}` }], isError: true };
       useProjectStore.getState().removeComponent(instanceId);
@@ -1042,9 +985,11 @@ const tools: ToolDef[] = [
   },
   {
     name: "connection.disconnect",
-    description: "Disconnect (remove) a connection by id",
-    inputSchema: { type: "object", properties: { connectionId: { type: "string" } }, required: ["connectionId"] },
-    execute: async ({ connectionId }) => {
+    description: "Disconnect (remove) a connection after confirming its exact id",
+    inputSchema: { type: "object", properties: { connectionId: { type: "string" }, confirmConnectionId: { type: "string" } }, required: ["connectionId", "confirmConnectionId"] },
+    annotations: { destructiveHint: true },
+    execute: async ({ connectionId, confirmConnectionId }) => {
+      if (connectionId !== confirmConnectionId) return toolFailure("CONFIRMATION_REQUIRED", "Disconnecting requires confirmConnectionId to exactly match connectionId.", { connectionId });
       const exists = useProjectStore.getState().project.connections.some((connection) => connection.id === connectionId);
       if (!exists) return { content: [{ type: "text", text: `Unknown connection ${connectionId}` }], isError: true };
       useProjectStore.getState().disconnectPorts(connectionId);
@@ -1063,340 +1008,60 @@ const tools: ToolDef[] = [
   },
   {
     name: "firmware.write",
-    description: "Write firmware files for a board instance; the code editor, Problems, Debug, and other tabs update live",
+    description: "Compatibility alias for code.write. Save ordinary editable source for a board; Schematic does not compile, run, upload, or physically test it.",
     inputSchema: {
       type: "object",
       properties: {
-        componentId: { type: "string", description: "Board instance id" },
-        files: { type: "array", items: { type: "object", properties: { name: { type: "string" }, content: { type: "string" } }, required: ["name", "content"] } },
-        language: { type: "string", enum: ["arduino", "micropython", "espidf", "c", "python", "wasm"] },
-        boardFqbn: { type: "string" },
+        componentId: { type: "string", minLength: 1, maxLength: MAX_TOOL_IDENTIFIER_LENGTH, description: "Board instance id" },
+        files: { type: "array", minItems: 1, maxItems: 128, items: { type: "object", properties: { name: { type: "string", minLength: 1, maxLength: 240 }, content: { type: "string", maxLength: 1048576 } }, required: ["name", "content"], additionalProperties: false } },
+        language: { type: "string", enum: ["arduino", "micropython", "espidf", "c", "cpp", "python"] },
+        boardFqbn: { type: "string", minLength: 1, maxLength: MAX_TOOL_IDENTIFIER_LENGTH },
+        expectedContentSha256: { anyOf: [{ type: "string", pattern: "^[0-9a-fA-F]{64}$" }, { type: "null" }], description: "null for create-only, or the exact hash returned by firmware.read/code.read for replacement" },
     },
-    required: ["componentId", "files"],
+    required: ["componentId", "files", "expectedContentSha256"],
     },
-    execute: async ({ componentId, files, language, boardFqbn }) => {
-      const id = String(componentId ?? "");
-      const project = useProjectStore.getState().project;
-      const binding = resolveFirmwareBinding(project, id);
-      if (!binding.component) return { content: [{ type: "text", text: `Unknown component ${id}` }], isError: true };
-      if (!isBoardDefinition(binding.definition)) return { content: [{ type: "text", text: `${id} is not a programmable board` }], isError: true };
-      if (!Array.isArray(files) || files.length === 0) return { content: [{ type: "text", text: "At least one firmware file is required" }], isError: true };
-      const normalizedFiles = files.map((file: any) => ({ name: String(file?.name ?? "").trim(), content: typeof file?.content === "string" ? file.content : String(file?.content ?? "") }));
-      if (normalizedFiles.some((file: { name: string }) => !file.name)) return { content: [{ type: "text", text: "Every firmware file needs a name" }], isError: true };
-      const targetConfig = binding.targetConfig;
-      if (boardFqbn && targetConfig && boardFqbn !== targetConfig.fqbn) {
-        return { content: [{ type: "text", text: `${id} maps to ${targetConfig.fqbn}; refusing firmware for ${boardFqbn}` }], isError: true };
-      }
-      const targetLanguage = language ?? binding.target?.language ?? targetConfig?.language;
-      const targetFqbn = boardFqbn ?? targetConfig?.fqbn ?? binding.target?.boardFqbn;
-      useProjectStore.getState().updateFirmware(id, normalizedFiles, { language: targetLanguage, boardFqbn: targetFqbn });
-      const codeIssues = validateFirmwareFiles(normalizedFiles);
-      useValidationStore.getState().setCodeIssues(codeIssues);
-      useSimulationStore.getState().appendSerial(`[firmware] ${id} updated · ${normalizedFiles.length} file(s)\n`);
-      useSelectionStore.getState().setActive(id);
-      return { content: [{ type: "text", text: `Firmware written for ${id} (${normalizedFiles.length} file(s))` }], data: { componentId: id, definitionId: binding.component.definitionId, language: targetLanguage, boardFqbn: targetFqbn, files: normalizedFiles.map((file: { name: string }) => file.name), codeIssues } };
+    execute: async (args) => {
+      const { componentId, files, language, boardFqbn, expectedContentSha256 } = args;
+      if (!boundedToolIdentifier(componentId)) return toolFailure("INVALID_CODE_REQUEST", "componentId must be a bounded identifier and expectedContentSha256 must be null or a 64-character SHA-256 hash.");
+      if (!Object.prototype.hasOwnProperty.call(args ?? {}, "expectedContentSha256") || expectedContentSha256 === undefined) return toolFailure("SOURCE_PRECONDITION_REQUIRED", "Code writes require expectedContentSha256: null for create-only, or the exact current hash for replacement.");
+      if (!validSha256(expectedContentSha256)) return toolFailure("INVALID_CODE_REQUEST", "expectedContentSha256 must be null or a 64-character SHA-256 hash.");
+      const result = await writeCode({ targetComponentId: componentId, files: Array.isArray(files) ? files : [], language: language ?? "arduino", boardFqbn, expectedContentSha256, origin: "ai-generated" });
+      if (!result.ok) return { content: [{ type: "text", text: JSON.stringify(result.error, null, 2) }], isError: true, error: result.error, data: { code: result.error.code, ...(result.data ?? {}) } };
+      useSelectionStore.getState().setActive(String(componentId ?? ""));
+      return { content: [{ type: "text", text: JSON.stringify({ ...result.data, compatibilityAlias: "firmware.write" }, null, 2) }], data: { ...result.data, compatibilityAlias: "firmware.write" } };
     },
   },
   {
     name: "firmware.read",
-    description: "Read firmware files for a board instance from the active project",
-    inputSchema: { type: "object", properties: { componentId: { type: "string" } }, required: ["componentId"] },
+    description: "Compatibility alias for code.read. Read editable source metadata for a board; source is not executed.",
+    inputSchema: { type: "object", properties: { componentId: { type: "string", minLength: 1, maxLength: MAX_TOOL_IDENTIFIER_LENGTH } }, required: ["componentId"] },
     annotations: { readOnlyHint: true },
     execute: async ({ componentId }) => {
-      const id = String(componentId ?? "");
-      const binding = resolveFirmwareBinding(useProjectStore.getState().project, id);
-      if (!binding.target) return { content: [{ type: "text", text: `No firmware for ${id}` }], isError: true };
-      return { content: [{ type: "text", text: JSON.stringify({ ...binding.target, definitionId: binding.component?.definitionId ?? binding.target.definitionId, definitionMatchesTarget: binding.definitionMatchesTarget }, null, 2) }], data: { ...binding.target, definitionId: binding.component?.definitionId ?? binding.target.definitionId, definitionMatchesTarget: binding.definitionMatchesTarget } };
+      if (!boundedToolIdentifier(componentId)) return toolFailure("INVALID_CODE_REQUEST", "componentId must be a bounded non-empty identifier of at most 200 characters.");
+      const result = await readCode(String(componentId ?? ""));
+      if (!result.ok) return { content: [{ type: "text", text: JSON.stringify(result.error, null, 2) }], isError: true, error: result.error, data: { code: result.error.code, ...(result.data ?? {}) } };
+      return { content: [{ type: "text", text: JSON.stringify({ ...result.data, compatibilityAlias: "firmware.read" }, null, 2) }], data: { ...result.data, compatibilityAlias: "firmware.read" } };
     },
   },
   {
     name: "firmware.check",
-    description: "Run browser-safe firmware diagnostics and publish them to Problems and Debug",
-    inputSchema: { type: "object", properties: { componentId: { type: "string" } }, required: ["componentId"] },
-    execute: async ({ componentId }) => {
-      const id = String(componentId ?? "");
-      const binding = resolveFirmwareBinding(useProjectStore.getState().project, id);
-      const target = binding.target;
-      if (!target) return { content: [{ type: "text", text: `No firmware for ${id}` }], isError: true };
-      const targetIssues = !binding.component || !binding.definition
-        ? [{ code: "INVALID_FIRMWARE_TARGET", message: `Firmware target ${id} references a missing board.` }]
-        : !isBoardDefinition(binding.definition)
-          ? [{ code: "NON_BOARD_FIRMWARE_TARGET", message: `${binding.definition.title} is not a programmable board.` }]
-          : !target.definitionId
-            ? [{ code: "FIRMWARE_DEFINITION_REQUIRED", message: "Firmware has no exact board definition binding." }]
-            : !target.boardFqbn
-              ? [{ code: "FIRMWARE_FQBN_REQUIRED", message: "Firmware has no explicit board FQBN." }]
-          : !binding.definitionMatchesTarget
-            ? [{ code: "FIRMWARE_DEFINITION_MISMATCH", message: `Firmware was written for ${target.definitionId}, but the current board is ${binding.component.definitionId}.` }]
-            : !binding.fqbnMatchesDefinition
-              ? [{ code: "FIRMWARE_FQBN_MISMATCH", message: `Firmware uses ${target.boardFqbn}, but the current board maps to ${binding.targetConfig?.fqbn}.` }]
-            : [];
-      const codeIssues = validateFirmwareFiles(target.files);
-      useValidationStore.getState().setCodeIssues(codeIssues);
-      useSimulationStore.getState().appendSerial(`[firmware] checked ${id} · ${codeIssues.length + targetIssues.length} diagnostic(s)\n`);
-      return { content: [{ type: "text", text: JSON.stringify({ componentId: id, codeIssues, targetIssues }, null, 2) }], data: { componentId: id, codeIssues, targetIssues } };
-    },
-  },
-  {
-    name: "firmware.compile",
-    description: "Compile firmware for a board; uses the remote compiler when connected and a browser preflight on static deployments",
-    inputSchema: { type: "object", properties: { componentId: { type: "string" }, boardFqbn: { type: "string", description: "e.g. arduino:avr:uno" } }, required: ["componentId"] },
-    execute: async ({ componentId, boardFqbn }, { signal } = {}) => {
-      const proj = useProjectStore.getState().project;
-      const id = String(componentId ?? "");
-      const binding = resolveFirmwareBinding(proj, id);
-      const tgt = binding.target;
-      if (!tgt) {
-        useValidationStore.getState().setCompile({ status: "error", log: `No firmware for ${id}`, checkedAt: Date.now() });
-        return { content: [{ type: "text", text: `No firmware for ${id} — call firmware.write first` }], isError: true };
-      }
-      if (!binding.component || !binding.definition || !isBoardDefinition(binding.definition)) {
-        const message = `${id} is not a valid programmable board target`;
-        useValidationStore.getState().setCompile({ status: "error", log: message, checkedAt: Date.now() });
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-      if (!binding.definitionMatchesTarget) {
-        const message = `Firmware target ${id} was created for ${tgt.definitionId}, but the current board is ${binding.component.definitionId}`;
-        useValidationStore.getState().setCompile({ status: "error", log: message, checkedAt: Date.now() });
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-      if (boardFqbn && binding.targetConfig && boardFqbn !== binding.targetConfig.fqbn) {
-        const message = `${id} maps to ${binding.targetConfig.fqbn}; refusing compilation for ${boardFqbn}`;
-        useValidationStore.getState().setCompile({ status: "error", log: message, checkedAt: Date.now() });
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-      if (!binding.fqbnMatchesDefinition && !boardFqbn) {
-        const message = `Firmware target ${id} uses ${tgt.boardFqbn}, but the current board maps to ${binding.targetConfig?.fqbn}`;
-        useValidationStore.getState().setCompile({ status: "error", log: message, checkedAt: Date.now() });
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-      const fqbn = boardFqbn ?? tgt.boardFqbn ?? binding.targetConfig?.fqbn;
-      const codeIssues = validateFirmwareFiles(tgt.files);
-      useValidationStore.getState().setCodeIssues(codeIssues);
-      if (!fqbn) {
-        const message = `No compiler target is mapped for ${binding.definition.title}; provide boardFqbn explicitly or use a supported board.`;
-        useValidationStore.getState().setCompile({ status: "unavailable", log: message, checkedAt: Date.now() });
-        return { content: [{ type: "text", text: message }], data: { componentId: id, definitionId: binding.component.definitionId, available: false, error: message, codeIssues } };
-      }
-      useValidationStore.getState().setCompile({ status: "checking", boardFqbn: fqbn, log: "Checking source…", checkedAt: Date.now() });
-      const result = await fetchJson("/api/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: tgt.files, board_fqbn: fqbn, component_id: id, definition_id: binding.component.definitionId, language: tgt.language ?? binding.targetConfig?.language }), signal });
-      // A hosted Pages/Sites Function can be reachable while still lacking a
-      // native arduino-cli binary. Treat its explicit preflight contract like
-      // the fully static fallback instead of reporting a malformed compiler
-      // success or blocking the rest of the behavioral runtime.
-      if (result.available && result.response?.ok && result.data?.mode === "browser-preflight") {
-        const preflight = result.data;
-        const status = preflight.preflight?.balanced_braces === false || codeIssues.some((issue) => issue.severity === "error") ? "error" : "unavailable";
-        useValidationStore.getState().setCompile({ status, boardFqbn: fqbn, log: JSON.stringify(preflight, null, 2), checkedAt: Date.now() });
-        useSimulationStore.getState().appendSerial(`[firmware] ${status === "error" ? "compile failed" : "preflight complete"} · ${id}\n`);
-        return { content: [{ type: "text", text: JSON.stringify(preflight, null, 2) }], data: { ...preflight, componentId: id, definitionId: binding.component.definitionId, codeIssues } };
-      }
-      if (!result.available) {
-        const preflight = browserCompilePreflight(tgt.files, fqbn);
-        const status = codeIssues.some((issue) => issue.severity === "error") ? "error" : "unavailable";
-        useValidationStore.getState().setCompile({ status, boardFqbn: fqbn, log: JSON.stringify(preflight, null, 2), checkedAt: Date.now() });
-        useSimulationStore.getState().appendSerial(`[firmware] ${status === "error" ? "compile failed" : "preflight complete"} · ${id}\n`);
-        return { content: [{ type: "text", text: JSON.stringify(preflight, null, 2) }], data: { ...preflight, componentId: id, definitionId: binding.component.definitionId, codeIssues } };
-      }
-      if (!result.response?.ok) {
-        useValidationStore.getState().setCompile({ status: "error", boardFqbn: fqbn, log: JSON.stringify(result.data, null, 2), checkedAt: Date.now() });
-        return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: result.data, isError: true };
-      }
-      if (result.data?.success !== true) {
-        const message = result.data?.error || "Compiler returned no firmware artifact";
-        useValidationStore.getState().setCompile({ status: "error", boardFqbn: fqbn, log: JSON.stringify(result.data, null, 2), checkedAt: Date.now() });
-        useSimulationStore.getState().appendSerial(`[firmware] compile failed · ${id} · ${message}\n`);
-        return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: { ...result.data, componentId: id, definitionId: binding.component.definitionId, boardFqbn: fqbn }, isError: true };
-      }
-      const identity = result.data?.artifact_identity && typeof result.data.artifact_identity === "object"
-        ? {
-            componentId: result.data.artifact_identity.component_id ?? id,
-            definitionId: result.data.artifact_identity.definition_id ?? binding.component.definitionId,
-            sourceSha256: result.data.artifact_identity.source_sha256,
-            artifactName: result.data.artifact_identity.artifact_name ?? null,
-            artifactSha256: result.data.artifact_identity.artifact_sha256 ?? null,
-            boardFqbn: result.data.artifact_identity.board_fqbn ?? fqbn,
-            language: result.data.artifact_identity.language ?? tgt.language ?? binding.targetConfig?.language,
-            compiler: result.data.artifact_identity.compiler ?? null,
-          }
-        : undefined;
-      useProjectStore.getState().setCompiledArtifact(id, {
-        success: true,
-        log: JSON.stringify(result.data, null, 2),
-        hexB64: typeof result.data?.hex_content === "string" ? btoa(result.data.hex_content) : undefined,
-        binB64: typeof result.data?.binary_content === "string" ? base64FromHex(result.data.binary_content) : undefined,
-        identity,
-      });
-      useValidationStore.getState().setCompile({ status: "success", boardFqbn: fqbn, log: JSON.stringify(result.data, null, 2), checkedAt: Date.now() });
-      useSimulationStore.getState().appendSerial(`[firmware] compiled · ${id}\n`);
-      return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: { ...result.data, componentId: id, definitionId: binding.component.definitionId, boardFqbn: fqbn } };
-    },
-  },
-  {
-    name: "simulation.run",
-    description: "Run simulation for current project (uses remote engines when connected, otherwise a browser runtime)",
-    inputSchema: { type: "object", properties: { durationMs: { type: "number", description: "Duration ms, default 1000" } } },
-    execute: async ({ durationMs }, { signal } = {}) => {
-      const project = useProjectStore.getState().project;
-      const inputs = useSimulationStore.getState().pinStates;
-      const boundedDurationMs = durationMs ?? 1000;
-      const validation = validateProject(project);
-      const topology = runTopologyCheck(project, inputs, boundedDurationMs);
-      // Keep agent-triggered runs aligned with the Studio button: a missing
-      // executable model must not suppress canonical wiring diagnostics.
-      useValidationStore.getState().setResult(validation);
-      useSimulationStore.getState().start();
-      // The bounded portable contract is deliberately browser-first so a
-      // connected backend cannot silently replace the C/WASM trace with a
-      // different interpreter. More complex projects retain the remote-first
-      // path and fall back to the explicit browser interpreter when offline.
-      if (hasPortableButtonLedContract(project)) {
-        const res = enrichRunResult(await runBrowserSimulation(project, inputs, boundedDurationMs), topology, validation);
-        useSimulationStore.getState().setLastRun(res);
-        if (res.status === "unsupported-api" && res.codeExecution?.status !== "unavailable") {
-          return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res, isError: true };
-        }
-        return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
-      }
-      const sessionId = useSimulationStore.getState().remoteSessionId;
-      const result = await fetchJson("/api/simulation/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, inputs, duration_ns: boundedDurationMs * 1e6, ...(sessionId ? { session_id: sessionId } : {}) }), signal });
-      const remoteContract = result.available && result.data && typeof result.data === "object" && result.data.runtime === "remote" && result.data.execution_mode === "behavioral";
-      const remotePayload = remoteContract && result.response?.ok;
-      const degradedRemote = remoteContract && DEGRADED_RUN_STATUSES.has(String(result.data.status));
-      const remote = remotePayload && (result.data.status === "completed" || result.data.status === "completed-with-warnings");
-      if (degradedRemote) {
-        const normalized = enrichRunResult(normalizeRemoteRun(result.data, topology), topology, validation);
-        const simulation = useSimulationStore.getState();
-        simulation.setTime(BigInt(Math.round(boundedDurationMs * 1_000_000)));
-        for (const [portId, value] of Object.entries(normalized.outputs)) {
-          if (typeof value === "boolean" || typeof value === "number") simulation.setPin(portId, value);
-        }
-        simulation.setLastRun(normalized);
-        simulation.appendSerial(`[${project.name}] remote checks complete · browser code execution unavailable\n`);
-        simulation.stop();
-        return { content: [{ type: "text", text: JSON.stringify(normalized, null, 2) }], data: normalized };
-      }
-      if (remotePayload && !remote) {
-        useSimulationStore.getState().stop();
-        return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: result.data, isError: true };
-      }
-      if (result.available && result.response && !result.response.ok && result.data && typeof result.data === "object") {
-        useSimulationStore.getState().stop();
-        return { content: [{ type: "text", text: JSON.stringify(result.data, null, 2) }], data: result.data, isError: true };
-      }
-      if (!remotePayload && result.available && result.response?.ok && result.data && typeof result.data === "object") {
-        useSimulationStore.getState().stop();
-        const contractError = { status: "invalid-response", error: "Simulation backend returned a JSON response without the remote behavioral contract.", response: result.data };
-        return { content: [{ type: "text", text: JSON.stringify(contractError, null, 2) }], data: contractError, isError: true };
-      }
-      if (!remote) {
-        const res = enrichRunResult(await runBrowserSimulation(project, inputs, boundedDurationMs), topology, validation);
-        const reason = result.available && !result.response?.ok ? ` Backend HTTP ${result.response?.status ?? "unknown"};` : "";
-        res.note = `${res.note}${reason} Browser runtime is the active execution path.`;
-        useSimulationStore.getState().setLastRun(res);
-        return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }], data: res };
-      }
-      const res = result.data;
-      const normalized = enrichRunResult(normalizeRemoteRun(res, topology), topology, validation);
-      const timeNs = BigInt(normalized.durationMs * 1_000_000);
-      const simulation = useSimulationStore.getState();
-      simulation.setRemoteSessionId(typeof res.session_id === "string" ? res.session_id : null);
-      simulation.setTime(timeNs);
-      for (const [portId, value] of Object.entries(normalized.outputs)) {
-        if (typeof value === "boolean" || typeof value === "number") simulation.setPin(portId, value);
-      }
-      simulation.setLastRun(normalized);
-      const readings = Object.entries(normalized.outputs).map(([key, value]) => `${key.split(":").pop()}=${value}`).join("  ");
-      simulation.appendSerial(`[${project.name}] remote runtime · t=${timeNs}ns${readings ? `  ${readings}` : ""}\n${normalized.serialOutput}`);
-      simulation.stop();
-      return { content: [{ type: "text", text: JSON.stringify(normalized, null, 2) }], data: normalized };
-    },
-  },
-  {
-    name: "simulation.stop",
-    description: "Stop simulation",
-    inputSchema: { type: "object", properties: {} },
-    execute: async (_args, { signal } = {}) => {
-      useSimulationStore.getState().stop();
-      const sessionId = useSimulationStore.getState().remoteSessionId;
-      const result = await fetchJson("/api/simulation/stop", { method: "POST", body: JSON.stringify(sessionId ? { session_id: sessionId } : {}), signal });
-      useSimulationStore.getState().setRemoteSessionId(null);
-      if (!result.available) return { content: [{ type: "text", text: "Simulation stopped locally (browser runtime)" }], data: { status: "stopped", runtime: "browser" } };
-      if (!result.response?.ok) return { content: [{ type: "text", text: `Simulation stopped locally; backend returned HTTP ${result.response?.status ?? "unknown"}` }], data: result.data, isError: true };
-      return { content: [{ type: "text", text: "Simulation stopped" }], data: result.data };
-    },
-  },
-  {
-    name: "simulation.get_state",
-    description: "Get simulation state (running, timeNs, pinStates, engineStatus)",
-    inputSchema: { type: "object", properties: {} },
+    description: "Compatibility diagnostic alias. Reports editable source metadata only; Schematic does not compile or preflight source in the preview workflow.",
+    inputSchema: { type: "object", properties: { componentId: { type: "string", minLength: 1, maxLength: MAX_TOOL_IDENTIFIER_LENGTH } }, required: ["componentId"] },
     annotations: { readOnlyHint: true },
-    execute: async () => {
-      const sim = useSimulationStore.getState();
-      const state = { running: sim.running, timeNs: sim.timeNs.toString(), pinStates: sim.pinStates, engineStatus: sim.engineStatus, remoteSessionId: sim.remoteSessionId, lastRun: sim.lastRun, serialOutput: sim.serialOutput.slice(-500) };
-      return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }], data: state };
-    },
-  },
-  {
-    name: "simulation.set_input",
-    description: "Set sensor input (e.g. motion=true, temperature=25) for simulation",
-    inputSchema: { type: "object", properties: { componentId: { type: "string" }, key: { type: "string" }, value: {} } , required: ["componentId", "key", "value"]},
-    execute: async ({ componentId, key, value }, { signal } = {}) => {
-      throwIfAborted(signal);
-      const component = useProjectStore.getState().project.components.find((item) => item.id === componentId);
-      if (!component) return { content: [{ type: "text", text: `Unknown component ${componentId}` }], isError: true };
-      if (typeof value !== "boolean" && typeof value !== "number") return { content: [{ type: "text", text: "Simulation input must be a boolean or number" }], isError: true };
-      useSimulationStore.getState().setPin(`${componentId}:${key}`, value as boolean | number);
-      useSimulationStore.getState().appendSerial(`[input] ${componentId}.${key}=${JSON.stringify(value)}\n`);
-      // Forward to a connected backend only when explicitly configured, or when
-      // the app is running locally. Never open insecure ws:// from HTTPS Pages.
-      const configuredBackend = import.meta.env.VITE_BACKEND_URL as string | undefined;
-      const localBackend = ["localhost", "127.0.0.1", "::1"].includes(location.hostname) ? `${location.protocol}//${location.hostname}:8001` : undefined;
-      const backendUrl = configuredBackend || localBackend;
-      if (backendUrl) {
-        let ws: WebSocket | undefined;
-        const closeOnAbort = () => ws?.close();
-        signal?.addEventListener("abort", closeOnAbort, { once: true });
-        try {
-          const auth = await getAuthSession(false, signal);
-          throwIfAborted(signal);
-          const wsUrl = new URL(apiUrl("/api/simulation/ws"), backendUrl);
-          wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
-          // Browser WebSocket cannot set Authorization headers. Offer the
-          // short-lived ticket as a subprotocol instead of putting a bearer
-          // token in the URL where it can leak into logs, history, or proxy
-          // analytics. Local development can use its explicit local session
-          // credential when the ticket endpoint is not enabled.
-          let protocols = auth?.token ? ["schematic-bearer", `schematic-token.${auth.token}`] : ["schematic-local"];
-          if (auth?.token && auth.environment !== "local") {
-            const ticket = await fetchJson("/api/auth/ws-ticket", { method: "POST", signal });
-            throwIfAborted(signal);
-            if (ticket.response?.ok && typeof ticket.data?.ticket === "string") protocols = ["schematic-bearer", `schematic-ticket.${ticket.data.ticket}`];
-          }
-          throwIfAborted(signal);
-          const socket = new WebSocket(wsUrl.toString(), protocols);
-          ws = socket;
-          socket.onopen = () => {
-            if (signal?.aborted) {
-              socket.close();
-              return;
-            }
-            socket.send(JSON.stringify({ op: "set_sensor_input", componentId, key, value, session_id: useSimulationStore.getState().remoteSessionId }));
-            socket.close();
-          };
-        } catch (error) {
-          if (signal?.aborted || (error as Error)?.name === "AbortError") throw signal?.aborted ? abortError() : error;
-        } finally {
-          signal?.removeEventListener("abort", closeOnAbort);
-        }
-      }
-      throwIfAborted(signal);
-      return { content: [{ type: "text", text: `Set ${componentId}.${key}=${JSON.stringify(value)}` }], data: { componentId, key, value, pin: `${componentId}:${key}`, forwarded: Boolean(backendUrl) } };
+    execute: async ({ componentId }) => {
+      if (!boundedToolIdentifier(componentId)) return toolFailure("INVALID_CODE_REQUEST", "componentId must be a bounded non-empty identifier of at most 200 characters.");
+      const id = String(componentId ?? "");
+      const result = await readCode(id);
+      if (!result.ok) return { content: [{ type: "text", text: JSON.stringify(result.error, null, 2) }], isError: true, error: result.error, data: { code: result.error.code, ...(result.data ?? {}) } };
+      return {
+        content: [{ type: "text", text: JSON.stringify({ componentId: id, status: "not-performed", notice: "Schematic does not compile or preflight editable source. Use the board SDK/toolchain externally.", document: result.data.document }, null, 2) }],
+        data: { componentId: id, status: "not-performed", notice: "Schematic does not compile or preflight editable source. Use the board SDK/toolchain externally.", document: result.data.document },
+      };
     },
   },
   {
     name: "validation.check",
-    description: "Validate current design — returns issues (voltage, ground, I2C collision, TX-TX, etc.)",
+    description: "Run static graph-rule validation for wiring and component constraints. Source is not read or executed, and physical wiring/hardware are not verified.",
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true },
     execute: async () => {
@@ -1404,7 +1069,8 @@ const tools: ToolDef[] = [
         const project = useProjectStore.getState().project;
         const result = validateProject(project);
         useValidationStore.getState().setResult(result);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], data: result };
+        const data = { ...result, scope: "static-graph-rules", sourceCodeEvaluated: false, physicalWiringVerified: false, hardwareVerified: false, notice: GRAPH_VALIDATION_NOTICE };
+        return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], data };
       } catch (e) {
         return { content: [{ type: "text", text: `Validation error: ${(e as Error).message}` }], isError: true };
       }
@@ -1412,10 +1078,11 @@ const tools: ToolDef[] = [
   },
   {
     name: "validation.explain_error",
-    description: "Explain a validation error code with fix guidance",
-    inputSchema: { type: "object", properties: { code: { type: "string" } }, required: ["code"] },
+    description: "Explain a static graph-check error code with fix guidance. Physical wiring, hardware behavior, and editable source remain unverified.",
+    inputSchema: { type: "object", properties: { code: { type: "string", minLength: 1, maxLength: MAX_TOOL_IDENTIFIER_LENGTH } }, required: ["code"] },
     annotations: { readOnlyHint: true },
     execute: async ({ code }) => {
+      if (!boundedToolIdentifier(code)) return toolFailure("INVALID_VALIDATION_CODE", "code must be a bounded non-empty string of at most 200 characters.");
       const map: Record<string, string> = {
         VOLTAGE_MISMATCH: "Voltage exceeds target max — insert level shifter or choose compatible variant.",
         OUTPUT_TO_OUTPUT: "Output→output illegal — one side must be input/bidirectional.",
@@ -1425,7 +1092,8 @@ const tools: ToolDef[] = [
         MISSING_GROUND: "Add common ground net.",
         USB_HOST_TO_HOST: "Host must connect to device.",
       };
-      return { content: [{ type: "text", text: map[code] ?? `No explanation for ${code}` }] };
+      const normalizedCode = code.trim();
+      return { content: [{ type: "text", text: map[normalizedCode] ?? `No explanation for ${normalizedCode}` }] };
     },
   },
   {
@@ -1434,7 +1102,7 @@ const tools: ToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Exact part, board, manufacturer, or catalog id" },
+        query: { type: "string", minLength: 1, maxLength: MAX_SHOPPING_QUERY_LENGTH, description: "Exact part, board, manufacturer, or catalog id" },
         quantity: { type: "integer", minimum: 1, maximum: 999, description: "Required quantity" },
         listings: {
           type: "array",
@@ -1476,10 +1144,10 @@ const tools: ToolDef[] = [
       description: "Omit listings/publication to run bounded public discovery and receive a handoff request. Include both to publish verified results.",
     },
     annotations: { untrustedContentHint: true },
-    execute: async ({ query = "", quantity = 1, listings, publication, __trustedAuth }, { signal } = {}) => {
-      if (typeof query !== "string" || (quantity !== undefined && (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1 || quantity > 999))) {
+    execute: async ({ query = "", quantity = 1, listings, publication, __trustedAuth }, { signal, persistenceContext } = {}) => {
+      if (typeof query !== "string" || query.trim().length === 0 || query.length > MAX_SHOPPING_QUERY_LENGTH || hasShoppingControlCharacters(query) || (quantity !== undefined && (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1 || quantity > 999))) {
         return shoppingError("INVALID_SEARCH_REQUEST", "shopping.search requires a string query and an integer quantity between 1 and 999.", {
-          query: typeof query === "string" ? query : null,
+          query: typeof query === "string" ? query.slice(0, MAX_SHOPPING_QUERY_LENGTH) : null,
           quantity: typeof quantity === "number" ? quantity : null,
           results: [],
           liveOffers: false,
@@ -1502,6 +1170,14 @@ const tools: ToolDef[] = [
         let discovery: ShoppingDiscovery | null = null;
         if (trustedAuth?.authenticated && trustedAuth.subject) {
           const lookup = await fetchJson(`/api/parts/search?query=${encodeURIComponent(searchQuery)}&quantity=${requestedQuantity}`, { signal });
+          if (!persistenceContextStillCurrent(persistenceContext)) {
+            return toolFailure(
+              "PERSISTENCE_NOT_READY",
+              "The active account room changed while parts discovery was running; the stale result was discarded.",
+              { unchanged: true, hint: "Re-run parts search after the workspace reports Saved." },
+              true,
+            );
+          }
           providerFallback = {
             attempted: true,
             available: Boolean(lookup.response?.ok),
@@ -1613,9 +1289,12 @@ const tools: ToolDef[] = [
   {
     name: "shopping.cart_add",
     description: "Add an exact shopping result to the build cart",
-    inputSchema: { type: "object", properties: { resultId: { type: "string" }, quantity: { type: "number" } }, required: ["resultId"] },
+    inputSchema: { type: "object", properties: { resultId: { type: "string", maxLength: 160 }, quantity: { type: "integer", minimum: 1, maximum: 999 } }, required: ["resultId"] },
     annotations: { untrustedContentHint: true },
     execute: async ({ resultId, quantity }) => {
+      if (!shoppingText(resultId, 160) || (quantity !== undefined && (!Number.isInteger(quantity) || quantity < 1 || quantity > 999))) {
+        return toolFailure("INVALID_CART_REQUEST", "resultId must be a non-empty string of at most 160 characters and quantity must be an integer from 1 to 999.");
+      }
       const id = String(resultId);
       const result = useShoppingStore.getState().results.find((item) => item.id === id);
       if (!result) return { content: [{ type: "text", text: `Unknown shopping result ${id}; search for the part first` }], isError: true };
@@ -1627,9 +1306,10 @@ const tools: ToolDef[] = [
   {
     name: "shopping.cart_remove",
     description: "Remove a part from the shopping cart",
-    inputSchema: { type: "object", properties: { resultId: { type: "string" } }, required: ["resultId"] },
+    inputSchema: { type: "object", properties: { resultId: { type: "string", maxLength: 160 } }, required: ["resultId"] },
     annotations: { untrustedContentHint: true },
     execute: async ({ resultId }) => {
+      if (!shoppingText(resultId, 160)) return toolFailure("INVALID_CART_REQUEST", "resultId must be a non-empty string of at most 160 characters.");
       const id = String(resultId);
       if (!useShoppingStore.getState().cart.some((line) => line.resultId === id)) return { content: [{ type: "text", text: `Shopping result ${id} is not in the cart` }], isError: true };
       useShoppingStore.getState().removeFromCart(id);
@@ -1639,9 +1319,12 @@ const tools: ToolDef[] = [
   {
     name: "shopping.cart_set_quantity",
     description: "Set the quantity for a shopping cart line, or remove it with zero",
-    inputSchema: { type: "object", properties: { resultId: { type: "string" }, quantity: { type: "number" } }, required: ["resultId", "quantity"] },
+    inputSchema: { type: "object", properties: { resultId: { type: "string", maxLength: 160 }, quantity: { type: "integer", minimum: 0, maximum: 999 } }, required: ["resultId", "quantity"] },
     annotations: { untrustedContentHint: true },
     execute: async ({ resultId, quantity }) => {
+      if (!shoppingText(resultId, 160) || !Number.isInteger(quantity) || quantity < 0 || quantity > 999) {
+        return toolFailure("INVALID_CART_REQUEST", "resultId must be a non-empty string of at most 160 characters and quantity must be an integer from 0 to 999.");
+      }
       const id = String(resultId);
       if (!useShoppingStore.getState().cart.some((line) => line.resultId === id)) return { content: [{ type: "text", text: `Shopping result ${id} is not in the cart` }], isError: true };
       useShoppingStore.getState().setQuantity(id, Number(quantity));
@@ -1651,9 +1334,12 @@ const tools: ToolDef[] = [
   {
     name: "shopping.cart_set_budget",
     description: "Set or clear the target build budget in USD",
-    inputSchema: { type: "object", properties: { budget: { type: ["number", "null"] } }, required: ["budget"] },
+    inputSchema: { type: "object", properties: { budget: { type: ["number", "null"], minimum: 0, maximum: 1_000_000_000 } }, required: ["budget"] },
     annotations: { untrustedContentHint: true },
     execute: async ({ budget }) => {
+      if (budget !== null && (typeof budget !== "number" || !Number.isFinite(budget) || budget < 0 || budget > 1_000_000_000)) {
+        return toolFailure("INVALID_CART_REQUEST", "budget must be null or a finite number from 0 to 1,000,000,000.");
+      }
       useShoppingStore.getState().setBudget(budget === null ? null : Number(budget));
       return { content: [{ type: "text", text: JSON.stringify(useShoppingStore.getState().getQuote(), null, 2) }], data: useShoppingStore.getState().getQuote() };
     },
@@ -1671,11 +1357,16 @@ const tools: ToolDef[] = [
   {
     name: "shopping.cart_reset",
     description: "Reset the cart to one of every catalog part currently required by the project, after listings have been searched",
-    inputSchema: { type: "object", properties: { requiredCatalogIds: { type: "array", items: { type: "string" } } } },
+    inputSchema: { type: "object", properties: { requiredCatalogIds: { type: "array", maxItems: 500, items: { type: "string", maxLength: 120 } } } },
     annotations: { untrustedContentHint: true },
     execute: async ({ requiredCatalogIds }) => {
+      if (requiredCatalogIds !== undefined && (!Array.isArray(requiredCatalogIds)
+        || requiredCatalogIds.length > 500
+        || requiredCatalogIds.some((catalogId) => !shoppingText(catalogId, 120)))) {
+        return toolFailure("INVALID_CART_REQUEST", "requiredCatalogIds must contain at most 500 non-empty catalog IDs of at most 120 characters each.");
+      }
       const project = useProjectStore.getState().project;
-      const ids = Array.isArray(requiredCatalogIds) && requiredCatalogIds.length ? requiredCatalogIds.map(String) : project.components.map((component) => component.definitionId);
+      const ids = Array.isArray(requiredCatalogIds) && requiredCatalogIds.length ? requiredCatalogIds : project.components.map((component) => component.definitionId);
       const availableIds = new Set(useShoppingStore.getState().results.filter((result) => result.exactMatch).map((result) => result.catalogId));
       const missingCatalogIds = [...new Set(ids)].filter((catalogId) => !availableIds.has(catalogId));
       useShoppingStore.getState().resetCart(ids);
@@ -1686,9 +1377,12 @@ const tools: ToolDef[] = [
   {
     name: "shopping.choose_alternative",
     description: "Replace a cart part with an agent-recommended context-aware alternative",
-    inputSchema: { type: "object", properties: { resultId: { type: "string" }, catalogId: { type: "string" } }, required: ["resultId", "catalogId"] },
+    inputSchema: { type: "object", properties: { resultId: { type: "string", maxLength: 160 }, catalogId: { type: "string", maxLength: 120 } }, required: ["resultId", "catalogId"] },
     annotations: { untrustedContentHint: true },
     execute: async ({ resultId, catalogId }) => {
+      if (!shoppingText(resultId, 160) || !shoppingText(catalogId, 120)) {
+        return toolFailure("INVALID_CART_REQUEST", "resultId and catalogId must be non-empty bounded strings.");
+      }
       const changed = useShoppingStore.getState().chooseAlternative(String(resultId), String(catalogId));
       if (!changed) return { content: [{ type: "text", text: "Alternative is not available as a searched result yet" }], isError: true };
       return { content: [{ type: "text", text: JSON.stringify(useShoppingStore.getState().getQuote(), null, 2) }], data: useShoppingStore.getState().getQuote() };
@@ -1742,15 +1436,39 @@ async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> 
       useWebMCPStore.getState().finishTool(activityId, denied, true);
       return denied;
     }
+    // A session event can replace the persistence room while tools remain
+    // registered in the browser. Mutation tools capture the current hydrated
+    // lease and fail immediately during a room transition; read-only
+    // inspection can continue to report the currently visible snapshot.
+    const isMutation = !tool.annotations?.readOnlyHint;
+    const persistenceContext = isMutation ? getProjectPersistenceContext() : null;
+    if (isMutation && !isCurrentProjectPersistenceContext(persistenceContext)) {
+      const denied = toolFailure(
+        "PERSISTENCE_NOT_READY",
+        "The active account room is changing; wait for workspace hydration to finish before editing.",
+        { unchanged: true, hint: "Retry after the workspace reports Saved." },
+        true,
+      );
+      useWebMCPStore.getState().finishTool(activityId, denied, true);
+      return denied;
+    }
     const trustedAuth: TrustedToolContext | undefined = session
       ? { authenticated: true, subject: session.subject, environment: session.environment }
       : undefined;
     throwIfAborted(signal);
-    const result = await tool.execute({ ...args, __trustedAuth: trustedAuth }, { signal });
-    throwIfAborted(signal);
+    const result = await tool.execute({ ...args, __trustedAuth: trustedAuth }, { signal, persistenceContext });
+    // A mutating tool may have crossed its point of no return before its
+    // promise settled. Once execute returns, report that applied result even
+    // if cancellation arrived in the final microtask; throwing here would
+    // invite an unsafe retry of an operation that already committed.
     useWebMCPStore.getState().finishTool(activityId, result);
     return result;
   } catch (e) {
+    const notReady = persistenceNotReadyFailure(e);
+    if (notReady) {
+      useWebMCPStore.getState().finishTool(activityId, notReady, true);
+      return notReady;
+    }
     const message = (e as Error).message;
     useWebMCPStore.getState().finishTool(activityId, { content: [{ type: "text", text: message }], isError: true }, true);
     throw e;

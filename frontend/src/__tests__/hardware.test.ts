@@ -47,10 +47,11 @@ describe("shared hardware resolvers", () => {
     expect(getCatalogComponent("esp32-devkit-v1")?.ports.some((port) => port.id === "PA13")).toBe(false);
   });
 
-  it("marks unimplemented protocol parts as validation-only", () => {
-    expect(getCatalogComponent("ds3231")?.model).toMatchObject({ support: "behavioral", modelId: "ds3231-register-read:v1" });
-    expect(getCatalogComponent("bmp280")?.model.support).toBe("validation");
-    expect(getCatalogComponent("ssd1306")?.model).toMatchObject({ support: "behavioral", adapterId: "i2c-display-text" });
+  it("exposes only exact typed-preview bindings on the active catalog", () => {
+    expect(getCatalogComponent("led")?.behavior).toEqual({ profileId: "digital-indicator", profileVersion: 1 });
+    expect(getCatalogComponent("ds3231")?.behavior).toBeUndefined();
+    expect(getCatalogComponent("ssd1306")?.behavior).toBeUndefined();
+    expect(getCatalogComponent("led")).not.toHaveProperty("model");
   });
 
   it("keeps device-specific ports and bus identities physically truthful", () => {

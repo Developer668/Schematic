@@ -11,6 +11,13 @@ const authGate = vi.hoisted(() => {
   return {
     initAuth: vi.fn(() => promise),
     getCurrentUserId: vi.fn(() => null as string | null),
+    getAuthSession: vi.fn(async () => {
+      const subject = authGate.getCurrentUserId() ?? "anonymous";
+      return { authenticated: true, subject, userId: subject, environment: "local" as const };
+    }),
+    getAuthHeaders: vi.fn(async () => ({})),
+    apiUrl: (path: string) => path,
+    waitForAuth: vi.fn(async () => authGate.getAuthSession()),
     reset,
     resolve: (value: null) => resolveGate(value),
   };
@@ -19,6 +26,10 @@ const authGate = vi.hoisted(() => {
 vi.mock("../auth/session.ts", () => ({
   initAuth: authGate.initAuth,
   getCurrentUserId: authGate.getCurrentUserId,
+  getAuthSession: authGate.getAuthSession,
+  getAuthHeaders: authGate.getAuthHeaders,
+  apiUrl: authGate.apiUrl,
+  waitForAuth: authGate.waitForAuth,
 }));
 
 import {
@@ -26,8 +37,10 @@ import {
   getProjectPersistenceStatus,
   startProjectPersistence,
   waitForProjectPersistence,
+  waitForCurrentProjectPersistence,
 } from "../store/projectPersistence.ts";
 import { useProjectStore, type HardwareGraph } from "../store/useProjectStore.ts";
+import { invokeWebMCPTool } from "../webmcp/tools.ts";
 
 const namespace = { roomId: "workspace", userId: null, key: "v1:user:anonymous:room:workspace" };
 
@@ -93,6 +106,7 @@ describe("project persistence lifecycle", () => {
     localStorage.clear();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     if (visibilityStateDescriptor) {
       Object.defineProperty(document, "visibilityState", visibilityStateDescriptor);
     } else {
@@ -207,6 +221,203 @@ describe("project persistence lifecycle", () => {
     const [saved, options] = saveWorkspace.mock.calls[0] as unknown as [WorkspaceSnapshot<HardwareGraph>, Record<string, unknown>];
     expect(saved.projects[0].name).toBe("Live edit during hydration");
     expect(options).toMatchObject({ expectedRevision: 4, source: "migration" });
+  });
+
+  it("blocks UI and WebMCP mutations across a subject switch until the new room is hydrated", async () => {
+    const durableA = project("User A durable", "2026-08-31T08:00:00.000Z");
+    const durableB = project("User B durable", "2026-08-31T10:00:00.000Z");
+    const localB = project("User B local fallback", "2026-08-31T09:00:00.000Z");
+    authGate.getCurrentUserId.mockReturnValue("user-a");
+
+    let resolveB: (value: { ok: true; value: StoredWorkspace<HardwareGraph> }) => void = () => undefined;
+    const bLoad = new Promise<{ ok: true; value: StoredWorkspace<HardwareGraph> }>((resolve) => { resolveB = resolve; });
+    const loadWorkspace = vi.spyOn(ProjectRepository.prototype, "loadWorkspace").mockImplementation(function (this: ProjectRepository<HardwareGraph>) {
+      return this.namespace.userId === "user-b"
+        ? bLoad as never
+        : Promise.resolve({ ok: true, value: storedWorkspace(durableA, 1) }) as never;
+    });
+    const saveWorkspace = vi.spyOn(ProjectRepository.prototype, "saveWorkspace").mockResolvedValue({
+      ok: true,
+      value: storedWorkspace(durableA, 2, "migration"),
+    } as never);
+
+    stop = startProjectPersistence();
+    authGate.resolve(null);
+    await waitForProjectPersistence();
+    await settlePromises(); // let the capture-phase session listener install
+    expect(loadWorkspace).toHaveBeenCalledTimes(1);
+    expect(useProjectStore.getState().project.name).toBe("User A durable");
+
+    localStorage.setItem("schematic-projects:user-b", JSON.stringify({
+      version: 1,
+      activeProjectId: localB.id,
+      projects: [localB],
+      updatedAt: "2026-08-31T09:00:00.000Z",
+    }));
+    authGate.getCurrentUserId.mockReturnValue("user-b");
+    window.dispatchEvent(new Event("schematic-session"));
+
+    // The project store has switched to its synchronous B-room fallback, but
+    // the durable B room is still loading. Neither UI store methods nor the
+    // already-registered WebMCP surface may write during this interval.
+    expect(getProjectPersistenceStatus()).toMatchObject({ userId: "user-b", hydrated: false });
+    expect(useProjectStore.getState().project.name).toBe("User B local fallback");
+    let waiterSettled = false;
+    const roomWaiter = waitForCurrentProjectPersistence().then(() => { waiterSettled = true; });
+    await settlePromises();
+    expect(waiterSettled).toBe(false);
+    // Token refresh/session re-announcement for the same subject must join the
+    // existing B hydration rather than replacing its pending promise.
+    window.dispatchEvent(new Event("schematic-session"));
+    await settlePromises();
+    expect(waiterSettled).toBe(false);
+    expect(() => useProjectStore.getState().renameProject(useProjectStore.getState().activeProjectId, "poisoned UI write")).toThrow("room is changing");
+    const blocked = await invokeWebMCPTool("project.rename", { name: "poisoned agent write" });
+    expect(blocked).toMatchObject({ isError: true, error: { code: "PERSISTENCE_NOT_READY", retryable: true }, data: { unchanged: true } });
+    expect(useProjectStore.getState().project.name).toBe("User B local fallback");
+    expect(saveWorkspace).not.toHaveBeenCalled();
+
+    resolveB({ ok: true, value: storedWorkspace(durableB, 7) });
+    await waitForProjectPersistence();
+    await roomWaiter;
+    expect(getProjectPersistenceStatus()).toMatchObject({ userId: "user-b", hydrated: true, revision: 7 });
+    expect(useProjectStore.getState().project.name).toBe("User B durable");
+    expect(saveWorkspace).not.toHaveBeenCalled();
+    const loadsAfterB = loadWorkspace.mock.calls.length;
+    // A normal token refresh/identity re-announcement for the same subject
+    // must not create a fresh room generation or re-read IndexedDB.
+    window.dispatchEvent(new Event("schematic-session"));
+    await settlePromises();
+    expect(loadWorkspace).toHaveBeenCalledTimes(loadsAfterB);
+    expect(getProjectPersistenceStatus()).toMatchObject({ userId: "user-b", hydrated: true });
+    // A same-room refresh must not re-read the synchronous localStorage
+    // fallback and roll the hydrated IndexedDB snapshot back.
+    expect(useProjectStore.getState().project.name).toBe("User B durable");
+  });
+
+  it("does not miss a subject switch while the initial room is still hydrating", async () => {
+    const durableA = project("User A durable", "2026-08-31T08:00:00.000Z");
+    const durableB = project("User B durable", "2026-08-31T10:00:00.000Z");
+    const localB = project("User B local fallback", "2026-08-31T09:00:00.000Z");
+    authGate.getCurrentUserId.mockReturnValue("user-a");
+
+    let resolveA: (value: { ok: true; value: StoredWorkspace<HardwareGraph> }) => void = () => undefined;
+    let resolveB: (value: { ok: true; value: StoredWorkspace<HardwareGraph> }) => void = () => undefined;
+    const aLoad = new Promise<{ ok: true; value: StoredWorkspace<HardwareGraph> }>((resolve) => { resolveA = resolve; });
+    const bLoad = new Promise<{ ok: true; value: StoredWorkspace<HardwareGraph> }>((resolve) => { resolveB = resolve; });
+    vi.spyOn(ProjectRepository.prototype, "loadWorkspace").mockImplementation(function (this: ProjectRepository<HardwareGraph>) {
+      return this.namespace.userId === "user-b" ? bLoad as never : aLoad as never;
+    });
+    const saveWorkspace = vi.spyOn(ProjectRepository.prototype, "saveWorkspace");
+
+    stop = startProjectPersistence();
+    authGate.resolve(null);
+    await settlePromises();
+    expect(getProjectPersistenceStatus()).toMatchObject({ userId: "user-a", hydrated: false });
+
+    localStorage.setItem("schematic-projects:user-b", JSON.stringify({
+      version: 1,
+      activeProjectId: localB.id,
+      projects: [localB],
+      updatedAt: "2026-08-31T09:00:00.000Z",
+    }));
+    authGate.getCurrentUserId.mockReturnValue("user-b");
+    window.dispatchEvent(new Event("schematic-session"));
+    expect(getProjectPersistenceStatus()).toMatchObject({ userId: "user-b", hydrated: false });
+    expect(useProjectStore.getState().project.name).toBe("User B local fallback");
+
+    // Completion of the abandoned A request must not preserve B's synchronous
+    // fallback into A or replace the pending B promise.
+    resolveA({ ok: true, value: storedWorkspace(durableA, 3) });
+    await settlePromises();
+    expect(getProjectPersistenceStatus()).toMatchObject({ userId: "user-b", hydrated: false });
+    expect(saveWorkspace).not.toHaveBeenCalled();
+
+    resolveB({ ok: true, value: storedWorkspace(durableB, 7) });
+    await waitForProjectPersistence();
+    expect(getProjectPersistenceStatus()).toMatchObject({ userId: "user-b", hydrated: true, revision: 7 });
+    expect(useProjectStore.getState().project.name).toBe("User B durable");
+    expect(saveWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("does not preserve the synchronous authenticated fallback over newer IndexedDB on initial auth", async () => {
+    const durableB = project("User B durable", "2026-08-31T10:00:00.000Z");
+    // Start anonymous, as the hosted browser does before the session endpoint
+    // resolves. There is deliberately no B localStorage record: the
+    // synchronous room swap will create an empty fallback before IndexedDB
+    // returns the durable project.
+    authGate.getCurrentUserId.mockReturnValue(null);
+    const loadWorkspace = vi.spyOn(ProjectRepository.prototype, "loadWorkspace").mockImplementation(function (this: ProjectRepository<HardwareGraph>) {
+      return this.namespace.userId === "user-b"
+        ? Promise.resolve({ ok: true, value: storedWorkspace(durableB, 7) }) as never
+        : Promise.resolve({ ok: true, value: null }) as never;
+    });
+    const saveWorkspace = vi.spyOn(ProjectRepository.prototype, "saveWorkspace");
+
+    stop = startProjectPersistence();
+    authGate.getCurrentUserId.mockReturnValue("user-b");
+    window.dispatchEvent(new Event("schematic-session"));
+    expect(getProjectPersistenceStatus()).toMatchObject({ userId: "user-b", hydrated: false });
+
+    authGate.resolve(null);
+    await waitForProjectPersistence();
+
+    expect(loadWorkspace).toHaveBeenCalledTimes(1);
+    expect(useProjectStore.getState().project.name).toBe("User B durable");
+    expect(saveWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("discards an in-flight shopping response from the old room", async () => {
+    const durableA = project("User A durable", "2026-08-31T08:00:00.000Z");
+    const durableB = project("User B durable", "2026-08-31T10:00:00.000Z");
+    authGate.getCurrentUserId.mockReturnValue("user-a");
+
+    let resolveB: (value: { ok: true; value: StoredWorkspace<HardwareGraph> }) => void = () => undefined;
+    const bLoad = new Promise<{ ok: true; value: StoredWorkspace<HardwareGraph> }>((resolve) => { resolveB = resolve; });
+    vi.spyOn(ProjectRepository.prototype, "loadWorkspace").mockImplementation(function (this: ProjectRepository<HardwareGraph>) {
+      return this.namespace.userId === "user-b"
+        ? bLoad as never
+        : Promise.resolve({ ok: true, value: storedWorkspace(durableA, 1) }) as never;
+    });
+    const saveWorkspace = vi.spyOn(ProjectRepository.prototype, "saveWorkspace").mockResolvedValue({
+      ok: true,
+      value: storedWorkspace(durableA, 2, "migration"),
+    } as never);
+
+    let resolveFetch: (value: Response) => void = () => undefined;
+    const fetchRequest = new Promise<Response>((resolve) => { resolveFetch = resolve; });
+    vi.stubGlobal("fetch", vi.fn(() => fetchRequest));
+    stop = startProjectPersistence();
+    authGate.resolve(null);
+    await waitForProjectPersistence();
+    await settlePromises();
+
+    const pendingSearch = invokeWebMCPTool("shopping.search", { query: "ESP32", quantity: 1 });
+    await settlePromises();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+    const bShoppingBefore = JSON.stringify({
+      query: "B sentinel",
+      results: [],
+      cart: [],
+      budget: null,
+      lastSearchAt: null,
+      handoff: null,
+      discovery: null,
+    });
+    localStorage.setItem("schematic-shopping:user-b", bShoppingBefore);
+    authGate.getCurrentUserId.mockReturnValue("user-b");
+    window.dispatchEvent(new Event("schematic-session"));
+    expect(getProjectPersistenceStatus()).toMatchObject({ userId: "user-b", hydrated: false });
+
+    // Resolve the old request only after the subject changed. Its continuation
+    // must fail the captured A generation before it can persist under B.
+    resolveFetch(new Response(JSON.stringify({ results: [] }), { status: 200 }));
+    resolveB({ ok: true, value: storedWorkspace(durableB, 7) });
+    await waitForProjectPersistence();
+    await expect(pendingSearch).resolves.toMatchObject({ isError: true, error: { code: "PERSISTENCE_NOT_READY", retryable: true } });
+    expect(localStorage.getItem("schematic-shopping:user-b")).toBe(bShoppingBefore);
+    expect(saveWorkspace).not.toHaveBeenCalled();
   });
 
   it("best-effort flushes pending saves on pagehide, hidden visibility, and explicit save", async () => {

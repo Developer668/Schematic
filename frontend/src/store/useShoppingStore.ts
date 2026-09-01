@@ -168,6 +168,20 @@ type PersistedShopping = Pick<ShoppingState, "query" | "results" | "cart" | "bud
 // masquerade as a current offer in the workspace.
 const MAX_OFFER_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_TIMESTAMP_FUTURE_SKEW_MS = 5 * 60 * 1000;
+export const MAX_SHOPPING_QUERY_LENGTH = 240;
+const MAX_SHOPPING_RESULTS = 24;
+const MAX_SHOPPING_OFFERS = 3;
+const MAX_SHOPPING_ALTERNATIVES = 3;
+const MAX_SHOPPING_PERSISTED_BYTES = 256 * 1024;
+
+function boundedString(value: unknown, max: number, required = true): value is string {
+  if (typeof value !== "string" || value.length > max) return false;
+  return required ? value.trim().length > 0 : true;
+}
+
+function jsonBytes(value: unknown) {
+  try { return new TextEncoder().encode(JSON.stringify(value)).byteLength; } catch { return Number.POSITIVE_INFINITY; }
+}
 
 function validTimestamp(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return false;
@@ -196,14 +210,24 @@ function validCurrency(value: unknown) {
 function validListing(value: unknown): value is ShoppingResult {
   if (!value || typeof value !== "object") return false;
   const result = value as ShoppingResult;
-  if (!result.id || !result.title || !getCatalogComponent(result.catalogId) || !result.partNumber || result.exactMatch !== true || !validTimestamp(result.updatedAt)) return false;
-  if (!result.provenance || result.provenance.source !== "webmcp-agent" || !result.provenance.agentId || !result.provenance.provider || !validTimestamp(result.provenance.publishedAt)) return false;
-  if (!Number.isInteger(result.requestedQuantity) || result.requestedQuantity < 1 || !Array.isArray(result.offers) || result.offers.length === 0) return false;
+  if (!boundedString(result.id, 160) || !boundedString(result.title, 240) || !boundedString(result.catalogId, 120) || !getCatalogComponent(result.catalogId) || !boundedString(result.partNumber, 160) || result.exactMatch !== true || !validTimestamp(result.updatedAt)) return false;
+  if (result.manufacturer !== undefined && !boundedString(result.manufacturer, 160, false)) return false;
+  if (result.matchNote !== undefined && !boundedString(result.matchNote, 500, false)) return false;
+  if (!result.provenance || result.provenance.source !== "webmcp-agent" || !boundedString(result.provenance.agentId, 240) || !boundedString(result.provenance.provider, 120) || !validTimestamp(result.provenance.publishedAt)) return false;
+  if (!Number.isInteger(result.requestedQuantity) || result.requestedQuantity < 1 || result.requestedQuantity > 999 || !Array.isArray(result.offers) || result.offers.length === 0 || result.offers.length > MAX_SHOPPING_OFFERS) return false;
+  if (!Array.isArray(result.alternatives) || result.alternatives.length > MAX_SHOPPING_ALTERNATIVES || !result.alternatives.every((alternative) => alternative
+    && boundedString(alternative.catalogId, 120)
+    && Boolean(getCatalogComponent(alternative.catalogId))
+    && boundedString(alternative.title, 240)
+    && boundedString(alternative.reason, 500)
+    && (alternative.resultId === undefined || boundedString(alternative.resultId, 160)))) return false;
   const retailers = new Set<string>();
   return result.offers.every((offer) => {
     if (!offer || typeof offer !== "object") return false;
     const candidate = offer as Partial<PartOffer>;
-    if (typeof candidate.retailer !== "string" || typeof candidate.title !== "string" || typeof candidate.provider !== "string") return false;
+    if (!boundedString(candidate.id, 160) || !boundedString(candidate.retailer, 160) || !boundedString(candidate.title, 240) || !boundedString(candidate.provider, 120)) return false;
+    if (candidate.availability !== undefined && !boundedString(candidate.availability, 160, false)) return false;
+    if (!boundedString(candidate.url, 2_000)) return false;
     const retailer = candidate.retailer.trim().toLowerCase();
     const validPrice = candidate.price === null || (typeof candidate.price === "number" && Number.isFinite(candidate.price) && candidate.price >= 0);
     if (retailers.has(retailer)) return false;
@@ -212,8 +236,25 @@ function validListing(value: unknown): value is ShoppingResult {
   });
 }
 
+function cloneListing(result: ShoppingResult): ShoppingResult {
+  return {
+    id: result.id,
+    catalogId: result.catalogId,
+    title: result.title,
+    ...(result.manufacturer !== undefined ? { manufacturer: result.manufacturer } : {}),
+    partNumber: result.partNumber,
+    requestedQuantity: result.requestedQuantity,
+    exactMatch: true,
+    ...(result.matchNote !== undefined ? { matchNote: result.matchNote } : {}),
+    offers: result.offers.map((offer) => ({ ...offer })),
+    alternatives: result.alternatives.map((alternative) => ({ ...alternative })),
+    updatedAt: result.updatedAt,
+    provenance: { ...result.provenance },
+  };
+}
+
 function validPublication(value: AgentPublication) {
-  return Boolean(getCurrentUserId()) && value?.authenticated === true && Boolean(value.agentId?.trim()) && Boolean(value.provider?.trim()) && validTimestamp(value.publishedAt);
+  return Boolean(getCurrentUserId()) && value?.authenticated === true && boundedString(value.agentId, 240) && boundedString(value.provider, 120) && validTimestamp(value.publishedAt);
 }
 
 function storageKey() {
@@ -231,9 +272,9 @@ export function createShoppingHandoff(query: string, quantity = 1, requiredCatal
     schemaVersion: "schematic.parts.lookup.v1",
     requestId: makeRequestId(),
     requestType: "exact_parts_lookup",
-    query: query.trim(),
+    query: query.trim().slice(0, MAX_SHOPPING_QUERY_LENGTH),
     quantity: safeQuantity(quantity),
-    requiredCatalogIds: [...new Set(requiredCatalogIds.map(String).map((id) => id.trim()).filter(Boolean))],
+    requiredCatalogIds: [...new Set(requiredCatalogIds.slice(0, 500).map(String).map((id) => id.trim().slice(0, 120)).filter(Boolean))],
     providerFallbackOrder: ["jlcsearch", "adafruit", "web-search"],
     returnTool: "shopping.search",
     returnFormat: "json",
@@ -256,21 +297,42 @@ function roomId() {
   return getCurrentUserId();
 }
 
-function readState(): PersistedShopping {
+function normalizePersistedState(raw: unknown): PersistedShopping {
   const fallback: PersistedShopping = { query: "", results: [], cart: [], budget: null, lastSearchAt: null, handoff: null, discovery: null };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || jsonBytes(raw) > MAX_SHOPPING_PERSISTED_BYTES) return fallback;
+  const value = raw as Record<string, unknown>;
+  const query = boundedString(value.query, MAX_SHOPPING_QUERY_LENGTH, false) ? value.query : "";
+  const results = Array.isArray(value.results) ? value.results.slice(0, MAX_SHOPPING_RESULTS).filter(validListing).map(cloneListing) : [];
+  const resultIds = new Set(results.map((result) => result.id));
+  const cart = Array.isArray(value.cart) ? value.cart.slice(0, 100).flatMap((entry): CartLine[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const line = entry as Record<string, unknown>;
+    if (!boundedString(line.resultId, 160) || !resultIds.has(line.resultId) || !Number.isInteger(line.quantity) || Number(line.quantity) < 1 || Number(line.quantity) > 999) return [];
+    if (line.selectedOfferId !== undefined && !boundedString(line.selectedOfferId, 160)) return [];
+    return [{ resultId: line.resultId, quantity: Number(line.quantity), ...(line.selectedOfferId ? { selectedOfferId: line.selectedOfferId } : {}) }];
+  }) : [];
+  const budget = value.budget === null || (typeof value.budget === "number" && Number.isFinite(value.budget) && value.budget >= 0) ? value.budget : null;
+  const lastSearchAt = value.lastSearchAt === null || (typeof value.lastSearchAt === "number" && Number.isFinite(value.lastSearchAt) && value.lastSearchAt >= 0) ? value.lastSearchAt : null;
+  // Handoffs/discovery are ephemeral requests. They are deliberately rebuilt
+  // from bounded tool/server inputs rather than trusted from storage or BC.
+  return { query, results, cart, budget, lastSearchAt, handoff: null, discovery: null };
+}
+
+function readState(): PersistedShopping {
   try {
     const raw = typeof localStorage !== "undefined" ? JSON.parse(localStorage.getItem(storageKey()) ?? "null") : null;
-    const results = raw && typeof raw === "object" && Array.isArray(raw.results) ? raw.results.filter(validListing) : [];
-    const cart = raw && typeof raw === "object" && Array.isArray(raw.cart)
-      ? raw.cart.filter((line: CartLine) => results.some((result: ShoppingResult) => result.id === line.resultId))
-      : [];
-    return raw && typeof raw === "object" ? { ...fallback, ...raw, results, cart } : fallback;
-  } catch { return fallback; }
+    return normalizePersistedState(raw);
+  } catch { return { query: "", results: [], cart: [], budget: null, lastSearchAt: null, handoff: null, discovery: null }; }
 }
 
 function snapshot(state: ShoppingState): PersistedShopping { return { query: state.query, results: state.results, cart: state.cart, budget: state.budget, lastSearchAt: state.lastSearchAt, handoff: state.handoff, discovery: state.discovery }; }
 function persist(state: ShoppingState, broadcast = true) {
-  const next = snapshot(state);
+  // Storage and cross-tab messages are both untrusted re-entry points. Run
+  // our own outbound snapshot through the same bounded decoder so an
+  // accidental oversized in-memory value can never become durable or fan
+  // out to another tab. Handoffs and discovery candidates are intentionally
+  // ephemeral and are re-created by the active request.
+  const next = normalizePersistedState(snapshot(state));
   try { if (typeof localStorage !== "undefined") localStorage.setItem(storageKey(), JSON.stringify(next)); } catch {}
   if (broadcast) shoppingChannel?.postMessage({ type: "shopping:update", state: { ...next, _room: roomId() } });
 }
@@ -293,7 +355,11 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
   handoff: null,
   discovery: null,
   undoStack: [],
-  setQuery(query) { set({ query }); persist(get()); },
+  setQuery(query) {
+    if (!boundedString(query, MAX_SHOPPING_QUERY_LENGTH, false)) return;
+    set({ query });
+    persist(get());
+  },
   setRequestStatus(requestStatus) { set({ requestStatus }); },
   setHandoff(handoff) { set({ handoff, requestStatus: handoff ? "staged" : "idle" }); persist(get()); },
   setDiscovery(discovery) {
@@ -305,7 +371,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     persist(get());
   },
   publishAgentResults(rawResults, publication) {
-    const results = Array.isArray(rawResults) ? rawResults : [];
+    const results = Array.isArray(rawResults) && rawResults.length <= MAX_SHOPPING_RESULTS && jsonBytes(rawResults) <= 128 * 1024 ? rawResults : [];
     if (!validPublication(publication)) {
       set({ results: [], cart: [], lastSearchAt: null, requestStatus: "failed", publicationError: "Listing publication rejected: the WebMCP agent authentication or provider provenance is missing or invalid." });
       persist(get());
@@ -315,7 +381,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     const normalized = results.filter((result): result is ShoppingResult => {
       if (!validListing(result) || !result.provenance) return false;
       return result.provenance.agentId === publication.agentId && result.provenance.provider === publication.provider && result.provenance.publishedAt === publishedAt;
-    });
+    }).map(cloneListing);
     const rejected = results.length - normalized.length;
     if (normalized.length === 0) {
       const message = "Listing publication rejected: every listing needs a canonical catalogId, exactMatch=true, part number, an HTTPS retailer URL, a recent timestamp, currency, and provider provenance.";
@@ -419,7 +485,8 @@ shoppingChannel?.addEventListener("message", (event) => {
   if (event.data?.type !== "shopping:update" || !event.data.state) return;
   if ((event.data.state._room ?? null) !== roomId()) return;
   const { _room: _ignoredRoom, ...state } = event.data.state;
-  useShoppingStore.setState(state);
+  const next = normalizePersistedState(state);
+  useShoppingStore.setState({ ...next, requestStatus: "idle", publicationError: null, undoStack: [] });
 });
 
 export function reloadShoppingForCurrentUser() {
@@ -433,8 +500,8 @@ if (typeof window !== "undefined") {
   window.addEventListener("storage", (event) => {
     if (event.key !== storageKey() || !event.newValue) return;
     try {
-      const next = JSON.parse(event.newValue) as PersistedShopping;
-      if (next && typeof next === "object") useShoppingStore.setState({ ...next, requestStatus: "idle", handoff: null, discovery: null, publicationError: null, undoStack: [] });
+      const next = normalizePersistedState(JSON.parse(event.newValue));
+      useShoppingStore.setState({ ...next, requestStatus: "idle", publicationError: null, undoStack: [] });
     } catch {}
   });
 }

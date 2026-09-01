@@ -3,11 +3,19 @@
 Status: implementation handoff
 Audience: agents and engineers extending Schematic's TypeScript web workspace
 Product direction approved: 2026-08-31
-Repository truth last checked: 2026-08-31
+Repository truth last checked: 2026-09-01
+Release-candidate repository gates passed. Sol's final turn reached the usage
+limit before formal sign-off; do not infer Site publication or live-host
+acceptance from this handoff. Record those results against the exact deployed
+commit/version.
 
-This path is intentionally retained for continuity with earlier agent handoffs.
-The former compiler/emulator roadmap in this file is superseded in full by the
-behavior-preview and code-authoring direction below.
+This is the implementation handoff for the landed compiler-free
+Behavior-Preview/editable-Code path. Earlier runtime/compiler notes are retained
+only when they explain migration or quarantine; they are not current product
+capabilities. The repository's canonical Site binding is
+`appgprj_6a913ce4a58881918a47ea49fa0ca505` at
+<https://schematic-hardware-workspace.decipherer71.chatgpt.site>. Publication of
+the current revision must be verified by the release agent.
 
 ## 1. Decision summary
 
@@ -69,9 +77,9 @@ Future agents must preserve all of the following:
 
 ## 3. Current repository truth
 
-The repository does not yet implement the target architecture. An implementing
-agent must migrate from these current facts rather than assuming the new types
-already exist.
+The target authoring/preview architecture is implemented for the default web
+path. The legacy runtime/toolchain files that remain in the repository are
+quarantined or dormant and must not be treated as Site capabilities.
 
 ### 3.1 Current canonical project state
 
@@ -80,72 +88,56 @@ already exist.
 
 - component instances and their positions/properties;
 - typed connections;
-- firmware targets and source files;
-- an optional legacy `compiledArtifact` field;
-- legacy simulation configuration.
+- compatibility firmware targets and source-file mirrors;
+- durable `behaviorPlans` records;
+- durable `codeDocuments` records; and
+- optional JSON-only `legacyBehaviorData` quarantine.
 
-The separate `@schematic/hardware-graph` package is stricter but is not yet the
-only graph contract. The Behavior System should depend on the canonical package
-DTOs and use one explicit frontend adapter until the store migration is complete.
-Do not create a third graph model.
+Legacy `compiledArtifact` and simulation configuration may be accepted at the
+import boundary for old files, but normalization removes them from active
+canonical targets and stores them only under inert legacy data. The Behavior
+System uses the canonical `@schematic/hardware-graph` DTO adapter and does not
+read source or legacy runtime state.
 
 ### 3.2 Current code panel
 
-`frontend/src/components/editor/MonacoWorkspace.tsx` already:
-
-- shows Arduino/C++ or other board source;
-- saves edits through `updateFirmware`;
-- supports copying code;
-- uses Monaco syntax services;
-- invokes a `firmware.compile` preflight path from a button labeled “Check source.”
-
-The new direction keeps Monaco and source persistence but removes compilation
-from the recommended product flow. Monaco highlighting or editor diagnostics are
-editor assistance only. They must not become a “compiled,” “verified,” or
-“hardware ready” badge.
+`frontend/src/components/editor/MonacoWorkspace.tsx` shows ordinary
+Arduino/C/C++/Python source, supports multi-file editable documents, saves
+through the code-document command/store path, and supports copy/download. It
+does not offer a compile/preflight action. Monaco syntax services are editor
+assistance only and must not become a “compiled,” “verified,” or “hardware
+ready” badge.
 
 ### 3.3 Current runtime and visual state
 
-The current “Run” flow routes through `simulation.run`. It can select a fixed
-precompiled 400-byte button-to-LED C/WASM fixture or a bounded TypeScript
-Arduino-like interpreter. The Site API exposes a related behavioral runtime and
-compile preflight. These are truthful but narrow historical capabilities.
+The default “Preview behavior” flow routes through
+`frontend/src/application/behaviorCommands.ts` and the shared
+`@schematic/behavior` system. It opens an ephemeral, bounded session from a
+saved plan and renders typed visual projections. It never reads source files.
 
-`useSimulationStore` currently mixes:
-
-- run/stop state;
-- simulated nanoseconds;
-- loose `pinStates` keys;
-- engine availability;
-- serial text;
-- remote session state;
-- the most recent runtime result.
-
-`HardwareNode.tsx` infers several visual effects by searching those loose keys
-and contains component-specific display/actuator branches. This is the main
-visual seam to replace.
+`frontend/src/behavior/useBehaviorPreviewStore.ts` holds only ephemeral preview
+status, snapshots, diagnostics, logical duration, and UI request generation.
+Project/plan/graph changes dispose the session; code-only edits do not change a
+preview snapshot. Historical `useSimulationStore.ts`, runtime, and harness
+files may remain dormant for quarantine/regression context but are not imported
+by the default Site path.
 
 ### 3.4 Current component capability metadata
 
-`modelContract.ts` and `capabilityRegistry.ts` describe simulation-oriented
-families and adapters. Much of the assignment is inferred from catalog IDs,
-categories, ports, or text. The new behavior preview needs a separate explicit
-profile binding. Simulation support and preview-action support are different
-questions and must not share one overloaded badge.
+`frontend/src/data/catalog.ts` now contains explicit behavior bindings for the
+initial profiles. The shared registry resolves exact definition ID/profile ID/
+version tuples. Catalog category, title, ports, or fuzzy model names never grant
+preview support. Graph model metadata can still contain historical compatibility
+fields, but preview capability is reported separately and explicitly.
 
 ### 3.5 Existing tool seams worth reusing
 
-The current WebMCP surface already has useful low-level operations:
-
-- `project.get_graph` and graph mutation tools;
-- `firmware.write` and `firmware.read`;
-- component and connection inspection;
-- project validation;
-- browser-local persistence and board selection.
-
-Use these seams where their semantics remain accurate. Add preview-oriented tools
-through shared application commands; do not implement separate rules inside
-`webmcp/tools.ts`.
+The current WebMCP surface contains graph/project/workspace tools,
+`firmware.write`/`firmware.read` source aliases, validation, shopping, layout,
+and the eight Behavior/Code tools. The default registry has exactly 45 tools;
+`firmware.compile` and all `simulation.*` names are absent. Use
+`frontend/src/application/behaviorCommands.ts` for preview/code semantics; do
+not implement separate rules inside `webmcp/tools.ts`.
 
 ## 4. Target product semantics
 
@@ -672,6 +664,17 @@ Thus direct `behavior.invoke` calls remain reproducible without silently
 mutating the durable plan: preview truth is the prepared plan plus this exact
 session log.
 
+The project fingerprint is semantic, not visual. `projectBehaviorFingerprint`
+hashes the project id/version, sorted component instance ids, definition ids,
+properties and optional firmware-group identity, plus sorted connection
+endpoints/domains. It deliberately excludes source files, code metadata,
+timestamps, labels, positions, and rotations. Moving components or applying
+auto-layout therefore does not invalidate a prepared preview's semantic graph
+hash; changing component identity/definition/properties or wiring does. A
+session still rejects a genuinely changed graph, and code/plan link status is
+reconciled from these exact hashes rather than from screenshots or editor
+state.
+
 ### 6.8 Code documents
 
 ```ts
@@ -891,6 +894,7 @@ export interface WriteCodeRequest {
   files: readonly CodeFile[];
   language: CodeDocument["language"];
   dependencies: readonly CodeDependency[];
+  /** Required: null for create-only, or the exact hash of the revision read. */
   expectedContentSha256: string | null;
   origin: CodeDocument["origin"];
   linkToBehaviorPlan?: {
@@ -902,7 +906,10 @@ export interface WriteCodeRequest {
 ```
 
 - `expectedContentSha256: null` means create only if empty.
-- An exact hash allows replacement of the revision the caller actually read.
+- An exact hash returned by `code.read`/`firmware.read` allows replacement of
+  the revision the caller actually read.
+- Omitting the field, or passing `undefined`, is rejected; there is no
+  unguarded overwrite path.
 - A mismatch returns `source-conflict` without changing files.
 - A destructive replacement tool requires explicit overwrite intent and an
   exact expected hash.
@@ -1016,7 +1023,9 @@ WebMCP callbacks must be thin adapters over shared application commands.
 
 `behavior.plan.write`
 
-- creates or updates a versioned plan with an expected revision;
+- creates or updates a versioned plan with a mandatory expected revision;
+- uses `expectedRevision: null` for create-only and the exact current integer
+  revision for replacement; omission, `undefined`, and stale revisions fail;
 - validates schema and project references;
 - does not start playback or write code.
 
@@ -1059,19 +1068,20 @@ WebMCP callbacks must be thin adapters over shared application commands.
 
 ### 12.2 Compatibility aliases
 
-During migration:
+The current default registration has already crossed the migration boundary:
 
-- `firmware.write` may adapt to `code.write`;
-- `firmware.read` may adapt to `code.read`;
-- `simulation.run` may return a deprecation result pointing to
-  `behavior.preview`, or remain behind an explicitly labeled legacy flag;
-- `firmware.compile` must be removed from the recommended workflow and later
-  from native registration;
-- `/api/compile` and `/api/simulation/*` are not needed for the target preview
-  path.
+- `firmware.write` is a thin alias for `code.write`;
+- `firmware.read` is a thin alias for `code.read`;
+- `firmware.check` reports editable-document metadata with
+  `not-performed`; it does not check source; and
+- `firmware.compile` and all `simulation.*` tools are removed from the default
+  registry rather than returning a hidden runtime/deprecation path.
 
-Do not silently change an old tool’s meaning while claiming protocol
-compatibility. Version or deprecate it clearly.
+The canonical ChatGPT Site catch-all API route also returns 404 for
+`/api/compile` and every `/api/simulation/*` path. Repository-root compatibility
+handlers are excluded from that package and are not product capabilities. Do not restore those names to the default registration
+or silently assign them a new meaning. Any future compatibility surface needs
+an explicit, separately reviewed hardware boundary.
 
 ### 12.3 Result truth
 
@@ -1090,6 +1100,25 @@ export interface PreviewClaims {
   physicalBehaviorVerified: false;
 }
 ```
+
+### 12.4 Destructive operations and confirmations
+
+The model-facing mutation surface must make destructive intent explicit and
+identity-bound. These tools require the exact repeated identifier in the same
+request:
+
+| Operation | Required confirmation | Default behavior |
+| --- | --- | --- |
+| `project.delete` | `projectId` and matching `confirmProjectId` | Delete only the named project; the final project is protected. |
+| `project.clear` | active `projectId` and matching `confirmProjectId` | Clear the active graph after exact identity confirmation. |
+| `component.remove` | `instanceId` and matching `confirmInstanceId` | Remove the instance and attached connections/source target. |
+| `connection.disconnect` | `connectionId` and matching `confirmConnectionId` | Remove only the named connection. |
+| `project.apply_blueprint` replacement | `replace: true` and matching `confirmProjectId` | Replacement is rejected without both values; omission creates a new project. |
+
+Failed confirmation must return a structured error and must not mutate the
+project. Human controls use the same target-bound two-step confirmation
+pattern. Read-only inspection and source reads do not require confirmation;
+`firmware.check` reports metadata only and never compiles or validates source.
 
 ## 13. Persistence and project schema
 
@@ -1126,6 +1155,16 @@ Project import/export must:
 - mark code/plan links stale if canonical hashes no longer match;
 - ignore or quarantine legacy compiled artifacts.
 
+Import is a provenance boundary, not an execution boundary. Imported plans and
+source are labelled with their imported origin, normalized into the current
+project id, and checked for exact IDs, definitions, paths, payloads, sizes, and
+content hashes. Legacy firmware source may be materialized into editable code
+documents and mirrored for compatibility; compiled artifacts, legacy
+simulation configuration, unknown fields, and unsupported future plan versions
+remain inert `legacyBehaviorData`. A successful round trip proves preservation
+of bounded data and provenance only; it does not prove that source builds or
+that a physical device behaves as described.
+
 ## 14. Security and resource budgets
 
 ### 14.1 Trust boundaries
@@ -1141,25 +1180,43 @@ Project import/export must:
 - Preview tools cannot navigate, fetch URLs, open sockets, or call external
   SDKs.
 
-### 14.2 Initial hard limits
+### 14.2 Current hard limits
 
-Choose explicit constants and test boundary values. Recommended starting limits:
+The checked-in constants and validators currently enforce:
 
 - 100 plans per project;
 - 200 rules per plan;
 - 20 actions per rule;
 - 2,000 cues per plan;
-- 60,000 ms preview duration by default;
-- 10-minute absolute logical duration ceiling;
-- 10,000 total dispatched events per session;
+- 600,000 ms (10 minutes) maximum logical preview time;
+- 10,000 dispatched events per session;
 - 32 event-chain depth;
 - 4,096 characters per display-text payload;
-- 1 MiB per code file and 10 MiB total project import, consistent with current
-  project-file protections;
-- 500 retained timeline items before bounded summarization;
-- bounded project-scoped prepared-plan cache with LRU eviction.
+- 500 retained timeline items;
+- 100 code documents per project;
+- 128 files per code document;
+- 1 MiB per code file;
+- 512 KiB aggregate canonical editable source across all code documents in one
+  project;
+- 1 MiB aggregate serialized source-container envelope when canonical code
+  documents and legacy `firmwareTargets` mirrors are both present;
+- 256 dependencies per code document;
+- 50 export-history records; and
+- 50 projects per local workspace;
+- 8 MiB serialized local workspace. An over-limit hydrated room enters
+  recovery: the original stored room is not overwritten, every project within
+  the bounded recovery window remains visible/selectable/exportable, and
+  ordinary persistence mutations are blocked. Only confirmed project
+  `clear`/`delete` operations that strictly reduce project count or serialized
+  size are allowed; normal authoring resumes once the room fits. A room beyond
+  the bounded recovery window requires a manual backup/repair workflow; and
+- 10 MiB maximum `.vlx` project import.
 
-Large values must fail with structured diagnostics before playback.
+Large values fail with structured diagnostics before persistence or playback.
+The 1 MiB per-file ceiling is a separate upper bound; the 512 KiB canonical
+project aggregate is stricter for ordinary source authoring. Workspace and
+project capacity checks are applied atomically so a rejected create, duplicate,
+import, or write cannot leave a partially updated Zustand/local-storage room.
 
 ### 14.3 Performance rules
 
@@ -1173,165 +1230,26 @@ Large values must fail with structured diagnostics before playback.
 - Timeline rendering must virtualize or summarize large histories.
 - Project switching disposes the current preview session.
 
-## 15. Migration roadmap
+## 15. Migration roadmap and landed status
 
-This sequence replaces the former compiler/AVR phases. Complete each vertical
-slice before adding broader catalog support.
+This sequence replaces the former compiler/AVR phases. The default
+authoring/preview path has landed through Phase 6. Phase 7 is future work and
+must not expand the Site into a source runtime.
 
-### Phase 0: lock truth and vocabulary
+| Phase | Status | Evidence in this checkout |
+| --- | --- | --- |
+| 0. Truth and vocabulary | Landed | Product copy, ADR, UI notices, and this handoff state that preview is typed/scripted and source is not run. |
+| 1. Behavior System contracts | Landed | `packages/behavior/` exports JSON-safe contracts, schemas, canonical hashes, registry, preparation, sessions, and boundary profiles. |
+| 2. Generic visual projection | Landed | `ComponentVisualOverlay`, profile projectors, accessible summaries, and typed canvas state cover the initial eight profile families. |
+| 3. Preview state and persistence | Landed | `useBehaviorPreviewStore` is ephemeral; project persistence stores plans/code; reload and project-switch isolation are tested. |
+| 4. Editable code lifecycle | Landed | `behaviorPersistence.ts`, Monaco integration, content hashes, exact-hash conflicts, stale links, export history, and handoff manifests are active. |
+| 5. Shared commands and WebMCP | Landed | `behaviorCommands.ts` is shared by UI/tools; `behaviorTools.ts` supplies five behavior and three code adapters; default registry has 45 tools. |
+| 6. Retire default source runtime | Landed for the Site boundary | No `firmware.compile` or `simulation.*` registration; Site compile/runtime API paths return 404; legacy files are dormant/quarantined. |
+| 7. Measured profile/SDK expansion | Future | Add only demand-backed profiles, conformance fixtures, or user-authorized external handoff integrations. Never add hidden source execution. |
 
-Deliverables:
-
-- adopt this decision record;
-- update product copy from simulation/run/compile to preview/code/export where
-  the new path is active;
-- document current legacy runtime separately from the target architecture;
-- define a feature flag or compatibility boundary for migration;
-- ensure no new work depends on `browser-toolchain` or `avr-runtime`.
-
-Acceptance:
-
-- every new preview surface says code execution is absent;
-- current production claims remain accurate during transition;
-- dormant compiler/emulator packages do not enter the Site bundle;
-- agents have one canonical handoff document.
-
-### Phase 1: deep Behavior System contracts
-
-Deliverables:
-
-- create `packages/behavior/` (published name `@schematic/behavior`);
-- add plan schemas, canonical serialization/hashing, diagnostics, limits, exact
-  profile registry, preparation, sessions, and snapshots;
-- add a frontend graph adapter without introducing another graph DTO;
-- implement `catalog-only:v1`, `momentary-input:v1`, and
-  `digital-indicator:v1`.
-
-Acceptance:
-
-- button press/release can deterministically drive an LED plan rule;
-- unknown actions fail explicitly;
-- identical inputs produce identical snapshot hashes;
-- direct seek equals sequential playback;
-- package imports no frontend/browser/runtime/compiler code;
-- boundary tests exercise only public interfaces.
-
-### Phase 2: generic visual projection
-
-Deliverables:
-
-- add the minimal shared preview application command and
-  `useBehaviorPreviewStore` state needed by canvas consumers;
-- create `ComponentVisualOverlay`;
-- migrate LED/button state away from loose `pinStates` suffix matching;
-- add `text-display:v1`, `buzzer:v1`, `relay:v1`,
-  `rotary-actuator:v1`, `motor:v1`, and `numeric-sensor:v1`;
-- expose accessible summaries and reduced-motion behavior;
-- add profile support separately from existing simulation labels.
-
-Acceptance:
-
-- LED, button, display, buzzer, relay, servo, motor, and sensor outcomes render
-  from generic primitives;
-- no profile gains support through fuzzy inference;
-- unsupported controls remain visible with a reason;
-- component-specific canvas branches are reduced rather than multiplied;
-- accessible summaries match visual snapshots.
-
-### Phase 3: preview store, timeline, and persistence
-
-Deliverables:
-
-- finish replacing or migrating `useSimulationStore` to the preview-oriented
-  store introduced in Phase 2;
-- persist Behavior Plans and their project/profile revisions;
-- implement playback, pause, seek, reset, input/event dispatch, and staleness;
-- update Behavior Plan import/export validation and migrations;
-- move the right-panel tab into `useWorkspaceStore`.
-
-Acceptance:
-
-- reload preserves plans and code but recreates preview state safely;
-- project switching cannot leak sessions or snapshots;
-- graph/profile changes invalidate prepared plans;
-- no active timer is persisted;
-- preview history is bounded;
-- old projects import without trusting legacy artifacts.
-
-### Phase 4: code-document lifecycle
-
-Deliverables:
-
-- add code-document hashes, origin, revision, preview relation, and export state;
-- adapt `updateFirmware`/existing storage without losing user source;
-- persist code-document provenance and add its project import/export migration;
-- remove compile controls from Monaco’s primary workflow;
-- add copy/download and exact-hash overwrite protection;
-- mark links stale on plan, project, or code changes;
-- keep Monaco source fully editable.
-
-Acceptance:
-
-- agent-written code appears immediately in the selected board’s Code panel;
-- manual edits never change preview output;
-- plan edits never overwrite source;
-- stale links are visible and machine-readable;
-- conflicting writes fail without data loss;
-- every code surface says it was not tested in Schematic.
-
-### Phase 5: shared commands and WebMCP migration
-
-Deliverables:
-
-- add the recommended behavior/code tools as thin adapters;
-- make human UI and WebMCP use the same commands;
-- deprecate simulation/compile tools with structured replacements;
-- update agent instructions and demo flows;
-- add tool cancellation and project-switch isolation.
-
-Acceptance:
-
-- a model can build a graph, write a plan, preview outcomes, write normal code,
-  and open Code without compiler/runtime calls;
-- a direct component action is schema-checked and deterministic;
-- UI and tool results have matching hashes/diagnostics;
-- tools cannot overwrite newer human code;
-- no preview tool reads source as execution input.
-
-### Phase 6: retire legacy default execution
-
-Deliverables:
-
-- make Behavior Preview the only default top-bar outcome workflow;
-- remove legacy runtime-specific UI/store fields after compatibility review;
-- remove native registration of misleading compile/run operations;
-- decide separately whether to delete or archive legacy runtime/WASM tests and
-  packages;
-- keep graph validation and project/code history intact.
-
-Acceptance:
-
-- ordinary users and agents cannot confuse preview with firmware execution;
-- the initial bundle has no legacy engine/compiler path;
-- code export remains intact;
-- release documentation contains no compiler/emulator implementation promise;
-- legacy removal does not reduce graph validation coverage.
-
-### Phase 7: measured profile and SDK handoff expansion
-
-Deliverables:
-
-- add profiles only from observed user demand;
-- provide a profile authoring guide and conformance fixtures;
-- improve code/project export formats for existing SDK workflows;
-- optionally expose user-selected external handoff adapters in a future RFC.
-
-Acceptance:
-
-- each new action has bounds, reducer tests, projection tests, and accessibility;
-- catalog coverage reports explicit supported/unsupported counts;
-- external handoff is user initiated and never implies an in-app build;
-- no third-party SDK is called without separate authorization and security review.
+Any future change must preserve the acceptance evidence and limits below. A
+local test or dormant package build does not turn the Site into a compiler,
+emulator, uploader, or physical test harness.
 
 ## 16. Test strategy
 
@@ -1482,34 +1400,36 @@ The new direction is complete when:
 This does not mean the generated code is correct or the physical device works.
 Those remain external testing outcomes.
 
-## 20. First-agent implementation checklist
+## 20. Continuation-agent checklist
 
-The next implementation agent should:
+An agent continuing this work should:
 
 1. Read this document, `README.md`, `ARCHITECTURE.md`, and
-   `docs/CHATGPT_SITE_RUNBOOK.md`.
-2. Run `pnpm run verify` before changing behavior.
-3. Inventory all current `simulation.run`, `firmware.compile`,
-   `useSimulationStore`, and `pinStates` call sites.
-4. Write an ADR confirming that source code is not preview input.
-5. Create `@schematic/behavior` with its public boundary tests first.
-6. Add exact behavior-profile bindings without changing current simulation
-   support metadata.
-7. Deliver the button-to-LED Behavior Plan vertical slice.
-8. Add generic visual primitives and accessible projection.
-9. Move right-panel tab state into `useWorkspaceStore`.
-10. Add durable Behavior Plans and code provenance with schema migration.
-11. Implement exact-hash code writes before exposing agent code tools.
-12. Add shared application commands before WebMCP callbacks.
-13. Rename UI only as the new path becomes functional; do not break current
-    truth during partial migration.
-14. Expand to display, buzzer, relay, servo, motor, and sensor profiles.
-15. Deprecate legacy tools with explicit structured replacements.
-16. Remove old production paths/tests only after parity and migration gates pass.
-17. Re-run the full release gate and update this handoff with actual landed state.
+   `docs/CHATGPT_SITE_RUNBOOK.md` before changing the release boundary.
+2. Run the focused frontend checks and `pnpm run verify:behavior-preview`.
+3. Treat `BehaviorPlanV1` plus the active graph as the only preview source of
+   truth. Never make source text a reducer or runtime input.
+4. Add profile support only through an exact catalog binding, bounded schema,
+   pure reducer, visual projector, accessible summary, and tests.
+5. Keep UI controls and WebMCP adapters on
+   `frontend/src/application/behaviorCommands.ts`; do not duplicate validation
+   or state transitions in tool callbacks.
+6. Preserve exact-hash plan/code writes, conflict behavior, stale links, export
+   history, and project-switch isolation.
+7. Preserve the 45-tool registry shape: five behavior tools, three code tools,
+   graph/workspace/component/connection/validation/shopping/layout tools, and
+   only the documented firmware source aliases.
+8. Keep `/api/compile` and `/api/simulation/*` out of the Site route and verify
+   they remain 404.
+9. Re-run import/export, migration, bundle-boundary, and live acceptance checks
+   after touching project state or Site wiring.
+10. Update the implementation evidence section with commands and observed
+    results, not assumptions about publication.
 
-Do not begin by integrating AVR8js, browser compilers, Arduino CLI, native
-simulators, remote execution, Web Serial upload, or third-party SDK calls.
+Do not integrate AVR8js, browser compilers, Arduino CLI, native simulators,
+remote execution, Web Serial upload, or third-party SDK calls into the default
+Site path. A separately authorized hardware-boundary project would need its own
+design, security review, and user-visible handoff.
 
 ## 21. File map
 
@@ -1519,10 +1439,11 @@ simulators, remote execution, Web Serial upload, or third-party SDK calls.
 | --- | --- |
 | Frontend project graph/source | `frontend/src/store/useProjectStore.ts` |
 | Project persistence | `frontend/src/store/projectPersistence.ts`, `packages/project-storage/` |
-| Current preview/runtime state | `frontend/src/store/useSimulationStore.ts` |
-| Current runtime | `frontend/src/simulation/runtime.ts` |
-| Current capability inference | `frontend/src/simulation/modelContract.ts`, `capabilityRegistry.ts` |
-| Current visual component state | `frontend/src/components/canvas/HardwareNode.tsx` |
+| Durable project state and migration | `frontend/src/store/useProjectStore.ts`, `frontend/src/store/behaviorPersistence.ts` |
+| Ephemeral preview state | `frontend/src/behavior/useBehaviorPreviewStore.ts`, `frontend/src/behavior/previewTypes.ts` |
+| Behavior System | `packages/behavior/src/` |
+| Shared application commands | `frontend/src/application/behaviorCommands.ts` |
+| Current visual component state | `frontend/src/components/canvas/HardwareNode.tsx`, `ComponentVisualOverlay.tsx` |
 | Static artwork | `frontend/src/components/ComponentArtwork.tsx` |
 | Code editor | `frontend/src/components/editor/MonacoWorkspace.tsx` |
 | Studio run controls | `frontend/src/pages/StudioPage.tsx` |
@@ -1531,9 +1452,10 @@ simulators, remote execution, Web Serial upload, or third-party SDK calls.
 | WebMCP tools | `frontend/src/webmcp/tools.ts` |
 | Graph validation | `packages/validation/`, `frontend/src/store/useValidationStore.ts` |
 | Import/export validation | `frontend/src/utils/vllxFile.ts` |
-| Dormant paths not to integrate | `packages/browser-toolchain/`, `packages/avr-runtime/` |
+| Site wrapper/API | `chatgpt-site/app/[[...path]]/SchematicClient.tsx`, `chatgpt-site/app/api/[[...path]]/route.ts` |
+| Dormant paths not to integrate | `frontend/src/store/useSimulationStore.ts`, `frontend/src/simulation/`, `packages/browser-toolchain/`, `packages/avr-runtime/` |
 
-### Proposed files
+### Future extension locations
 
 ```text
 packages/behavior/
@@ -1557,23 +1479,10 @@ packages/behavior/
   src/index.ts
   src/index.test.ts
 
-frontend/src/behavior/
-  graphAdapter.ts
-  behaviorSystem.ts
-  applicationCommands.ts
-
-frontend/src/store/
-  useBehaviorPreviewStore.ts
-
-frontend/src/components/behavior/
-  BehaviorPreviewControls.tsx
-  BehaviorTimeline.tsx
-  BehaviorPlanSummary.tsx
-  ComponentVisualOverlay.tsx
-
-frontend/src/code/
-  codeDocumentCommands.ts
-  codeDocumentStatus.ts
+frontend/src/behavior/                 # existing preview adapter/store boundary
+frontend/src/application/              # existing shared command boundary
+frontend/src/components/behavior/      # future dedicated plan/timeline controls
+packages/behavior/src/profiles/         # future exact profile additions
 ```
 
 File names are recommendations, not a license to create shallow pass-through
@@ -1628,15 +1537,15 @@ Recommended results:
 
 | Legacy concern | Target disposition |
 | --- | --- |
-| Fixed C/WASM button/LED harness | Keep only as historical/regression evidence until default runtime retirement; not target architecture |
-| TypeScript source interpreter | Remove from the default preview path after Behavior Plan parity |
-| Protocol runtime | Preserve only if another explicit product surface still owns it; do not couple it to Behavior Preview |
-| `useSimulationStore` engine/remote fields | Replace with preview status, logical cursor, snapshots, inputs, diagnostics, and timeline |
-| Loose `pinStates` visual lookup | Replace with typed component visual projections |
-| `simulation.run/stop/get_state` | Deprecate in favor of behavior tools |
-| `firmware.compile` and `/api/compile` | Remove from recommended workflow and later registration/routes |
-| `compiledArtifact` project field | Ignore/quarantine on migration; exclude from new canonical schema |
-| `browser-toolchain` and `avr-runtime` | Leave dormant or archive in a separate cleanup decision; do not integrate |
+| Fixed C/WASM button/LED harness | Dormant historical/regression material; not the Behavior Preview architecture and not in the active Site import closure |
+| TypeScript source interpreter | Dormant historical runtime; not used by the default preview path |
+| Protocol runtime | Dormant unless a separately owned product surface adopts it; never couple it to Behavior Preview implicitly |
+| `useSimulationStore` engine/remote fields | Preview store owns status, logical cursor, snapshots, inputs, diagnostics, and timeline; old store remains quarantine context only |
+| Loose `pinStates` visual lookup | Replaced in the active path by typed component visual projections |
+| `simulation.run/stop/get_state` | Removed from default WebMCP registration; `/api/simulation/*` returns 404 on the canonical Site route |
+| `firmware.compile` and `/api/compile` | Removed from default registration and canonical Site route; `/api/compile` returns 404 there |
+| `compiledArtifact` project field | Accepted only at migration boundary, quarantined under `legacyBehaviorData`, and excluded from active canonical targets |
+| `browser-toolchain` and `avr-runtime` | Dormant/reference packages; do not import into the Site bundle |
 | Native/remote engines | Out of scope |
 | Web Serial/flashing | Out of scope |
 | External SDK calls | Future separate RFC with explicit user authority |
@@ -1648,16 +1557,19 @@ commits.
 ## 24. Operational release caveat
 
 GitHub push and ChatGPT Site deployment are separate operations. The repository
-currently persists a Sites project ID in `chatgpt-site/.openai/hosting.json`.
+currently persists Sites project ID
+`appgprj_6a913ce4a58881918a47ea49fa0ca505` in
+`chatgpt-site/.openai/hosting.json`; the canonical URL is
+<https://schematic-hardware-workspace.decipherer71.chatgpt.site>.
 If the selected ChatGPT workspace cannot access that opaque ID, do not replace
 it or create a duplicate Site silently. Switch to the owning workspace or obtain
 explicit authorization for a new binding. See `docs/CHATGPT_SITE_RUNBOOK.md`.
 
 This hosting caveat does not change the Behavior Preview architecture.
 
-## 25. Final recommendation
+## 25. Current recommendation
 
-Build the smallest complete authoring loop first:
+The smallest complete authoring loop is now landed:
 
 ```text
 exact graph
@@ -1668,10 +1580,36 @@ exact graph
   -> copy/download for external hardware or SDK testing
 ```
 
-Then add display, buzzer, relay, servo, motor, and sensor profiles through the
-same registry and generic visual primitives.
+The next work should add only measured, demand-backed profile coverage or
+explicitly user-authorized external handoff integrations. Do not spend the next
+implementation cycle building a compiler or MCU emulator. The product value is
+helping people and agents design the system, understand the intended outcome,
+and iteratively prepare code for the environment where it will actually be
+built and tested.
 
-Do not spend the next implementation cycle building a compiler or MCU emulator.
-The product value is helping people and agents design the system, understand the
-intended outcome, and iteratively prepare code for the environment where it will
-actually be built and tested.
+## 26. Implementation evidence and release handoff
+
+The implementation/audit work is present in the release candidate. Sol's final
+turn reached the account usage limit before a formal sign-off; the root release
+audit therefore records the automated evidence explicitly and keeps live Site
+acceptance as a separate required step.
+
+The focused suites are intended to cover the 45-tool registry and absence of
+`firmware.compile`/`simulation.*`, graph and shopping boundaries, the complete
+Behavior Plan button→LED flow, model-call-to-canvas synchronization, editable
+code write/read/export, source-conflict protection, plan/project/code
+staleness, preview snapshot independence, project-switch isolation, legacy
+import quarantine, workspace capacity recovery, and no postMessage mutation
+bridge. Site capability fixtures are browser probes, not source-build or
+hardware evidence.
+
+The release candidate was checked on 2026-09-01 with `pnpm run verify`:
+workspace typecheck/lint/build passed; the frontend reported 31 test files and
+173 tests; the Behavior package reported 28 tests; Site lint/typecheck/tests/
+build and the compiler-free asset scan passed; and `git diff --check` passed.
+For a later release, rerun the current commit through the focused checks,
+`pnpm run verify:behavior-preview`, and `npm --prefix chatgpt-site run verify`.
+Verify the canonical URL, native 45-tool discovery, authentication,
+persistence/recovery behavior, preview, code handoff, confirmation guards, and
+retired-route 404s in the ChatGPT in-app browser. Record commands, observed
+outputs, commit, deployed revision, and publication status separately.

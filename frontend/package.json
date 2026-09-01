@@ -4,17 +4,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "predev": "pnpm --filter @schematic/firmware-harness verify:wasm",
     "dev": "vite",
-    "prebuild": "pnpm --filter @schematic/firmware-harness verify:wasm",
     "build": "vite build",
-    "prebuild:docker": "pnpm --filter @schematic/firmware-harness verify:wasm",
-    "build:docker": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "pretest": "pnpm --filter @schematic/firmware-harness verify:wasm",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -22,6 +17,7 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@xyflow/react": "^12.3.6",
+    "@schematic/behavior": "workspace:*",
     "axios": "^1.13.6",
     "idb-keyval": "^6.2.2",
     "jszip": "^3.10.1",

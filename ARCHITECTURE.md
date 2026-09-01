@@ -1,187 +1,353 @@
-# Schematic architecture — ChatGPT Site release path
+# Schematic architecture — Behavior Preview release path
 
-Schematic's primary release is the authenticated ChatGPT Site:
+Status: current implementation handoff (repository checked 2026-09-01)
+Release-candidate repository gates passed; the formal Sol turn hit its usage
+limit before sign-off, so live-host checks must still be recorded against the
+exact deployed revision.
 
-`ChatGPT in-app browser → chatgpt-site wrapper → shared React frontend/store → 42 WebMCP tools → browser runtime and same-origin Site API`
-
-The canonical live Site is [schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site). Production acceptance is performed in the ChatGPT in-app browser that will judge the submission.
-
-## Canonical request and execution path
+Schematic's canonical release is the authenticated ChatGPT Site:
 
 ```text
 ChatGPT in-app browser
-        │  verified ChatGPT identity; native WebMCP host
-        ▼
-chatgpt-site/app/[[...path]]/SchematicClient.tsx
-        │  dynamic client-only import
-        ▼
-frontend/src/App.tsx
-        │
-        ├── shared React UI and Zustand stores
-        │     project graph · selection · workspace · validation
-        │     simulation · shopping · browser-local persistence
-        │
-        ├── frontend/src/webmcp/tools.ts
-        │     42 semantic tools; the same store actions as the UI
-        │
-        └── simulation.run
-              ├── exact button→LED recognizer
-              │     packages/firmware-harness/generated/button-led.wasm
-              │     portable C core · C/WASM ABI v2 · verified SHA-256
-              │
-              └── bounded TypeScript behavioral interpreter
-                    graph/topology checks · protocol/device adapters
-
-Same-origin Site API (/api)
-        │
-        ▼
-chatgpt-site/app/api/[[...path]]/route.ts
-        │  imports functions/api/_runtime.ts directly
-        ▼
-catalog · validation · behavioral HTTP simulation · compile preflight
+  -> chatgpt-site wrapper
+  -> shared React frontend and Zustand stores
+  -> application commands
+  -> typed Behavior System and visual canvas
 ```
 
-The wrapper owns the Site route and identity boundary; it does not fork the
-workbench. The React application, graph model, stores, tool callbacks, and
-browser runtime are shared with the standalone frontend. The API route is also
-same-origin: it imports the tested runtime functions from
-`functions/api/_runtime.ts` instead of forwarding requests to another service.
+Canonical Site URL:
+[schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
 
-## Boundaries and data flow
+Sites project ID: `appgprj_6a913ce4a58881918a47ea49fa0ca505`
 
-1. The Site protects `/studio`, `/parts`, and `/settings` with the ChatGPT
-   identity boundary. `/api/auth/session` exchanges that verified identity for
-   a short-lived Schematic session signed with the server-only
-   `SCHEMATIC_SESSION_SECRET`.
-2. `SchematicClient` loads the shared `frontend/src/App.tsx`. The app hydrates
-   the active project from the browser-local project repository (IndexedDB,
-   with localStorage compatibility migration), scoped to the verified user
-   room. It broadcasts changes to same-origin tabs; this is not cloud backup or
-   cross-device synchronization.
-3. Human UI actions and WebMCP callbacks call the same Zustand store methods.
-   `frontend/src/webmcp/tools.ts` registers exactly 42 tools when the host
-   exposes the native `document.modelContext`/`navigator.modelContext` API.
-   Compatibility shims exist for local tests and constrained browsers; they are
-   not evidence of native WebMCP discovery by a judge.
-4. A tool result is structured (`content`, optional `data`, and `isError`) and
-   is reflected in the WebMCP activity panel. Mutating tools change the active
-   browser-local room; read-only tools report state without changing the graph.
-5. `simulation.run` validates the graph and chooses the narrowest honest
-   execution path:
-   - A source/graph pair that matches the exact button→LED grammar selects the
-     checked-in fixed C/WASM implementation. The matched source itself is not
-     compiled into or executed by WASM. The harness resolves the actual board
-     pins and connected button/LED endpoints, uses ABI version 2, and returns
-     the artifact SHA-256.
-   - Other supported source shapes use the bounded TypeScript interpreter and
-     explicit protocol/device adapters. Results identify unsupported APIs and
-     model limits; a generic pin map is not silently promoted to a device
-     model.
-   - A source or device outside those contracts returns an explicit
-     unsupported/unavailable result. The Site never claims arbitrary C/C++,
-     MCU-library, analog, RF, or binary execution.
-6. When a tool needs the API, the client calls the Site's same-origin `/api`
-   route. The route reuses `_runtime.ts` for catalog lookup, validation, HTTP
-   behavioral simulation, session checks, and compile preflight. The Site does
-   not launch a compiler subprocess, native simulator, or raw WebSocket.
+The repository records that binding. A release agent must tie publication to a
+pushed commit and record the returned Site version/deployment status; this
+document does not infer publication from a local build.
 
-## Capability matrix
+## The source of truth
 
-| Surface                                           | ChatGPT Site status                   | Boundary / truthful interpretation                                                                                                                                                                           |
-| ------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Site wrapper and shared app                       | Production wired                      | The Site route dynamically loads the shared React app; there is one graph/store implementation.                                                                                                              |
-| Hardware graph, catalog, typed wiring, validation | Production wired                      | Components can be searched, placed, inspected, connected, saved, and validated. Device execution still depends on the model contract.                                                                        |
-| Native WebMCP                                     | Integrated, host-dependent            | `tools.ts` exposes 42 native registrations when the in-app browser supplies `modelContext`; local compatibility shims are test aids, not a native-agent acceptance result.                                   |
-| Button→LED C/WASM harness                         | Production wired, deliberately narrow | Exact recognized source only; portable C core through C/WASM ABI v2, deterministic virtual I/O, artifact hash, pressed/released evidence.                                                                    |
-| TypeScript behavioral interpreter                 | Production wired                      | Bounded Arduino-like execution and graph-aware protocol/device adapters; supports only the APIs and model contracts reported in the result.                                                                  |
-| Same-origin Site API                              | Production wired                      | `chatgpt-site/app/api/.../route.ts` imports `functions/api/_runtime.ts`; health, catalog, validation, behavioral HTTP simulation, and compile preflight are available.                                       |
-| Firmware compilation on the Site                  | Preflight only                        | `firmware.compile` checks source/target and reports that a binary compiler is unavailable. It must not be presented as an arbitrary binary compiler.                                                         |
-| Project persistence                               | Production wired                      | Browser-local IndexedDB repository, localStorage migration, verified-user room keying, and same-origin tab synchronization.                                                                                  |
-| Parts sourcing                                    | Keyless discovery, agent-published   | The first `shopping.search` call returns untrusted no-key JLCSearch/LCSC or exact-product Adafruit candidates and a strict `schematic.parts.lookup.v1` handoff; the second call publishes only after trusted WebMCP auth and canonical listing validation. Candidates never become cart listings, and the surface has no purchase, checkout, or silent retailer navigation. |
-| Native external engines                           | Not production wired                  | Site engine status reports native simulator/compiler gaps explicitly; no native process is launched by the Site.                                                                                             |
-| Raw WebSocket transport                           | Not available on the Site             | Use the browser runtime or the same-origin HTTP simulation routes.                                                                                                                                           |
+The product has one behavioral source of truth: a versioned, data-only
+Behavior Plan associated with the active hardware graph. The plan names exact
+component instances, profile-defined events, profile-defined actions, and
+bounded payloads.
 
-## Reference and dormant paths
+```text
+user intent
+    |
+    +--> graph tools ------------------> HardwareGraph
+    |                                      |
+    +--> behavior.plan.write ------------> BehaviorPlanV1
+                                           |
+                                           v
+                                  @schematic/behavior
+                              inspect -> prepare -> session
+                                           |
+                                           v
+                              visual projections and timeline
+                                           |
+                                           v
+                                  canvas visual overlays
 
-These paths remain useful for development, lineage, experiments, or future
-work. They are not the ChatGPT Site production execution path:
+user/agent code response ----------------> CodeDocument
+                                           |
+                                           +--> Monaco / copy / download
+                                           +--> external SDK or hardware handoff
+```
 
-| Path / component                                                                | Status            | What the label means                                                                                                                      |
-| ------------------------------------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `frontend/` standalone Vite app                                                 | Reference/local   | A separately runnable Vite frontend and its local API proxy; useful for development and regression tests, not the canonical Site wrapper. |
-| `backend/app/` Python/FastAPI service                                           | Reference/local   | Optional local API and orchestration service. It is not called by the deployed ChatGPT Site.                                              |
-| `backend/app/engines/renode.py`, `ngspice.py`, `wasmtime.py`                    | Dormant/reference | Adapter sketches and local experiments; no Site subprocess or native engine is wired into production.                                     |
-| `vendor/velxio-simulation/` and `backend/app/velxio_reference/`                 | Reference/lineage | Vendored/reference material for the original hardware-workbench direction; not imported by the canonical Site runtime.                    |
-| `packages/avr-runtime/` and `packages/browser-toolchain/`                       | Dormant/reference | Historical toolchain/runtime scaffolds; they are not part of the approved Behavior Preview roadmap and do not make Site compilation available. |
-| `backend/worker.py` (Cloudflare worker entrypoint) and `backend/wrangler.jsonc` | Reference/dormant | A separate worker entrypoint/configuration, not wired to the ChatGPT Site release path.                                                   |
-| QEMU, Verilator, FMI, Gazebo, RF, and full SPICE plans                          | Future/reference  | Architectural targets only. They are not capabilities of the current Site and must not be shown as live demo features.                    |
+The preview follows the plan and checked-in profiles. It never reads source
+files as executable input. Code and preview may be linked by hashes for
+provenance, but a link does not mean that code caused the preview.
 
-## Contract details
+## What actually runs
 
-### Shared graph and stores
+The in-app preview runs only trusted, checked-in TypeScript profile reducers and
+visual projectors from `packages/behavior`. Those reducers consume validated
+typed action requests and return generic visual primitives such as indicator,
+button, text-display, numeric-readout, rotation, and activity state.
 
-`frontend/src/store/useProjectStore.ts` owns the canonical `HardwareGraph`:
-component instances, typed connections, firmware targets, and simulation
-metadata. Selection, workspace panels, validation, shopping, and simulation
-state live in adjacent stores. React Flow renders the graph; it is not the
-source of truth. The project-storage package persists the workspace locally and
-keeps user rooms separate.
+The preview is a deterministic conceptual outcome. It is not firmware
+execution, electrical simulation, an MCU emulator, a compiler, an uploader, or
+a physical hardware test. Preview claims are machine-readable as:
 
-### WebMCP registration
+```text
+basis: declared-behavior-plan
+sourceCodeRead: false
+sourceCodeExecuted: false
+sourceCodeCompiled: false
+hardwareUploaded: false
+electricalBehaviorSimulated: false
+physicalWiringVerified: false
+physicalBehaviorVerified: false
+```
 
-`frontend/src/webmcp/tools.ts` is the single tool registry and exports
-`WEBMCP_TOOL_COUNT = tools.length`. Each native registration carries the tool
-name, description, input schema, annotations, and an execution callback that
-delegates to the shared stores. The current implementation follows the WebMCP
-draft dated 26 August 2026. The browser testing flag documentation is for
-Chrome v149+; the judge target here is the ChatGPT in-app browser, whose native
-producer availability must be checked at acceptance time.
+The honest UI sentence is:
 
-### Browser simulation
+> This scripted preview shows the requested outcome. No source code ran, and
+> wiring, electrical behavior, and physical hardware were not verified.
 
-The portable harness is intentionally an exact contract, not a general
-compiler. It recognizes one safe `setup`/`loop` shape that reads a connected
-button and writes a connected LED, then selects a fixed precompiled
-implementation. The matched source bytes are not passed to WASM, and optional
-recognized delay syntax does not define the module's step timing. The generated
-module is a 400-byte, hash-verified artifact with ABI v2. The same portable C
-core has a source-only ESP32 Arduino export, but that export is not an ESP32
-binary and does not make physical-device testing part of the Site.
+Build, upload, and physical test happen later in the user's selected external
+SDK/toolchain or hardware workflow. They are outside this Site.
 
-The TypeScript runtime is the bounded fallback. It performs topology checks
-even when firmware execution is unavailable, caps requested run duration, and
-reports code/model coverage through `executionEngine`, `unsupportedApis`,
-`targetIssues`, protocol traces, and validation summaries.
+## Runtime and dependency topology
 
-### Site API
+```text
+chatgpt-site/app/[[...path]]/SchematicClient.tsx
+        |
+        v
+frontend/src/App.tsx
+        |
+        +--> frontend/src/store/useProjectStore.ts
+        |       HardwareGraph, BehaviorPlan records, CodeDocument records
+        |
+        +--> frontend/src/application/behaviorCommands.ts
+        |       shared plan/code commands and exact-hash writes
+        |
+        +--> packages/behavior/
+        |       schemas, registry, prepare, profiles, deterministic sessions
+        |
+        +--> frontend/src/behavior/useBehaviorPreviewStore.ts
+        |       ephemeral UI status, snapshot, diagnostics, timeline cursor
+        |
+        +--> frontend/src/webmcp/behaviorTools.ts
+        |       5 behavior + 3 code adapters
+        |
+        +--> frontend/src/webmcp/tools.ts
+                45 total registered tools
+```
 
-`chatgpt-site/app/api/[[...path]]/route.ts` maps same-origin requests to the
-shared functions in `functions/api/_runtime.ts`. The route provides health,
-catalog search/inspection, import analysis, behavioral simulation state/run/
-stop, parts-provider rejection, and compile preflight. API sessions are
-short-lived bearer tokens issued after the Site verifies ChatGPT identity. A
-missing or weak server secret is a release failure, not a reason to fall back
-to anonymous access.
+`@schematic/behavior` is framework- and transport-free. It must not import
+React, Zustand, React Flow, Monaco, WebMCP, DOM APIs, network clients,
+compiler packages, MCU runtimes, or Site APIs. The application command layer is
+the only place that adapts the frontend graph/store and persistence boundary to
+the package.
 
-## Release truth
+The Site API at
+`chatgpt-site/app/api/[[...path]]/route.ts` is deliberately narrow. It exposes
+same-origin health, catalog search/inspection, component import analysis,
+parts discovery, and identity helpers. Behavior Preview and source authoring
+stay in the local typed application layer. `/api/compile` and
+`/api/simulation/*` are retired from the Site route and must return 404.
 
-The repository's initial commit is dated 25 August 2026. Git history shows a
-substantial WebMCP extension after that date: `00d9956` added the hardware
-WebMCP studio on 26 August, `de54b96` fixed the WebMCP testing environment on
-26 August, `7d2c587` completed the hardware workflow and `7d3f702` verified it
-on 27 August, and `6e59adf`/`67b6783` bound the Site and authenticated
-workspace runtime on 28 August. This history describes what landed; it does
-not imply that dormant engines or a native Site MCP server are production
-features.
+## State ownership
 
-See [README.md](README.md) for local checks and
-[docs/CHATGPT_SITE_RUNBOOK.md](docs/CHATGPT_SITE_RUNBOOK.md) for publication and
-acceptance gates. The implementation-grade roadmap for replacing the default
-runtime outcome flow with typed Behavior Plans, deterministic visual actions,
-and independently editable/exportable code is
-[docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md](docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md).
+### Durable project state
 
-## License
+`frontend/src/store/useProjectStore.ts` owns the active `HardwareGraph` and the
+project collection. Current durable authoring fields are:
 
-Schematic is AGPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for
-third-party notices.
+- `behaviorPlans`: normalized `BehaviorPlanRecord[]`;
+- `codeDocuments`: normalized, multi-file `CodeDocumentRecord[]`; and
+- `legacyBehaviorData`: JSON-only quarantine for unsupported or legacy values.
+
+Legacy `firmwareTargets` remain as a compatibility mirror for existing source
+consumers, but new behavior preview does not read their source. Compiled
+artifacts are removed from active targets and retained only under quarantine
+when imported. Legacy simulation configuration is similarly quarantined, not
+used to drive preview state.
+
+`frontend/src/store/projectPersistence.ts` persists projects in the existing
+browser-local repository. The verified-user room key prevents an authenticated
+room from inheriting another user's data. IndexedDB/localStorage and same-origin
+tab synchronization are device-local storage mechanisms; they are not cloud
+backup or cross-device sync.
+
+### Ephemeral preview state
+
+`frontend/src/behavior/useBehaviorPreviewStore.ts` contains only UI/session
+state: status, current snapshot, diagnostics, selected component, duration,
+announcement, and request generation. Timers, reducers, session objects, and
+active snapshots are not persisted or exported. Graph, plan, and project changes
+dispose the active session; code-only edits do not alter the preview snapshot.
+
+### Code documents
+
+`frontend/src/store/behaviorPersistence.ts` normalizes data-only code records.
+Each record has a project/target identity, language, optional board FQBN,
+source files, declared dependencies, revision, content SHA-256, origin,
+preview-link relation, export history, and the fixed
+`inAppVerification: "not-performed"` value.
+
+`frontend/src/application/behaviorCommands.ts` owns `code.write`, `code.read`,
+and `code.export` behavior. Every `code.write`/`firmware.write` request must
+include `expectedContentSha256`: `null` creates only when no document exists,
+while an exact hash returned by `code.read`/`firmware.read` authorizes replacing
+that revision. Missing, undefined, or mismatched hashes fail with a structured
+error without overwriting newer source. A manual edit changes the content hash
+and marks an old plan link stale. Plan or graph changes also mark links stale.
+No command regenerates or silently overwrites code.
+
+## Behavior System boundary
+
+The public package in `packages/behavior/src` has these layers:
+
+1. `contracts.ts` defines JSON-safe plans, requests, diagnostics, snapshots,
+   claims, code metadata, and handoff manifests.
+2. `schemas.ts` validates bounded Behavior Plan and payload data.
+3. `canonicalize.ts` provides stable canonical JSON and SHA-256 hashes.
+4. `registry.ts` resolves exact catalog bindings to exact profile versions.
+5. `prepare.ts` validates a plan against the graph, registry, and profile
+   action/event schemas. Unsupported items block by default or are reported as
+   partial only when an explicit skip policy is selected.
+6. `session.ts` applies ordered events/actions through pure profile reducers,
+   tracks logical time and a bounded session log, and produces deterministic
+   snapshot hashes.
+7. `profiles/` contains trusted, checked-in implementations. Imported plans
+   can name IDs but cannot provide reducers, JavaScript, callbacks, URLs,
+   templates, or executable plugins.
+
+Current exact catalog bindings cover:
+
+| Catalog identity | Profile | Representative actions/events |
+| --- | --- | --- |
+| `pushbutton` | `momentary-input:v1` | `button.pressed`, `button.released`, `button.setPressed` |
+| `led` | `digital-indicator:v1` | `indicator.set`, `indicator.setBrightness` |
+| `lcd1602` | `text-display:v1` | `display.showText`, `display.clear` |
+| `buzzer` | `buzzer:v1` | `buzzer.start`, `buzzer.stop` |
+| `relay` | `relay:v1` | `relay.set` |
+| `servo` | `rotary-actuator:v1` | `servo.setAngle` |
+| `stepper-motor` | `motor:v1` | `motor.setSpeed`, `motor.stop` |
+| `ntc-temperature-sensor` | `numeric-sensor:v1` | `sensor.setReading`, `sensor.changed` |
+
+Catalog support is opt-in by exact definition ID and profile version. Unknown
+or unsupported components/actions return structured diagnostics and do not
+silently mutate the canvas.
+
+## Application commands and WebMCP
+
+`frontend/src/application/behaviorCommands.ts` is the shared command seam for
+human controls and model tools. `frontend/src/webmcp/behaviorTools.ts` adapts
+the commands to the WebMCP result envelope; it does not own reducers or parse
+source. Every result includes structured errors where applicable, hashes or
+metadata needed for provenance, and a notice that distinguishes expected
+visual outcome from source/hardware verification.
+
+The default registry in `frontend/src/webmcp/tools.ts` contains exactly 45
+tools. The eight authoring tools are:
+
+| Tool | Role |
+| --- | --- |
+| `behavior.get_capabilities` | Report exact profile actions/events and limitations. |
+| `behavior.plan.write` | Validate and persist a Behavior Plan with revision/hash conflict checks. |
+| `behavior.preview` | Prepare a saved plan and open a bounded ephemeral preview session. |
+| `behavior.invoke` | Dispatch one typed event/input/action through the active session. |
+| `behavior.get_state` | Read status, hashes, snapshot, diagnostics, and honest claims. |
+| `code.write` | Create or replace editable source with exact-hash protection. |
+| `code.read` | Read source and metadata without executing it. |
+| `code.export` | Produce source hashes and an external handoff manifest. |
+
+The other 37 tools cover project, workspace, components, connections,
+validation, shopping, layout, and two compatibility aliases (`firmware.write`
+and `firmware.read`) plus the non-build `firmware.check` diagnostic. There is
+no `firmware.compile` or `simulation.*` registration. See
+[`docs/webmcp/tools.md`](docs/webmcp/tools.md) for exact schemas and
+annotations.
+
+## Hashes and provenance
+
+Hashes are identity and concurrency metadata, not correctness proofs:
+
+- `planSha256` hashes canonical Behavior Plan data;
+- `projectSha256` hashes behavior-relevant graph identity: project id/version,
+  sorted component instance ids/definition ids/properties (and firmware-group
+  identity when present), plus sorted connection endpoints/domains. Source
+  files, code metadata, labels, positions, rotations, and timestamps are
+  intentionally excluded. Moving nodes or running auto-layout therefore does
+  not change the semantic preview fingerprint; changing component identity,
+  definition, properties, or wiring does;
+- `registrySha256` identifies the checked-in profile registry;
+- `contentSha256` hashes normalized code file names and contents;
+- each exported file receives a `sha256`; and
+- `sessionLogSha256`/`snapshotSha256` identify deterministic preview history and
+  visible state. The ordered session log is replay input, not a durable
+  executable program.
+
+The external handoff manifest in `ExternalCodeHandoffV1` carries these values,
+target/FQBN metadata, dependencies, graph diagnostics, preview-link relation,
+export timestamp, and explicit false claims for build, execution, upload, and
+physical testing. Import/export retains this provenance: imported plans and
+source remain data-only, legacy artifacts are quarantined, and links are marked
+stale when their exact plan/project/content hashes no longer match. A hash
+proves which data was handled; it does not prove the source compiles or the
+hardware works.
+
+## Limits and safety
+
+The current persistence and preview caps are intentionally finite:
+
+| Resource | Limit |
+| --- | ---: |
+| Behavior Plans per project | 100 |
+| Rules per plan | 200 |
+| Actions per rule | 20 |
+| Cues per plan | 2,000 |
+| Code documents per project | 100 |
+| Files per code document | 128 |
+| Source bytes per file | 1 MiB |
+| Dependencies per document | 256 |
+| Export history entries | 50 |
+| Projects per local workspace | 50 |
+| Serialized local workspace | 8 MiB |
+| Canonical editable source per project | 512 KiB aggregate |
+| Mirrored source-container envelope per project | 1 MiB serialized |
+| `.vlx` import size | 10 MiB |
+| Logical preview duration | 600,000 ms |
+
+Payload schemas reject unsupported keywords, remote references, dynamic schema
+loading, non-JSON values, unsafe relative filenames, and unbounded values.
+Event/action dispatch is validated against the active instance, definition,
+profile, action/event ID, and current project fingerprint before reduction.
+
+Workspace hydration rejects an over-limit room without overwriting it. The
+application records a recovery error, keeps every project in the bounded
+recovery window visible/selectable/exportable, and blocks ordinary writes.
+Only confirmed project `clear` or `delete` operations are allowed while in
+recovery, and only when they strictly reduce project count or serialized size;
+normal authoring resumes once the room fits. Create, duplicate, and import
+operations are also atomic with respect to the 50-project and 8 MiB limits.
+Destructive WebMCP operations require exact repeated identity fields:
+`confirmProjectId`, `confirmInstanceId`, or `confirmConnectionId`; blueprint
+replacement additionally requires `replace: true` and the exact active project
+id. The default blueprint path creates a separate project.
+
+## Legacy and external boundaries
+
+The repository may still contain historical runtime, compiler, AVR, protocol,
+or API files. Their presence is not a product capability. They are quarantined
+or dormant until a separately authorized hardware-boundary project exists. The
+default Site entry closure must not import firmware harnesses, browser
+toolchains, AVR runtime, source interpreters, or remote simulation handlers.
+
+Do not add a direct `eval`, dynamic import of user code, JavaScript function
+name, WebSocket runtime, compiler subprocess, Web Serial uploader, or hidden SDK
+call to the Behavior Preview path. External testing remains user initiated.
+
+## Release and verification
+
+Run from the repository root:
+
+```bash
+pnpm --filter @schematic/frontend typecheck
+pnpm --filter @schematic/frontend test -- --run
+pnpm run verify:behavior-preview
+npm --prefix chatgpt-site run verify
+```
+
+The static behavior release gate checks package dependency boundaries, active
+Site import closure, required profile bindings, 45-tool registration, active
+client/server import boundaries and forbidden endpoint references, truthful
+claims, and bundle asset boundaries. It does not make live HTTP 404 checks. A local pass is not proof that the hosted Site has been
+published or that the ChatGPT host exposes native WebMCP.
+
+Before release, the release agent must check the canonical Site URL in the
+ChatGPT in-app browser, confirm native discovery of 45 tools, verify `/api/health`
+and `/api/docs`, confirm retired compile/simulation paths return 404, reload a
+project to test local persistence, and run a button→LED Behavior Plan. Record
+the deployed revision and publication result separately.
+
+## Related documents
+
+- [Behavior Preview and Editable Code Handoff](docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md)
+- [WebMCP schemas](docs/webmcp/tools.md)
+- [ChatGPT Site runbook](docs/CHATGPT_SITE_RUNBOOK.md)
+- [Demo script](docs/DEMO_SCRIPT.md)
+- [Site capability probes](chatgpt-site/SITES_CAPABILITY.md)

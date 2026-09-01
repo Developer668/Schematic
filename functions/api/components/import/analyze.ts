@@ -1,4 +1,4 @@
-import { componentImportAnalyze, optionsResponse } from "../../_runtime";
+import { componentImportAnalyze, optionsResponse } from "../../_catalog-runtime";
 
 type Context = { request: Request; env: Record<string, string> };
 export const onRequestOptions = ({ request }: Context) => optionsResponse(request);

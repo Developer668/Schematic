@@ -1451,6 +1451,7 @@ export default function ShoppingWorkspace({
               <input
                 id="shopping-agent-request"
                 value={query}
+                maxLength={240}
                 onChange={(event) => shopping.setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {

@@ -7,6 +7,7 @@
  */
 
 import { createDirectPartsSourceGateway, type PartsSourceId as GatewaySourceId } from "./gateway";
+import { readBoundedResponseText } from "./bounded-response";
 
 export type PublicSourceId = "jlcsearch" | "adafruit";
 
@@ -230,8 +231,7 @@ async function fetchJson(source: PublicSourceId, url: string, timeoutMs: number)
       cacheTtlSeconds: 0,
       timeoutMs,
     });
-    const body = await response.text();
-    if (new TextEncoder().encode(body).byteLength > MAX_RESPONSE_BYTES) throw new Error("public source response was too large");
+    const body = await readBoundedResponseText(response, MAX_RESPONSE_BYTES);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     try { return JSON.parse(body) as unknown; } catch { throw new Error("public source returned non-JSON data"); }
   } catch (error) {

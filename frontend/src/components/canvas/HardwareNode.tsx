@@ -1,9 +1,11 @@
 import { Handle, NodeToolbar, Position, type NodeProps } from "@xyflow/react";
-import { CircuitBoard, Trash2 } from "lucide-react";
+import { Check, CircuitBoard, Trash2 } from "lucide-react";
 import ComponentArtwork from "../ComponentArtwork.tsx";
+import ComponentVisualOverlay from "./ComponentVisualOverlay.tsx";
+import DestructiveConfirmButton from "../DestructiveConfirmButton.tsx";
 import { getCatalogComponent } from "../../data/hardware.ts";
 import { useProjectStore } from "../../store/useProjectStore.ts";
-import { useSimulationStore } from "../../store/useSimulationStore.ts";
+import { useBehaviorPreviewStore } from "../../behavior/useBehaviorPreviewStore.ts";
 
 export interface HardwareNodeData {
   label: string;
@@ -52,14 +54,9 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
   const rows = Math.max(leftPorts.length, rightPorts.length, 4);
   const compact = data.ports.length <= 4 && ["passive", "analog", "logic"].includes(def?.category ?? "");
   const display = ["display", "displays"].includes(def?.category ?? "");
-  const running = useSimulationStore((state) => state.running);
-  const timeNs = useSimulationStore((state) => state.timeNs);
-  const pinStates = useSimulationStore((state) => state.pinStates);
-  const reading = (suffix: string, fallback: number) => {
-    const entry = Object.entries(pinStates).find(([key]) => key.endsWith(`:${suffix}`));
-    return typeof entry?.[1] === "number" ? entry[1] : fallback;
-  };
-  const liveOutput = Object.entries(pinStates).some(([key, value]) => key.startsWith(`${data.instanceId}:`) && /:(IN|OUT|R|G|B|P\d+)$/.test(key) && value === true);
+  const projection = useBehaviorPreviewStore((state) => state.snapshot?.components[data.instanceId]);
+  const dispatchEvent = useBehaviorPreviewStore((state) => state.dispatchEvent);
+  const invokeAction = useBehaviorPreviewStore((state) => state.invokeAction);
   const visualHeight = compact ? 108 : display ? Math.max(138, rows * 22 + 20) : Math.min(320, Math.max(142, rows * 22 + 30));
 
   return (
@@ -67,7 +64,17 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
       <NodeToolbar isVisible={selected} position={Position.Top} offset={10}>
         <div className="node-toolbar">
           <span>{data.label}</span>
-          <button type="button" className="node-toolbar-delete" onClick={(event) => { event.stopPropagation(); useProjectStore.getState().removeComponent(id); }} aria-label={`Delete ${data.label}`} title="Delete component (Delete)"><Trash2 size={13} /></button>
+          <DestructiveConfirmButton
+            targetKey={id}
+            onConfirm={() => useProjectStore.getState().removeComponent(id)}
+            className="node-toolbar-delete"
+            onPointerDown={(event) => event.stopPropagation()}
+            aria-label={`Delete ${data.label} (${id})`}
+            confirmAriaLabel={`Confirm delete ${data.label} (${id})`}
+            title={`Arm deletion of ${data.label} (${id}); attached wires and targeted editable source documents are also affected`}
+            confirmTitle={`Click again to delete ${data.label} (${id}); attached wires and targeted editable source documents will be removed`}
+            confirmChildren={<><Check size={13} /><span className="sr-only">Confirm delete</span></>}
+          ><Trash2 size={13} /></DestructiveConfirmButton>
         </div>
       </NodeToolbar>
 
@@ -82,20 +89,22 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
         <div className="hardware-part-selection" />
         <div className="hardware-part-shadow" />
         <ComponentArtwork definition={def} className="hardware-part-artwork" />
-        {(def?.category === "actuator" || def?.id === "led" || def?.id === "active-buzzer" || def?.id === "buzzer") && <div className={`hardware-live-output ${liveOutput ? "is-on" : ""}`} aria-live="polite"><span className="hardware-live-output-dot" />{liveOutput ? "ACTIVE" : "IDLE"}</div>}
-        {data.definitionId === "ssd1306" && (
-          <div className={`hardware-live-display ${running ? "is-running" : ""}`} aria-live="polite">
-            <header><span>ENVIRONMENT</span><b>{running ? "LIVE" : "STANDBY"}</b></header>
-            {running ? (
-              <div className="hardware-live-readings">
-                <strong>{reading("temperatureC", 0).toFixed(1)}<small>°C</small></strong>
-                <span>{reading("pressureHpa", 0).toFixed(1)} hPa</span>
-                <span>{reading("humidityPct", 0).toFixed(1)} %RH</span>
-                <footer>FRAME {timeNs.toString()} ns</footer>
-              </div>
-            ) : <div className="hardware-live-standby">PRESS RUN</div>}
-          </div>
-        )}
+        <ComponentVisualOverlay
+          componentId={data.instanceId}
+          projection={projection}
+          onEvent={(eventId, payload) => {
+            if (eventId === "button.pressed" || eventId === "button.released") {
+              void invokeAction({
+                componentId: data.instanceId,
+                definitionId: data.definitionId,
+                actionId: "button.setPressed",
+                payload: { kind: "literal", value: { pressed: eventId === "button.pressed" } },
+              });
+              return;
+            }
+            void dispatchEvent({ componentId: data.instanceId, definitionId: data.definitionId, eventId, payload });
+          }}
+        />
         {leftPorts.map((port, index) => <Pin key={`left-${port.id}`} port={port} side="left" index={index} total={leftPorts.length} />)}
         {rightPorts.map((port, index) => <Pin key={`right-${port.id}`} port={port} side="right" index={index} total={rightPorts.length} />)}
       </div>

@@ -26,8 +26,8 @@ const bento = [
     span: "lg:col-span-7 lg:row-span-2",
     icon: Boxes,
     kicker: "CATALOG • 500+ DEFINITIONS",
-    title: "A catalog that tells you what runs",
-    body: "Boards, sensors, displays, power and passives share typed identities. Each part exposes its port contract and execution coverage, so validation-only parts are never presented as simulated hardware.",
+    title: "A catalog that shows preview coverage",
+    body: "Boards, sensors, displays, power and passives share typed identities. Each part exposes its port contract and exact preview coverage, so unmapped parts are never presented as if they produced an outcome.",
     accent: "from-amber-500/10 via-transparent to-transparent",
     stat: "500+",
     statLabel: "definitions",
@@ -37,7 +37,7 @@ const bento = [
     icon: Cable,
     kicker: "TYPED GRAPH",
     title: "Wires that know their domain",
-    body: "Explicit power, I²C, SPI, UART, PWM, and ADC ports support typed checks for shorts, missing pull-ups, and ground. This is validation, not analog circuit simulation.",
+    body: "Explicit power, I²C, SPI, UART, PWM, and ADC ports support on-demand static typed graph-rule checks for short-like conflicts, missing pull-ups, and ground connectivity. This is validation, not analog circuit simulation.",
     accent: "from-amber-500/10 via-transparent to-transparent",
   },
   {
@@ -45,7 +45,7 @@ const bento = [
     icon: Code2,
     kicker: "FIRMWARE",
     title: "Code lives next to copper",
-    body: "Monaco, per-board targets, and browser preflight — so agent and human share the same project.",
+    body: "Monaco and per-board editable source documents keep agent and human work in the same project, ready for an external SDK or hardware toolchain.",
     accent: "from-amber-500/10 via-transparent to-transparent",
   },
   {
@@ -53,7 +53,7 @@ const bento = [
     icon: Terminal,
     kicker: `WEBMCP • ${WEBMCP_TOOL_COUNT} TOOLS`,
     title: "Agent-native, not bolted on",
-    body: "project.get_graph → component.add → connection.connect → firmware.write → simulation.run — same Zustand path as the UI.",
+    body: "project.get_graph → component.add → connection.connect → behavior.plan.write → behavior.preview — the same validated application path as the UI.",
     accent: "from-amber-500/10 via-transparent to-transparent",
   },
   {
@@ -61,15 +61,15 @@ const bento = [
     icon: ShoppingCart,
     kicker: "SHOPPING DESK",
     title: "From graph to cart without copy-paste",
-    body: "Agent-supplied offers, retailer links, alternatives, and budget quotes stay attached to the graph — with unavailable prices clearly marked until a provider supplies them.",
+    body: "Agent-supplied offers, retailer links, alternatives, and budget quotes stay in the same room alongside the graph — with unavailable prices clearly marked until a provider supplies them.",
     accent: "from-amber-500/10 via-transparent to-transparent",
   },
 ];
 
 const workflow = [
   { n: "01", title: "Search & place", desc: "500+ catalog definitions and domain filters. Click or drag — every drop is a typed node with visible support coverage.", icon: Search },
-  { n: "02", title: "Wire & validate", desc: "Side pins sit 6px from the artwork edge. Validation catches shorts, TX→TX, I²C collisions live.", icon: GitBranch },
-  { n: "03", title: "Code & simulate", desc: "Write supported Arduino-style firmware, preflight it, then drive a behavioral model and inspect pin states, serial, and output events.", icon: Activity },
+  { n: "02", title: "Wire & validate", desc: "Side pins sit 6px from the artwork edge. Run on-demand static typed graph checks for short-like conflicts, TX→TX, and I²C collisions before export.", icon: GitBranch },
+  { n: "03", title: "Plan & preview", desc: "Write ordinary source for later external use while a typed Behavior Plan drives clear component outcomes and a replayable event timeline.", icon: Activity },
 ];
 
 export default function LandingPage() {
@@ -173,7 +173,7 @@ export default function LandingPage() {
               <span>Understand every connection.</span>
             </h1>
             <p>
-              One serious workspace for hardware architecture, firmware, and WebMCP control. The canvas is a typed graph — every surface, tool, and agent share it.
+              One serious workspace for hardware architecture, editable source, Behavior Plans, and WebMCP control. The canvas is a typed graph — every surface, tool, and agent share it.
             </p>
             <div className="landing-actions">
               <Link to="/studio" className="landing-primary group">
@@ -194,7 +194,7 @@ export default function LandingPage() {
                 <Cpu size={14} strokeWidth={1.4} /> 500+ defs • {WEBMCP_TOOL_COUNT} tools
               </span>
               <span className="hidden lg:inline-flex">
-                <Zap size={14} strokeWidth={1.4} /> Supported models run in-browser
+                <Zap size={14} strokeWidth={1.4} /> Typed outcomes preview in-browser
               </span>
             </div>
           </div>
@@ -211,7 +211,7 @@ export default function LandingPage() {
                   <LogoMark />
                   <span>environment-controller.vlx — Untitled • 3 components</span>
                   <span className="window-badge">
-                    <Play size={10} strokeWidth={1.6} /> MODELED
+                    <Play size={10} strokeWidth={1.6} /> PREVIEW
                   </span>
                 </div>
                 <div className="landing-window-body">
@@ -253,7 +253,7 @@ export default function LandingPage() {
                     </div>
                   </div>
                   <div className="landing-code">
-                    <b>FIRMWARE</b>
+                    <b>EDITABLE CODE</b>
                     <pre>
                       <em>void</em> setup() {"{"}
                       {"\n"}  pinMode(4, INPUT_PULLUP);
@@ -271,13 +271,13 @@ export default function LandingPage() {
                       {"}"}
                     </pre>
                     <div className="code-foot">
-                      <span className="dot on" /> behavioral model • button → LED
+                      <span className="dot on" /> AI draft • not run
                     </div>
                   </div>
                 </div>
               </div>
             </div>
-              <div className="visual-caption">Typed graph → validation → behavioral runtime. The preview uses a supported button → LED path.</div>
+              <div className="visual-caption">Typed graph → Behavior Plan → visible outcome. The code remains an editable artifact for later hardware work.</div>
           </div>
         </section>
 
@@ -290,7 +290,7 @@ export default function LandingPage() {
               <br />
               <span>Not a picture — a graph.</span>
             </h2>
-            <p>Every panel, every tool, every agent reads the same `HardwareProject`. No export, no drift.</p>
+            <p>Graph panels and WebMCP tools read the active `HardwareProject`. Shopping and editable source stay in the same room without becoming graph fields.</p>
           </div>
 
           <div className="landing-bento">
@@ -320,7 +320,7 @@ export default function LandingPage() {
         <section id="workflow" className="landing-section">
           <div className="landing-section-head">
             <div className="eyebrow">WORKFLOW</div>
-            <h2>Search. Wire. Run.</h2>
+            <h2>Search. Wire. Preview.</h2>
           </div>
           <div className="workflow">
             {workflow.map(({ n, title, desc, icon: Icon }) => (
@@ -339,7 +339,7 @@ export default function LandingPage() {
               <ShieldCheck size={14} strokeWidth={1.4} /> validation: missing pull-up, TX→TX, I²C collision
             </span>
             <span>
-              <Activity size={14} strokeWidth={1.4} /> bounded behavioral runtime • modeled GPIO + I²C
+              <Activity size={14} strokeWidth={1.4} /> deterministic Behavior Plan • typed actions + events
             </span>
             <span>
               <Layers size={14} strokeWidth={1.4} /> netlist • Union-Find • 8 resolved nets in demo
@@ -392,7 +392,7 @@ export default function LandingPage() {
               <div className="mini-card">
                 <b>Code</b>
                 <code>if(digitalRead(4)==LOW) digitalWrite(13,HIGH);</code>
-                <code className="muted">preflight balanced_braces: true</code>
+                <code className="muted">editable source · not compiled or checked</code>
               </div>
             </div>
           </div>
@@ -415,7 +415,7 @@ export default function LandingPage() {
               </Link>
             </div>
           </div>
-          <div className="cta-foot">AGPL-3.0 • WebMCP {WEBMCP_TOOL_COUNT} tools • bounded browser models • provider-backed prices when connected</div>
+          <div className="cta-foot">AGPL-3.0 • WebMCP {WEBMCP_TOOL_COUNT} tools • typed outcome previews • provider-backed prices when connected</div>
         </section>
       </main>
 

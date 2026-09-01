@@ -18,10 +18,11 @@
     "plugins": [{ "name": "next" }],
     "paths": {
       "@/*": ["./*"],
+      "@schematic/behavior": ["../packages/behavior/src/index.ts"],
+      "@schematic/behavior/canonicalize": ["../packages/behavior/src/canonicalize.ts"],
       "@schematic/hardware-graph": ["../packages/hardware-graph/src"],
       "@schematic/validation": ["../packages/validation/src"],
       "@schematic/component-format": ["../packages/component-format/src"],
-      "@schematic/firmware-harness": ["../packages/firmware-harness/src/index.ts"],
       "@schematic/project-storage": ["../packages/project-storage/src/index.ts"],
       "@schematic/session": ["../functions/_auth.ts"]
     }

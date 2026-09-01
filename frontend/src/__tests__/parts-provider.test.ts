@@ -67,4 +67,19 @@ describe("server-side parts provider fallback", () => {
     expect(body.handoff.returnShape.listings).toHaveLength(1);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("stops reading an oversized chunked provider response without Content-Length", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("x".repeat(512 * 1024 + 1), { status: 200 })));
+    const response = await partsSearch(await requestFor("oversized-provider-response"), {
+      ...authEnv,
+      PARTS_PUBLIC_SOURCES_ENABLED: "false",
+      PARTS_PAID_PROVIDERS_ENABLED: "true",
+      PARTS_PROVIDER_ORDER: "oversized",
+      PARTS_PROVIDER_ENDPOINTS: JSON.stringify([{ id: "oversized", endpoint: "https://oversized-provider.example/search" }]),
+    });
+    const body = await response.json() as any;
+    expect(body.results).toEqual([]);
+    expect(body.attempts[0]).toMatchObject({ provider: "oversized", status: "error" });
+    expect(body.attempts[0].message).toContain("524288-byte limit");
+  });
 });

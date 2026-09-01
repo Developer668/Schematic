@@ -248,4 +248,41 @@ describe("debounced saves", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("aborted");
   });
+
+  it("drains a newer save scheduled while an earlier save is running", async () => {
+    const backing = repository(new FakeIndexedDBFactory(), "test-debounce-running");
+    let releaseFirst: (() => void) | undefined;
+    let markStarted: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => { markStarted = resolve; });
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let calls = 0;
+    const saver = createDebouncedWorkspaceSaver<TestProject>({
+      async saveWorkspace(snapshot, options) {
+        calls += 1;
+        if (calls === 1) {
+          markStarted?.();
+          await firstGate;
+        }
+        return backing.saveWorkspace(snapshot, options);
+      },
+    }, 10_000);
+
+    const first = saver.schedule(workspace("first"));
+    const firstFlush = saver.flush();
+    await firstStarted;
+    const second = saver.schedule(workspace("latest"));
+    const drain = saver.flush();
+    releaseFirst?.();
+
+    const [firstResult, secondResult, drainedResult] = await Promise.all([first, second, drain, firstFlush]);
+    expect(firstResult.ok).toBe(true);
+    expect(secondResult.ok).toBe(true);
+    expect(drainedResult?.ok).toBe(true);
+    if (drainedResult?.ok) expect(drainedResult.value.projects[0].name).toBe("latest");
+    const loaded = await backing.loadWorkspace();
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) expect(loaded.value?.projects[0].name).toBe("latest");
+    expect(calls).toBe(2);
+    expect(saver.pending).toBe(false);
+  });
 });

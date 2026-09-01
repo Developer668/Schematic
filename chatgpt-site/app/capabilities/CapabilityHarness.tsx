@@ -9,7 +9,7 @@ import {
 
 type ProbeStatus = "pass" | "fail" | "blocked" | "pending" | "running";
 
-type ProbeId = "worker" | "wasm" | "static-asset" | "indexeddb" | "cache" | "blob";
+type ProbeId = "worker" | "static-asset" | "indexeddb" | "cache" | "blob";
 
 interface ProbeResult {
   id: ProbeId;
@@ -29,12 +29,11 @@ const CAPABILITY_DB = "schematic-sites-capability-spike-v1";
 const CAPABILITY_ROOM = "capability-spike";
 const CAPABILITY_USER = "local-browser";
 const CAPABILITY_PROJECT_ID = "capability-persistence-marker";
-const CAPABILITY_MARKER = "browser-runtime-v1";
+const CAPABILITY_MARKER = "browser-capabilities-v2";
 const LARGE_ASSET_MIN_BYTES = 64 * 1024;
 
 const initialResults: ProbeResult[] = [
   { id: "worker", label: "Web Worker", status: "pending", detail: "Not run" },
-  { id: "wasm", label: "Small WebAssembly module", status: "pending", detail: "Not run" },
   { id: "static-asset", label: "Larger static asset", status: "pending", detail: "Not run" },
   { id: "indexeddb", label: "IndexedDB persistence", status: "pending", detail: "Run probes, then reload this page" },
   { id: "cache", label: "Cache Storage", status: "pending", detail: "Not run" },
@@ -59,14 +58,6 @@ function blockedOrFailed(id: ProbeId, label: string, error: unknown): ProbeResul
   const message = error instanceof Error ? error.message : "The browser API returned an unknown error.";
   const unavailable = /unavailable|not supported|undefined|secure context/i.test(message);
   return result(id, label, unavailable ? "blocked" : "fail", message);
-}
-
-function decodeBase64(value: string): Uint8Array {
-  const normalized = value.replace(/\s+/g, "");
-  const binary = atob(normalized);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
 }
 
 function persistenceWorkspace(): WorkspaceSnapshot<CapabilityProbeProject> {
@@ -113,26 +104,6 @@ async function runWorkerProbe(): Promise<ProbeResult> {
     };
     worker.postMessage({ type: "increment", value: 41 });
   });
-}
-
-async function runWasmProbe(): Promise<ProbeResult> {
-  const label = "Small WebAssembly module";
-  if (typeof WebAssembly === "undefined") return result("wasm", label, "blocked", "WebAssembly is unavailable in this browser context.");
-  try {
-    const response = await fetch("/capability-fixtures/answer.wasm.base64", { cache: "no-store" });
-    if (!response.ok) return result("wasm", label, "fail", `Static fixture returned HTTP ${response.status}.`);
-    const bytes = decodeBase64(await response.text());
-    const wasmModule = await WebAssembly.compile(bytes as unknown as BufferSource);
-    const instance = await WebAssembly.instantiate(wasmModule);
-    const main = instance.exports.main;
-    if (typeof main !== "function") return result("wasm", label, "fail", "The WASM fixture has no exported main function.", bytes.byteLength);
-    const value = (main as () => number)();
-    return value === 42
-      ? result("wasm", label, "pass", "Static WASM fixture instantiated and returned 42.", bytes.byteLength)
-      : result("wasm", label, "fail", `WASM returned ${String(value)} instead of 42.`, bytes.byteLength);
-  } catch (error) {
-    return blockedOrFailed("wasm", label, error);
-  }
 }
 
 async function runStaticAssetProbe(): Promise<ProbeResult> {
@@ -246,15 +217,14 @@ export default function CapabilityHarness() {
   const runProbes = async () => {
     setRunning(true);
     setResults((current) => current.map((item) => ({ ...item, status: "running", detail: "Running…" })));
-    const [worker, wasm, staticAsset, indexeddb, cache, blob] = await Promise.all([
+    const [worker, staticAsset, indexeddb, cache, blob] = await Promise.all([
       runWorkerProbe(),
-      runWasmProbe(),
       runStaticAssetProbe(),
       runPersistenceProbe(),
       runCacheProbe(),
       runBlobProbe(),
     ]);
-    setResults([worker, wasm, staticAsset, indexeddb, cache, blob]);
+    setResults([worker, staticAsset, indexeddb, cache, blob]);
     setRunning(false);
   };
 
@@ -272,9 +242,9 @@ export default function CapabilityHarness() {
     <main style={{ minHeight: "100vh", padding: "48px 24px", background: "#0e1117", color: "#e7edf5", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
       <div style={{ maxWidth: 960, margin: "0 auto" }}>
         <p style={{ color: "#78a9ff", letterSpacing: "0.08em", fontSize: 12, marginBottom: 12 }}>SCHEMATIC / SITE CAPABILITY SPIKE</p>
-        <h1 style={{ fontSize: "clamp(28px, 5vw, 52px)", lineHeight: 1.05, margin: 0, maxWidth: 700 }}>Browser runtime acceptance harness</h1>
+        <h1 style={{ fontSize: "clamp(28px, 5vw, 52px)", lineHeight: 1.05, margin: 0, maxWidth: 700 }}>Browser capability acceptance harness</h1>
         <p style={{ color: "#a7b3c5", maxWidth: 720, lineHeight: 1.6, margin: "20px 0 28px" }}>
-          These probes use only browser APIs and small same-origin fixtures. They do not call <code>/api/compile</code> or <code>/api/simulation</code>; those routes remain optional compatibility paths.
+          These probes use only browser APIs and small same-origin fixtures. They never parse or execute editable project source and are independent of Behavior Preview.
         </p>
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 28 }}>
@@ -312,7 +282,7 @@ export default function CapabilityHarness() {
         </section>
 
         <p style={{ color: "#77869d", lineHeight: 1.6, fontSize: 13, marginTop: 28 }}>
-          A persistence probe is <strong>pending</strong> until the marker written by “Run browser probes” is found after a real page reload. Browser download permission, cross-device sync, compiler assets, Web Serial, and WebUSB are intentionally outside this safe fixture spike.
+          A persistence probe is <strong>pending</strong> until the marker written by “Run browser probes” is found after a real page reload. Browser download permission, cross-device sync, source execution, Web Serial, and WebUSB are intentionally outside this safe fixture spike.
         </p>
       </div>
     </main>

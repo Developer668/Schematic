@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense } from "react";
 import Inspector from "../inspector/Inspector.tsx";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
@@ -6,13 +6,14 @@ import { getCatalogComponent } from "../../data/catalog.ts";
 import { Code2, Eye, FolderKanban, Trash2, ShoppingCart } from "lucide-react";
 import ComponentArtwork from "../ComponentArtwork.tsx";
 import ShoppingWorkspace from "../shopping/ShoppingWorkspace.tsx";
+import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
+import DestructiveConfirmButton from "../DestructiveConfirmButton.tsx";
 
 const MonacoWorkspace = lazy(() => import("../editor/MonacoWorkspace.tsx"));
 
-type Tab = "code" | "inspect" | "project" | "shopping";
-
 export default function RightPanel() {
-  const [tab, setTab] = useState<Tab>("code");
+  const tab = useWorkspaceStore((state) => state.rightPanelTab);
+  const setTab = useWorkspaceStore((state) => state.setRightPanelTab);
   const project = useProjectStore((s) => s.project);
   const activeId = useSelectionStore((s) => s.activeComponentId);
   const active = project.components.find((c) => c.id === activeId);
@@ -36,7 +37,7 @@ export default function RightPanel() {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {tab === "code" && (
           <div className="flex flex-1 flex-col min-h-0">
-            <Suspense fallback={<div className="flex h-full items-center justify-center bg-card text-xs text-muted-foreground">Loading firmware editor…</div>}>
+            <Suspense fallback={<div className="flex h-full items-center justify-center bg-card text-xs text-muted-foreground">Loading source editor…</div>}>
               <MonacoWorkspace />
             </Suspense>
           </div>
@@ -46,7 +47,18 @@ export default function RightPanel() {
             <Inspector />
             {active && (
               <div className="flex gap-1.5 p-2">
-                <button type="button" onClick={() => useProjectStore.getState().removeComponent(active.id)} className="w-full rounded border border-red-200 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400">Remove</button>
+                <DestructiveConfirmButton
+                  targetKey={active.id}
+                  onConfirm={() => useProjectStore.getState().removeComponent(active.id)}
+                  className="w-full rounded border border-red-200 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400"
+                  aria-label={`Remove ${active.id}`}
+                  confirmAriaLabel={`Confirm remove ${active.id}; attached wires and targeted editable source documents will also be removed`}
+                  title={`Arm removal of ${active.id}; attached wires and targeted editable source documents are also affected`}
+                  confirmTitle={`Click again to remove ${active.id}; attached wires and targeted editable source documents will be removed`}
+                  confirmChildren={<>Confirm remove <span className="font-mono">{active.id}</span></>}
+                >
+                  Remove
+                </DestructiveConfirmButton>
               </div>
             )}
           </div>
@@ -59,7 +71,7 @@ export default function RightPanel() {
               <div className="mt-2 grid grid-cols-3 gap-1.5">
                 <div className="rounded border border-border p-2 text-center"><div className="font-mono text-sm font-medium tabular-nums">{String(project.components.length).padStart(2,"0")}</div><div className="kicker !text-[9px]">Comps</div></div>
                 <div className="rounded border border-border p-2 text-center"><div className="font-mono text-sm font-medium tabular-nums">{String(project.connections.length).padStart(2,"0")}</div><div className="kicker !text-[9px]">Wires</div></div>
-                <div className="rounded border border-border p-2 text-center"><div className="font-mono text-sm font-medium tabular-nums">{String(project.firmwareTargets.length).padStart(2,"0")}</div><div className="kicker !text-[9px]">Firmware</div></div>
+                <div className="rounded border border-border p-2 text-center"><div className="font-mono text-sm font-medium tabular-nums">{String(project.codeDocuments?.length ?? project.firmwareTargets.length).padStart(2,"0")}</div><div className="kicker !text-[9px]">Code docs</div></div>
               </div>
             </div>
 
@@ -89,7 +101,18 @@ export default function RightPanel() {
             </div>
 
             <div className="flex gap-1.5">
-              <button type="button" onClick={()=>useProjectStore.getState().clear()} className="flex-1 rounded border border-border py-1.5 text-xs hover:bg-muted inline-flex items-center justify-center gap-1"><Trash2 size={11} strokeWidth={1.6}/> Clear</button>
+              <DestructiveConfirmButton
+                targetKey={project.id}
+                onConfirm={() => useProjectStore.getState().clear()}
+                className="flex-1 rounded border border-red-200 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 inline-flex items-center justify-center gap-1"
+                aria-label={`Clear project ${project.name}`}
+                confirmAriaLabel={`Confirm clear project ${project.name}; components, wires, Behavior Plans, and editable source will be removed`}
+                title={`Arm project clear; components, wires, Behavior Plans, and editable source are affected`}
+                confirmTitle={`Click again to clear ${project.name}; components, wires, Behavior Plans, and editable source will be removed`}
+                confirmChildren={<><Trash2 size={11} strokeWidth={1.6} /> Confirm clear</>}
+              >
+                <Trash2 size={11} strokeWidth={1.6} /> Clear
+              </DestructiveConfirmButton>
               <button type="button" onClick={()=>{const b=new Blob([JSON.stringify(project,null,2)],{type:"application/json"}); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download=`${project.name}.json`; a.click(); URL.revokeObjectURL(u)}} className="flex-1 rounded bg-foreground py-1.5 text-xs font-medium text-background hover:opacity-90">Export</button>
             </div>
           </div>

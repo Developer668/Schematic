@@ -1,5 +1,6 @@
 import { componentPorts, resolveBoardPin, resolveFirmwareBinding, signalPort } from "../data/hardware.ts";
 import { createProtocolRuntime, type DeviceRuntimeState, type ProtocolRuntime, type ProtocolTrace, type ProtocolWarning } from "./protocolRuntime.ts";
+import { inferModelContract } from "./modelContract.ts";
 import type { HardwareGraph } from "../store/useProjectStore.ts";
 
 export type RuntimeValue = boolean | number;
@@ -782,7 +783,7 @@ export function runFirmwareRuntime(project: HardwareGraph, inputs: Record<string
       targetIssues.push({ componentId: target.componentId, code: "NON_BOARD_FIRMWARE_TARGET", message: `${binding.definition.title} is not a programmable board.` });
       continue;
     }
-    if (!["behavioral", "engine-backed"].includes(binding.definition.model.support)) {
+    if (!["behavioral", "engine-backed"].includes(inferModelContract(binding.definition).support)) {
       targetIssues.push({ componentId: target.componentId, code: "UNSUPPORTED_BOARD_MODEL", message: `${binding.definition.title} has no verified executable firmware model in the browser runtime.` });
       continue;
     }
