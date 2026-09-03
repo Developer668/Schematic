@@ -58,6 +58,8 @@ describe("WebMCP tools", () => {
     unregisterWebMCPTools();
     vi.unstubAllGlobals();
     delete (document as any).modelContext;
+    delete (navigator as any).modelContext;
+    delete (navigator as any).modelContextTesting;
   });
 
   it("registers the complete behavior/code tool surface without retired runtime names", () => {
@@ -344,6 +346,24 @@ describe("WebMCP tools", () => {
     expect(definitions.get("project.delete").annotations?.destructiveHint).toBe(true);
     expect(definitions.get("project.clear").annotations?.destructiveHint).toBe(true);
     expect(definitions.get("behavior.plan.write").inputSchema.required).toEqual(["plan", "expectedRevision"]);
+  });
+
+  it("does not fake native WebMCP when the browser does not expose it", async () => {
+    delete (document as any).modelContext;
+    delete (navigator as any).modelContext;
+
+    await registerWebMCPTools();
+
+    expect((document as any).modelContext).toBeUndefined();
+    expect((navigator as any).modelContext).toBeUndefined();
+    expect((navigator as any).modelContextTesting?.listTools).toBeTypeOf("function");
+    expect(useWebMCPStore.getState().registration).toMatchObject({
+      state: "unavailable",
+      registeredCount: 0,
+      declaredCount: WEBMCP_TOOL_COUNT,
+      discoveredCount: 0,
+      discovery: "unavailable",
+    });
   });
 
   it("does not expose an inbound postMessage mutation bridge", () => {

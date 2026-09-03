@@ -1511,30 +1511,6 @@ function installModelContextTestingPolyfill() {
   });
 }
 
-function installModelContextProducerPolyfill() {
-  const doc = document as any;
-  const nav = navigator as any;
-  if (typeof doc.modelContext?.registerTool === "function" || typeof nav.modelContext?.registerTool === "function") return;
-  const registry = new Map<string, ToolDef>();
-  const mc = {
-    async registerTool(tool: ToolDef, options?: { signal?: AbortSignal }) {
-      registry.set(tool.name, tool);
-      options?.signal?.addEventListener("abort", () => registry.delete(tool.name));
-    },
-    async getTools() {
-      return [...registry.values()];
-    },
-    async executeTool(tool: string | { name: string }, args: Record<string, unknown> = {}) {
-      const name = typeof tool === "string" ? tool : tool.name;
-      const found = registry.get(name);
-      if (!found) throw new Error(`Unknown WebMCP tool: ${name}`);
-      return executeToolWithActivity(found, args);
-    },
-  };
-  Object.defineProperty(doc, "modelContext", { configurable: true, value: mc });
-  Object.defineProperty(nav, "modelContext", { configurable: true, value: mc });
-}
-
 export async function registerWebMCPTools() {
   // React StrictMode and hot reload can invoke startup twice. Abort the old
   // lease before creating a new one so a native registry never accumulates
@@ -1548,9 +1524,6 @@ export async function registerWebMCPTools() {
   await waitForProjectPersistence();
   if (generation !== registrationGeneration) return;
   useWebMCPStore.getState().setRegistration({ state: "checking", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: undefined });
-  const existingModelContext: any = (document as any).modelContext ?? (navigator as any).modelContext;
-  const hasNativeModelContext = typeof existingModelContext?.registerTool === "function";
-  installModelContextProducerPolyfill();
   installModelContextTestingPolyfill();
   const mc: any = (document as any).modelContext ?? (navigator as any).modelContext;
   // Test/degraded-runtime fallback only. Native agents must use the
@@ -1565,7 +1538,7 @@ export async function registerWebMCPTools() {
   };
   if (!mc || typeof mc.registerTool !== "function") {
     useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: "The browser did not expose document.modelContext." });
-    console.warn("[WebMCP] modelContext not available — run in the supported in-app browser, or use the test/degraded-runtime fallback");
+    console.warn("[WebMCP] native document.modelContext is unavailable; no browser-visible tools were registered");
     return;
   }
   let registeredCount = 0;
@@ -1597,20 +1570,18 @@ export async function registerWebMCPTools() {
     mc.ontoolchange = () => console.log("[WebMCP] toolset changed");
   }
   let discoveredCount = 0;
-  let discovery: "verified" | "unverified" | "polyfill" = hasNativeModelContext ? "unverified" : "polyfill";
+  let discovery: "verified" | "unverified" = "unverified";
   if (typeof mc.getTools === "function") {
     try {
       const discovered = await mc.getTools();
       discoveredCount = Array.isArray(discovered) ? discovered.filter((tool: any) => typeof tool?.name === "string").length : 0;
-      if (hasNativeModelContext && discoveredCount === registeredCount && registeredCount === WEBMCP_TOOL_COUNT) discovery = "verified";
+      if (discoveredCount === registeredCount && registeredCount === WEBMCP_TOOL_COUNT) discovery = "verified";
     } catch (error) {
       console.warn("[WebMCP] native tool discovery check failed:", error);
     }
-  } else if (!hasNativeModelContext) {
-    discoveredCount = registeredCount;
   }
   useWebMCPStore.getState().setRegistration({
-    state: registrationErrors > 0 ? "error" : hasNativeModelContext ? "native" : "fallback",
+    state: registrationErrors > 0 ? "error" : "native",
     registeredCount,
     declaredCount: WEBMCP_TOOL_COUNT,
     discoveredCount,
