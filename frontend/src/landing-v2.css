@@ -425,111 +425,6 @@ body.landing-body {
   to { opacity: 1; transform: translateX(0) scale(1); }
 }
 
-.hardware-black-hole {
-  position: absolute;
-  z-index: 0;
-  top: -32%;
-  right: -48%;
-  width: 168%;
-  height: 152%;
-  overflow: hidden;
-  opacity: 0.96;
-  pointer-events: none;
-  mask-image: radial-gradient(ellipse 78% 76% at 53% 48%, black 0 62%, rgba(0, 0, 0, 0.7) 72%, transparent 89%);
-  -webkit-mask-image: radial-gradient(ellipse 78% 76% at 53% 48%, black 0 62%, rgba(0, 0, 0, 0.7) 72%, transparent 89%);
-  animation: black-hole-breathe 9s ease-in-out infinite;
-}
-
-@keyframes black-hole-breathe {
-  0%, 100% { transform: scale(1); filter: brightness(1); }
-  50% { transform: scale(1.035); filter: brightness(1.09); }
-}
-
-/* Animated photon-ring halo drawn around the rendered black hole */
-.hardware-black-hole::before {
-  content: "";
-  position: absolute;
-  z-index: 1;
-  top: 50%;
-  left: 50%;
-  width: 46%;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  translate: -50% -54%;
-  background:
-    radial-gradient(circle, transparent 0 38%, rgba(167, 150, 250, 0.16) 42%, transparent 52%),
-    conic-gradient(from 0deg, transparent 0deg, rgba(196, 185, 255, 0.24) 46deg, rgba(140, 124, 245, 0.1) 90deg, transparent 150deg, transparent 210deg, rgba(108, 96, 214, 0.2) 268deg, transparent 330deg);
-  filter: blur(6px);
-  opacity: 0.85;
-  animation: black-hole-swirl 26s linear infinite;
-  pointer-events: none;
-}
-
-/* Faint counter-rotating outer dust ring */
-.hardware-black-hole::after {
-  content: "";
-  position: absolute;
-  z-index: 1;
-  top: 50%;
-  left: 50%;
-  width: 64%;
-  aspect-ratio: 2.5 / 1;
-  border-radius: 50%;
-  translate: -50% -50%;
-  rotate: -12deg;
-  background: conic-gradient(from 90deg, transparent 0deg, rgba(120, 105, 220, 0.14) 60deg, transparent 130deg, transparent 240deg, rgba(150, 135, 245, 0.12) 305deg, transparent 360deg);
-  filter: blur(10px);
-  animation: black-hole-swirl 40s linear infinite reverse;
-  pointer-events: none;
-}
-
-@keyframes black-hole-swirl {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .hardware-black-hole,
-  .hardware-black-hole::before,
-  .hardware-black-hole::after {
-    animation: none;
-  }
-}
-
-.hardware-black-hole .optimized-black-hole,
-.hardware-black-hole .optimized-black-hole-canvas {
-  width: 100%;
-  height: 100%;
-}
-
-.optimized-black-hole {
-  position: relative;
-  overflow: hidden;
-  background: transparent !important;
-}
-
-.optimized-black-hole-canvas {
-  position: relative;
-  z-index: 2;
-}
-
-.optimized-black-hole-fallback {
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  opacity: 1;
-  background:
-    radial-gradient(circle at 52% 49%, #010104 0 9%, rgba(1, 1, 5, 0.99) 11%, transparent 14%),
-    radial-gradient(ellipse 44% 13% at 52% 50%, rgba(248, 247, 255, 0.92) 0 2%, rgba(139, 126, 244, 0.62) 8%, rgba(57, 66, 151, 0.26) 31%, transparent 69%),
-    radial-gradient(ellipse 57% 23% at 51% 49%, rgba(80, 63, 171, 0.18), transparent 58%);
-  filter: blur(0.2px);
-  transition: opacity 360ms ease;
-}
-
-.optimized-black-hole.is-ready .optimized-black-hole-fallback {
-  opacity: 0;
-}
-
 .hardware-hero-model {
   position: absolute;
   z-index: 4;
@@ -1285,11 +1180,6 @@ body.landing-body {
     height: 700px;
   }
 
-  .hardware-black-hole {
-    right: -30%;
-    width: 140%;
-  }
-
   .hardware-workflow-section,
   .hardware-project-section {
     grid-template-columns: 1fr;
@@ -1406,13 +1296,6 @@ body.landing-body {
 
   .hardware-hero-visual {
     height: 590px;
-  }
-
-  .hardware-black-hole {
-    top: -8%;
-    right: -44%;
-    width: 150%;
-    height: 105%;
   }
 
   .curated-hardware-stage {

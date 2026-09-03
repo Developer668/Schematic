@@ -25,7 +25,6 @@ import MotionFooter from "../components/ui/motion-footer.tsx";
 import "../landing-v2.css";
 
 const HardwareModelStage = lazy(() => import("../components/ui/hardware-model-stage.tsx"));
-const OptimizedBlackHole = lazy(() => import("../components/ui/optimized-black-hole.tsx"));
 
 const decisions = [
   {
@@ -58,14 +57,6 @@ const projectViews = [
 const preloadWorkspace = () => {
   void import("../WorkspaceApp.tsx");
 };
-
-function BlackHolePoster() {
-  return (
-    <div className="optimized-black-hole hardware-black-hole-poster" aria-hidden="true">
-      <div className="optimized-black-hole-fallback" />
-    </div>
-  );
-}
 
 function ModelStageFallback() {
   return (
@@ -245,14 +236,6 @@ export default function LandingPage() {
             </div>
 
             <div className="hardware-hero-visual" aria-label="Curated interactive hardware preview">
-              <div className="hardware-black-hole" aria-hidden="true">
-                {visualsReady ? (
-                  <Suspense fallback={<BlackHolePoster />}>
-                    <OptimizedBlackHole intensity={1.16} interactive={false} />
-                  </Suspense>
-                ) : <BlackHolePoster />}
-              </div>
-
               <div className="hardware-hero-model">
                 {visualsReady ? (
                   <Suspense fallback={<ModelStageFallback />}>
