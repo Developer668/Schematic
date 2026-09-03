@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { issueSessionToken, type AuthEnv } from "../../../functions/_auth.ts";
 import { partsSearch } from "../../../functions/api/parts/search.ts";
+import { resetBrightDataStateForTests } from "../../../functions/api/parts/brightdata.ts";
 
 const authEnv: AuthEnv = {
   SCHEMATIC_AUTH_MODE: "chatgpt-sites",
@@ -8,13 +9,16 @@ const authEnv: AuthEnv = {
   SCHEMATIC_SESSION_SECRET: "0123456789abcdef0123456789abcdef",
 };
 
-async function requestFor(query: string) {
-  const token = await issueSessionToken({ subject: "parts-test", environment: "chatgpt-sites" }, authEnv);
+async function requestFor(query: string, subject = "parts-test") {
+  const token = await issueSessionToken({ subject, environment: "chatgpt-sites" }, authEnv);
   return new Request(`https://schematic.example/api/parts/search?query=${encodeURIComponent(query)}&quantity=2`, { headers: { Authorization: `Bearer ${token}` } });
 }
 
 describe("server-side parts provider fallback", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetBrightDataStateForTests();
+  });
 
   it("falls through an unavailable adapter and normalizes the first usable result", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -81,5 +85,42 @@ describe("server-side parts provider fallback", () => {
     expect(body.results).toEqual([]);
     expect(body.attempts[0]).toMatchObject({ provider: "oversized", status: "error" });
     expect(body.attempts[0].message).toContain("524288-byte limit");
+  });
+
+  it("shares an in-flight Bright Data lookup and reuses its fresh result without another paid call", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ shopping_results: [{
+      title: "BMP280 pressure sensor", product_id: "bmp280-1", price: "$8.95", shop: "Example Electronics", link: "https://supplier.example/bmp280",
+    }] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const env = {
+      ...authEnv,
+      BRIGHTDATA_SERP_ENABLED: "true",
+      BRIGHTDATA_API_KEY: "test-only-key",
+      BRIGHTDATA_MAX_REQUESTS_PER_HOUR: "2",
+      BRIGHTDATA_MAX_REQUESTS_PER_DAY: "2",
+      BRIGHTDATA_MAX_GLOBAL_REQUESTS_PER_DAY: "2",
+    };
+    const [first, second] = await Promise.all([
+      partsSearch(await requestFor("BMP280"), env),
+      partsSearch(await requestFor("BMP280"), env),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await first.json() as any).candidates[0]).toMatchObject({ source: "brightdata-serp", verificationRequired: true });
+    expect((await second.json() as any).candidates[0]).toMatchObject({ source: "brightdata-serp" });
+    const cached = await partsSearch(await requestFor("BMP280"), env);
+    expect((await cached.json() as any).cacheHit).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call Bright Data after a per-user spending limit is reached", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ shopping_results: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const env = { ...authEnv, BRIGHTDATA_SERP_ENABLED: "true", BRIGHTDATA_API_KEY: "test-only-key", BRIGHTDATA_MAX_REQUESTS_PER_HOUR: "1", BRIGHTDATA_MAX_REQUESTS_PER_DAY: "1", BRIGHTDATA_MAX_GLOBAL_REQUESTS_PER_DAY: "200" };
+    const first = await partsSearch(await requestFor("quota-one", "quota-user"), env);
+    expect(first.status).toBe(200);
+    const limited = await partsSearch(await requestFor("quota-two", "quota-user"), env);
+    expect(limited.status).toBe(429);
+    expect((await limited.json() as any).code).toBe("BRIGHTDATA_RATE_LIMITED");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

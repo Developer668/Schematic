@@ -1,6 +1,7 @@
 import { jsonResponse, optionsResponse, requireApiIdentity } from "../_catalog-runtime";
 import { publicSourcesEnabled, searchPublicParts, type PublicPartCandidate, type PublicSourceAttempt } from "./public";
 import { readBoundedResponseText } from "./bounded-response";
+import { brightDataEnabled, searchBrightData } from "./brightdata";
 
 type ProviderConfig = {
   id: string;
@@ -323,6 +324,14 @@ export async function partsSearch(request: Request, envInput: PartsEnv) {
   const quantityValue = Number(searchParams.get("quantity") ?? 1);
   const quantity = Math.max(1, Math.min(999, Number.isFinite(quantityValue) ? Math.round(quantityValue) : 1));
   if (!query) return jsonResponse(request, { code: "INVALID_QUERY", message: "query is required", query, quantity }, 400);
+
+  // Bright Data is explicitly opt-in and stays fully server-side. It wins over
+  // the no-key adapters so a configured paid lookup cannot silently fall back
+  // to a different data source or bypass its quota controls.
+  if (brightDataEnabled(env)) {
+    const result = await searchBrightData(query, quantity, identity.subject, env);
+    return jsonResponse(request, result.body, result.status, { "Cache-Control": "no-store", ...(result.headers ?? {}) });
+  }
 
   // Public no-key discovery is the default. Paid/keyed adapters remain an
   // explicit server-only escape hatch for a later release and are never
