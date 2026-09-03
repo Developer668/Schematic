@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -23,52 +23,91 @@ import { getCatalogComponent } from "../../data/hardware.ts";
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
 import { useGraphFocusStore } from "../../store/useGraphFocusStore.ts";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
-import { Maximize2, Grid3X3, EyeOff, Map, AlertCircle, Cpu, Search, ArrowRight, Trash2, Check } from "lucide-react";
+import { AlertCircle, Check, Maximize2, Trash2 } from "lucide-react";
 import { componentArtworkHref } from "../../data/componentArtwork.ts";
 import DestructiveConfirmButton from "../DestructiveConfirmButton.tsx";
 
 const nodeTypes = { hardware: HardwareNode };
 
-function ArtworkMiniMapNode({ id, x, y, width, height, selected }: MiniMapNodeProps) {
+function ArtworkMiniMapNode({ id, x, y, width, height }: MiniMapNodeProps) {
   const component = useProjectStore((state) => state.project.components.find((item) => item.id === id));
   const definition = getCatalogComponent(component?.definitionId);
   const artwork = componentArtworkHref(definition);
   const inset = Math.max(2, Math.min(width, height) * 0.08);
+
   return (
     <g>
-      <rect x={x} y={y} width={width} height={height} rx={Math.min(10, height * 0.12)} fill="hsl(var(--card))" stroke={selected ? "hsl(var(--accent))" : "hsl(var(--border))"} strokeWidth={selected ? 2 : 1} />
-      {artwork && <image href={artwork} x={x + inset} y={y + inset} width={Math.max(1, width - inset * 2)} height={Math.max(1, height - inset * 2)} preserveAspectRatio="xMidYMid meet" />}
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx={Math.min(7, height * 0.1)}
+        fill="#08090d"
+        stroke="none"
+      />
+      {artwork && (
+        <image
+          href={artwork}
+          x={x + inset}
+          y={y + inset}
+          width={Math.max(1, width - inset * 2)}
+          height={Math.max(1, height - inset * 2)}
+          preserveAspectRatio="xMidYMid meet"
+          opacity="0.9"
+        />
+      )}
     </g>
   );
 }
 
 function projectToFlow(project: ReturnType<typeof useProjectStore.getState>["project"]) {
-  const nodes: Node[] = project.components.map((c) => {
-    const def = getCatalogComponent(c.definitionId);
+  const nodes: Node[] = project.components.map((component) => {
+    const definition = getCatalogComponent(component.definitionId);
     return {
-      id: c.id,
+      id: component.id,
       type: "hardware",
       deletable: false,
-      position: c.position,
+      position: component.position,
       data: {
-        label: def?.title ?? c.definitionId,
-        definitionId: c.definitionId,
-        instanceId: c.id,
-        thumbnail: def?.thumbnail,
-        ports: (def?.ports ?? []).map((p) => ({ id: p.id, domain: p.domain, direction: p.direction })),
+        label: definition?.title ?? component.definitionId,
+        definitionId: component.definitionId,
+        instanceId: component.id,
+        thumbnail: definition?.thumbnail,
+        ports: (definition?.ports ?? []).map((port) => ({
+          id: port.id,
+          domain: port.domain,
+          direction: port.direction,
+        })),
       },
     };
   });
-  const edges: Edge[] = project.connections.map((conn) => ({
-    id: conn.id,
-    source: conn.source.componentId,
-    sourceHandle: conn.source.portId,
-    target: conn.target.componentId,
-    targetHandle: conn.target.portId,
-    label: conn.domain,
+
+  const edges: Edge[] = project.connections.map((connection) => ({
+    id: connection.id,
+    source: connection.source.componentId,
+    sourceHandle: connection.source.portId,
+    target: connection.target.componentId,
+    targetHandle: connection.target.portId,
+    label: connection.domain,
     style: {
-      stroke: conn.domain === "i2c" ? "#3b82f6" : conn.domain === "power" ? "#ef4444" : conn.domain === "ground" ? "#9ca3af" : conn.domain === "spi" ? "#8b5cf6" : conn.domain === "uart" ? "#f59e0b" : conn.domain === "pwm" ? "#ec4899" : conn.domain === "adc" ? "#06b6d4" : "#22c55e",
-      strokeWidth: conn.domain === "i2c" ? 2.6 : 2,
+      stroke:
+        connection.domain === "i2c"
+          ? "#3b82f6"
+          : connection.domain === "power"
+            ? "#ef4444"
+            : connection.domain === "ground"
+              ? "#9ca3af"
+              : connection.domain === "spi"
+                ? "#8b5cf6"
+                : connection.domain === "uart"
+                  ? "#f59e0b"
+                  : connection.domain === "pwm"
+                    ? "#ec4899"
+                    : connection.domain === "adc"
+                      ? "#06b6d4"
+                      : "#22c55e",
+      strokeWidth: connection.domain === "i2c" ? 2.6 : 2,
     },
     labelStyle: { fill: "hsl(var(--foreground))", fontSize: 10, fontWeight: 600 } as any,
     labelBgStyle: { fill: "hsl(var(--card))", fillOpacity: 0.92 } as any,
@@ -78,52 +117,58 @@ function projectToFlow(project: ReturnType<typeof useProjectStore.getState>["pro
     deletable: false,
     type: "smoothstep",
   }));
+
   return { nodes, edges };
 }
 
-export default function HardwareCanvas({ onBrowseComponents }: { onBrowseComponents?: () => void }) {
-  const project = useProjectStore((s) => s.project);
-  const connectPorts = useProjectStore((s) => s.connectPorts);
-  const moveComponent = useProjectStore((s) => s.moveComponent);
+export default function HardwareCanvas() {
+  const project = useProjectStore((state) => state.project);
+  const connectPorts = useProjectStore((state) => state.connectPorts);
+  const moveComponent = useProjectStore((state) => state.moveComponent);
   const showGrid = useWorkspaceStore((state) => state.showGrid);
-  const setShowGrid = useWorkspaceStore((state) => state.setShowGrid);
   const snapToGrid = useWorkspaceStore((state) => state.snapToGrid);
   const activeConnectionId = useGraphFocusStore((state) => state.activeConnectionId);
   const setActiveConnection = useGraphFocusStore((state) => state.setActiveConnection);
+
   const { nodes: initialNodes, edges: initialEdges } = useMemo(() => {
     const flow = projectToFlow(project);
     return {
       ...flow,
-      edges: flow.edges.map<Edge>((edge) => ({ ...edge, selected: edge.id === activeConnectionId })),
+      edges: flow.edges.map<Edge>((edge) => ({
+        ...edge,
+        selected: edge.id === activeConnectionId,
+      })),
     };
   }, [activeConnectionId, project]);
+
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const [showMap, setShowMap] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<{ html: string; title: string; x: number; y: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<ReactFlowInstance | null>(null);
+
   const activeConnection = useMemo(
     () => project.connections.find((connection) => connection.id === activeConnectionId) ?? null,
     [activeConnectionId, project.connections],
   );
 
-  const onSafeNodesChange = useCallback((changes: NodeChange[]) => {
-    // React Flow can emit a remove change for keyboard/context-menu deletion.
-    // Component removal is intentionally available only through a confirmed,
-    // target-bound control, so never apply a remove change here.
-    const safeChanges = changes.filter((change) => change.type !== "remove");
-    if (safeChanges.length > 0) onNodesChange(safeChanges);
-  }, [onNodesChange]);
+  const onSafeNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const safeChanges = changes.filter((change) => change.type !== "remove");
+      if (safeChanges.length > 0) onNodesChange(safeChanges);
+    },
+    [onNodesChange],
+  );
 
-  const onSafeEdgesChange = useCallback((changes: EdgeChange[]) => {
-    // Keep wire visibility and durable graph state aligned. A wire can be
-    // disconnected explicitly through the confirmed command boundary.
-    const safeChanges = changes.filter((change) => change.type !== "remove");
-    if (safeChanges.length > 0) onEdgesChange(safeChanges);
-  }, [onEdgesChange]);
+  const onSafeEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      const safeChanges = changes.filter((change) => change.type !== "remove");
+      if (safeChanges.length > 0) onEdgesChange(safeChanges);
+    },
+    [onEdgesChange],
+  );
 
   useEffect(() => {
     canvasRef.current?.querySelector(".react-flow__controls")?.removeAttribute("aria-label");
@@ -131,7 +176,10 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
 
   useEffect(() => {
     if (!initialNodes.length) return;
-    const timer = window.setTimeout(() => flowRef.current?.fitView({ padding: 0.16, maxZoom: 1 }), 120);
+    const timer = window.setTimeout(
+      () => flowRef.current?.fitView({ padding: 0.16, maxZoom: 1 }),
+      120,
+    );
     return () => window.clearTimeout(timer);
   }, [project.id, initialNodes.length]);
 
@@ -148,8 +196,11 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
     (params: FlowConnection) => {
       if (!params.source || !params.target || !params.sourceHandle || !params.targetHandle) return;
       try {
-        const connection = connectPorts({ componentId: params.source, portId: params.sourceHandle }, { componentId: params.target, portId: params.targetHandle });
-        setEdges((eds) =>
+        const connection = connectPorts(
+          { componentId: params.source, portId: params.sourceHandle },
+          { componentId: params.target, portId: params.targetHandle },
+        );
+        setEdges((currentEdges) =>
           addEdge(
             {
               ...params,
@@ -161,12 +212,11 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
               label: connection.domain,
               type: "smoothstep",
             } as Edge,
-            eds,
+            currentEdges,
           ),
         );
-      } catch (e) {
-        const msg = (e as Error).message;
-        setConnectionError(`Wire failed: ${msg}`);
+      } catch (error) {
+        setConnectionError(`Wire failed: ${(error as Error).message}`);
         window.setTimeout(() => setConnectionError(null), 2600);
       }
     },
@@ -174,7 +224,7 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
   );
 
   const onNodeClick = useCallback(
-    (_: unknown, node: Node) => {
+    (_event: unknown, node: Node) => {
       setActiveConnection(null);
       useSelectionStore.getState().setActive(node.id);
     },
@@ -186,26 +236,35 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
     useSelectionStore.getState().clear();
   }, [setActiveConnection]);
 
-  const onEdgeClick = useCallback((_: unknown, edge: Edge) => {
-    setActiveConnection(edge.id);
-    const connection = useProjectStore.getState().project.connections.find((item) => item.id === edge.id);
-    useSelectionStore.getState().setActive(connection?.source.componentId ?? null);
-  }, [setActiveConnection]);
+  const onEdgeClick = useCallback(
+    (_event: unknown, edge: Edge) => {
+      setActiveConnection(edge.id);
+      const connection = useProjectStore
+        .getState()
+        .project.connections.find((item) => item.id === edge.id);
+      useSelectionStore.getState().setActive(connection?.source.componentId ?? null);
+    },
+    [setActiveConnection],
+  );
 
-  // Drag & drop from left palette — image/board preview in world
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
     setIsDraggingOver(true);
-    // Try to get component id from drag data
-    const compId = e.dataTransfer.getData("application/x-schematic-component");
-    if (compId) {
-      const def = getCatalogComponent(compId);
-      if (def) {
-        setDragPreview({ html: def.thumbnail ?? "", title: def.title, x: e.clientX, y: e.clientY });
+    const componentId = event.dataTransfer.getData("application/x-schematic-component");
+    if (componentId) {
+      const definition = getCatalogComponent(componentId);
+      if (definition) {
+        setDragPreview({
+          html: definition.thumbnail ?? "",
+          title: definition.title,
+          x: event.clientX,
+          y: event.clientY,
+        });
       }
     } else {
-      // mouse move preview fallback
-      setDragPreview((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : null));
+      setDragPreview((current) =>
+        current ? { ...current, x: event.clientX, y: event.clientY } : null,
+      );
     }
   }, []);
 
@@ -215,32 +274,38 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
   }, []);
 
   const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
+    (event: React.DragEvent) => {
+      event.preventDefault();
       setIsDraggingOver(false);
       setDragPreview(null);
-      const compId = e.dataTransfer.getData("application/x-schematic-component");
-      if (!compId) return;
+      const componentId = event.dataTransfer.getData("application/x-schematic-component");
+      if (!componentId) return;
       const position = flowRef.current?.screenToFlowPosition(
-        { x: e.clientX, y: e.clientY },
+        { x: event.clientX, y: event.clientY },
         { snapToGrid, snapGrid: [16, 16] },
       );
       if (!position) return;
-      useProjectStore.getState().addComponent(compId, { x: position.x - 84, y: position.y - 32 });
+      useProjectStore
+        .getState()
+        .addComponent(componentId, { x: position.x - 84, y: position.y - 32 });
     },
     [snapToGrid],
   );
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (dragPreview) {
-      setDragPreview((p) => (p ? { ...p, x: e.clientX, y: e.clientY } : null));
-    }
-  }, [dragPreview]);
+  const handleMouseMove = useCallback(
+    (event: React.MouseEvent) => {
+      if (!dragPreview) return;
+      setDragPreview((current) =>
+        current ? { ...current, x: event.clientX, y: event.clientY } : null,
+      );
+    },
+    [dragPreview],
+  );
 
   return (
     <div
       ref={canvasRef}
-      className="w-full h-full relative overflow-hidden bg-background world-grid"
+      className="hardware-canvas-redesign world-grid"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -256,8 +321,10 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
-        onInit={(instance) => { flowRef.current = instance; }}
-        onNodeDragStop={(_, node) => moveComponent(node.id, node.position)}
+        onInit={(instance) => {
+          flowRef.current = instance;
+        }}
+        onNodeDragStop={(_event, node) => moveComponent(node.id, node.position)}
         fitView
         fitViewOptions={{ padding: 0.22, maxZoom: 1.2 }}
         snapToGrid={snapToGrid}
@@ -266,11 +333,13 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
         proOptions={{ hideAttribution: true }}
         style={{ background: "transparent" }}
         className="!bg-transparent"
-        connectionLineStyle={{ stroke: "hsl(var(--primary))", strokeWidth: 2.5, strokeDasharray: "6 4" }}
+        connectionLineStyle={{
+          stroke: "hsl(var(--accent))",
+          strokeWidth: 2.5,
+          strokeDasharray: "6 4",
+        }}
         elevateEdgesOnSelect
         selectNodesOnDrag={false}
-        // Destructive removal is deliberately routed through target-bound
-        // confirmation controls in the node toolbar/Inspector.
         deleteKeyCode={null}
         nodesFocusable
         edgesFocusable
@@ -279,112 +348,94 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
           "minimap.ariaLabel": "Hardware workspace overview",
         }}
       >
-        {/* Optional drafting grid uses lines only. */}
-        {showGrid && <Background variant={BackgroundVariant.Lines} gap={24} size={0.65} color="hsl(var(--border))" style={{ opacity: 0.46 }} />}
+        {showGrid && (
+          <Background
+            variant={BackgroundVariant.Lines}
+            gap={24}
+            size={0.65}
+            color="hsl(var(--border))"
+            style={{ opacity: 0.34 }}
+          />
+        )}
 
         <Controls
           position="bottom-left"
-          style={{ left: 8, bottom: 8, display: "flex", flexDirection: "column", gap: 4 } as any}
+          style={{ left: 10, bottom: 10 } as any}
           showZoom
           showFitView
           showInteractive={false}
         />
 
-        {showMap && <MiniMap
+        <MiniMap
           position="top-right"
           pannable
           zoomable
           style={
             {
-              top: 8,
-              right: 8,
-              width: 124,
-              height: 76,
-              background: "hsl(var(--card))",
-              border: "1px solid hsl(var(--border))",
-              borderRadius: 6,
-              overflow: "hidden",
+              top: 10,
+              right: 10,
+              width: 126,
+              height: 78,
+              background: "transparent",
+              border: "none",
+              borderRadius: 0,
+              overflow: "visible",
             } as any
           }
-          maskColor="hsl(var(--background) / 0.6)"
+          maskColor="transparent"
           nodeComponent={ArtworkMiniMapNode}
-        />}
+        />
 
-        <div className="absolute top-2 left-2 right-[144px] flex items-center gap-1 pointer-events-none">
-          <div className="flex items-center gap-1 pointer-events-auto bg-card border border-border rounded px-1.5 py-1">
-            <button
-              type="button"
-              onClick={() => setShowGrid(!showGrid)}
-              className={`workspace-icon-button ${showGrid ? "is-active" : ""}`}
-              aria-pressed={showGrid}
-              title={showGrid ? "Hide grid" : "Show grid"}
-            >
-              {showGrid ? <Grid3X3 size={12} /> : <EyeOff size={12} />}
-            </button>
-            <button type="button" onClick={() => setShowMap((value) => !value)} className={`workspace-icon-button ${showMap ? "is-active" : ""}`} aria-pressed={showMap} title="Toggle overview map"><Map size={12} /></button>
-            <span className="text-[11px] font-mono text-muted-foreground pr-1 hidden sm:inline">
-              {nodes.length} · {edges.length}
-            </span>
+        {isDraggingOver && (
+          <div className="canvas-drop-label">
+            Drop to place
           </div>
-          {isDraggingOver && (
-            <div className="ml-auto bg-card border border-border text-xs px-2 py-1 rounded pointer-events-auto">
-              Drop to place
-            </div>
-          )}
-        </div>
+        )}
       </ReactFlow>
-
-      {nodes.length === 0 && (
-        <section className="pointer-events-none absolute inset-0 z-[5] grid place-items-center p-6" aria-labelledby="empty-canvas-title">
-          <div className="pointer-events-auto w-full max-w-[470px] rounded-2xl border border-border bg-card/95 p-5 shadow-[0_18px_60px_hsl(240_20%_4%/.2)] backdrop-blur-xl sm:p-6">
-            <div className="mb-4 grid h-10 w-10 place-items-center rounded-lg border border-border bg-muted text-muted-foreground">
-              <Cpu size={18} strokeWidth={1.6} />
-            </div>
-            <p className="kicker">New hardware project</p>
-            <h2 id="empty-canvas-title" className="mt-2 text-xl font-semibold tracking-[-0.035em]">Place the first component.</h2>
-            <p className="mt-2 max-w-md text-xs leading-5 text-muted-foreground">Start with a controller, then add devices and connect compatible ports. Graph checks catch modeled connection problems, while Behavior Preview demonstrates the plan-driven outcome.</p>
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-              <button type="button" onClick={() => useProjectStore.getState().addComponent("esp32-devkit-v1")} className="run-button h-9 flex-1 px-4">
-                <Cpu size={13} /> Add an ESP32 board
-              </button>
-              <button type="button" onClick={onBrowseComponents} className="secondary-button h-9 flex-1 px-4">
-                <Search size={13} /> Browse components
-              </button>
-            </div>
-            <ol className="mt-5 grid grid-cols-4 gap-2 border-t border-border pt-4 text-[10px] text-muted-foreground">
-              {["Place", "Wire", "Validate", "Preview"].map((label, index) => (
-                <li key={label} className="flex items-center gap-1.5">
-                  <span className="grid h-4 w-4 shrink-0 place-items-center rounded-sm bg-muted font-mono text-[8px] text-foreground">{index + 1}</span>
-                  <span>{label}</span>
-                  {index < 3 && <ArrowRight size={9} className="ml-auto hidden sm:block" aria-hidden="true" />}
-                </li>
-              ))}
-            </ol>
-          </div>
-        </section>
-      )}
 
       {dragPreview && (
         <div className="drag-preview" style={{ left: dragPreview.x, top: dragPreview.y }}>
-          <div className="w-[180px] bg-card border border-border rounded">
-            <div className="p-2 flex gap-2 items-center">
-              <div className="w-10 h-10 rounded border border-border bg-background flex items-center justify-center overflow-hidden shrink-0 [&>svg]:w-full [&>svg]:h-full">
-                {dragPreview.html ? <div dangerouslySetInnerHTML={{ __html: dragPreview.html }} className="w-full h-full" /> : <Maximize2 size={14} className="text-muted-foreground" />}
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs font-medium truncate">{dragPreview.title}</div>
-                <div className="text-[11px] text-muted-foreground">Drop on canvas</div>
-              </div>
+          <div className="drag-preview-card">
+            <div className="drag-preview-art">
+              {dragPreview.html ? (
+                <div
+                  dangerouslySetInnerHTML={{ __html: dragPreview.html }}
+                  className="h-full w-full"
+                />
+              ) : (
+                <Maximize2 size={14} />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-xs font-medium">{dragPreview.title}</div>
+              <div className="text-[11px] text-muted-foreground">Place on canvas</div>
             </div>
           </div>
         </div>
       )}
-      {connectionError && <div className="canvas-error" role="alert"><AlertCircle size={13} />{connectionError}</div>}
+
+      {connectionError && (
+        <div className="canvas-error" role="alert">
+          <AlertCircle size={13} />
+          {connectionError}
+        </div>
+      )}
+
       {activeConnection && (
-        <div className="absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-2 rounded-md border border-border bg-card px-2.5 py-2 shadow-lg" role="toolbar" aria-label={`Wire ${activeConnection.id} actions`}>
-          <div className="min-w-0 text-[10px] leading-tight">
-            <div className="truncate font-mono font-medium">{activeConnection.id}</div>
-            <div className="truncate text-muted-foreground">{activeConnection.source.componentId}:{activeConnection.source.portId} → {activeConnection.target.componentId}:{activeConnection.target.portId} · {activeConnection.domain}</div>
+        <div
+          className="canvas-wire-toolbar"
+          role="toolbar"
+          aria-label={`Wire ${activeConnection.id} actions`}
+        >
+          <div className="min-w-0">
+            <div className="truncate font-mono text-[10px] font-medium">
+              {activeConnection.id}
+            </div>
+            <div className="truncate text-[10px] text-muted-foreground">
+              {activeConnection.source.componentId}:{activeConnection.source.portId} →{" "}
+              {activeConnection.target.componentId}:{activeConnection.target.portId} ·{" "}
+              {activeConnection.domain}
+            </div>
           </div>
           <DestructiveConfirmButton
             targetKey={activeConnection.id}
@@ -392,13 +443,15 @@ export default function HardwareCanvas({ onBrowseComponents }: { onBrowseCompone
               useProjectStore.getState().disconnectPorts(activeConnection.id);
               setActiveConnection(null);
             }}
-            className="canvas-wire-delete inline-flex h-7 shrink-0 items-center gap-1 rounded border border-red-300 px-2 text-[10px] font-medium text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/30"
+            className="canvas-wire-delete"
             aria-label={`Delete wire ${activeConnection.id}`}
             confirmAriaLabel={`Confirm delete wire ${activeConnection.id}`}
             title={`Arm deletion of wire ${activeConnection.id}`}
             confirmTitle={`Click again to permanently delete wire ${activeConnection.id}`}
             confirmChildren={<><Check size={11} /> Confirm</>}
-          ><Trash2 size={11} /> Delete wire</DestructiveConfirmButton>
+          >
+            <Trash2 size={11} />
+          </DestructiveConfirmButton>
         </div>
       )}
     </div>

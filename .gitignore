@@ -73,3 +73,18 @@ Desktop.ini
 *.swo
 ~$*
 ChatGPT Image*.png
+
+# Local tooling, generated builds, and design-reference downloads
+.vercel/
+.chatgpt-ui-backup/
+.devpost-hackathon-state.json
+hallmark-main/
+
+# Keep only the six models imported by the landing page.
+LandingPage3dHardware/*.glb
+!LandingPage3dHardware/esp32.glb
+!LandingPage3dHardware/arduino_nano_v3_mini_usb_download_free.glb
+!LandingPage3dHardware/camera_module.glb
+!LandingPage3dHardware/raspberry_pi_3.glb
+!LandingPage3dHardware/hc-05_bluetooth_module.glb
+!LandingPage3dHardware/162__lcd_display.glb

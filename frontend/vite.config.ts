@@ -1,9 +1,30 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import fs from 'node:fs';
+import { brightDataPartsDevPlugin } from './brightdata-parts-dev';
+
+const componentMetadataId = 'virtual:schematic-component-metadata';
+const resolvedComponentMetadataId = `\0${componentMetadataId}`;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    {
+      name: 'schematic-component-metadata',
+      enforce: 'pre',
+      resolveId(source) {
+        return source === componentMetadataId ? resolvedComponentMetadataId : null;
+      },
+      load(id) {
+        if (id !== resolvedComponentMetadataId) return null;
+        const metadataPath = path.resolve(__dirname, 'public/components-metadata.json');
+        const metadata = fs.readFileSync(metadataPath, 'utf8');
+        return `export default ${metadata};`;
+      },
+    },
+    brightDataPartsDevPlugin(__dirname),
+    react(),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
@@ -19,6 +40,9 @@ export default defineConfig({
   server: {
     port: 3000,
     host: "0.0.0.0",
+    fs: {
+      allow: [path.resolve(__dirname, '..')],
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8001',
@@ -26,7 +50,7 @@ export default defineConfig({
       },
     },
   },
-  assetsInclude: ['**/*.wasm'],
+  assetsInclude: ['**/*.wasm', '**/*.glb'],
   optimizeDeps: {
     include: ['zustand', 'zod', '@xyflow/react', 'lucide-react'],
     esbuildOptions: { target: 'esnext' },
@@ -47,7 +71,6 @@ export default defineConfig({
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'xyflow': ['@xyflow/react'],
           'monaco': ['monaco-editor', '@monaco-editor/react'],
-          'lucide': ['lucide-react'],
           'zustand': ['zustand'],
         },
         compact: true,

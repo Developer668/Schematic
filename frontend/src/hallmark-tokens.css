@@ -1,0 +1,31 @@
+:root {
+  /* Shared workbench accents remain HSL components because the existing UI
+     consumes them through hsl(var(--token)). */
+  --schematic-accent: 248 46% 43%;
+  --schematic-accent-soft: 246 35% 95%;
+  --schematic-work-accent: 252 52% 50%;
+  --schematic-work-accent-deep: 246 37% 29%;
+
+  --hallmark-canvas: oklch(0.108 0.014 276);
+  --hallmark-canvas-raised: oklch(0.138 0.015 276);
+  --hallmark-surface: oklch(0.17 0.018 276);
+  --hallmark-ink: oklch(0.955 0.006 270);
+  --hallmark-muted: oklch(0.67 0.018 274);
+  --hallmark-faint: oklch(0.47 0.017 274);
+  --hallmark-rule: oklch(0.29 0.021 274);
+  --hallmark-rule-soft: oklch(0.22 0.017 274);
+  --hallmark-accent: oklch(0.67 0.14 286);
+  --hallmark-accent-strong: oklch(0.77 0.12 286);
+  --hallmark-accent-deep: oklch(0.4 0.105 286);
+  --hallmark-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --hallmark-radius-small: 5px;
+  --hallmark-radius: 8px;
+  --hallmark-radius-large: 12px;
+}
+
+.dark {
+  --schematic-accent: 252 65% 70%;
+  --schematic-accent-soft: 246 24% 15%;
+  --schematic-work-accent: 252 65% 70%;
+  --schematic-work-accent-deep: 246 42% 34%;
+}

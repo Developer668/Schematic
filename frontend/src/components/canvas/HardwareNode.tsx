@@ -17,17 +17,17 @@ export interface HardwareNodeData {
 }
 
 const domainColor: Record<string, string> = {
-  power: "#ef4444",
-  power_output: "#f97316",
-  ground: "#73737d",
-  gpio: "#22c55e",
-  i2c: "#3b82f6",
-  spi: "#8b5cf6",
-  uart: "#f59e0b",
-  pwm: "#ec4899",
-  adc: "#06b6d4",
-  analog: "#06b6d4",
-  rf: "#f97316",
+  power: "#d15f73",
+  power_output: "#d15f73",
+  ground: "#7c7f8d",
+  gpio: "#9a8cf2",
+  i2c: "#6f79d8",
+  spi: "#8c70df",
+  uart: "#8779c8",
+  pwm: "#9a8cf2",
+  adc: "#737bc9",
+  analog: "#737bc9",
+  rf: "#8171c4",
 };
 
 function Pin({ port, side, index, total }: { port: HardwareNodeData["ports"][number]; side: "left" | "right"; index: number; total: number }) {
@@ -37,12 +37,12 @@ function Pin({ port, side, index, total }: { port: HardwareNodeData["ports"][num
   return (
     <div className={`hardware-pin hardware-pin-${side}`} style={{ top }} title={`${port.id} · ${port.domain} · ${port.direction}`}>
       {port.direction === "output" || port.direction === "bidirectional" || port.direction === "power"
-        ? <Handle type="source" position={position} id={port.id} style={{ background: color, borderColor: "hsl(var(--background))" }} />
+        ? <Handle type="source" position={position} id={port.id} style={{ background: "hsl(var(--card))", borderColor: color }} />
         : null}
       {port.direction === "input" || port.direction === "bidirectional" || port.direction === "power"
-        ? <Handle type="target" position={position} id={port.id} style={{ background: color, borderColor: "hsl(var(--background))" }} />
+        ? <Handle type="target" position={position} id={port.id} style={{ background: "hsl(var(--card))", borderColor: color }} />
         : null}
-      <span className="hardware-pin-label"><b style={{ background: color }} />{port.id}</span>
+      <span className="hardware-pin-label">{port.id}</span>
     </div>
   );
 }
@@ -60,10 +60,10 @@ export default function HardwareNode({ id, data, selected }: NodeProps & { data:
   const visualHeight = compact ? 108 : display ? Math.max(138, rows * 22 + 20) : Math.min(320, Math.max(142, rows * 22 + 30));
 
   return (
-    <div className={`hardware-node ${compact ? "is-compact-part" : ""} ${display ? "is-display-part" : ""} ${selected ? "is-selected" : ""}`} style={{ fontFamily: "Inter, sans-serif" }}>
+    <div className={`hardware-node ${compact ? "is-compact-part" : ""} ${display ? "is-display-part" : ""} ${selected ? "is-selected" : ""}`} style={{ fontFamily: "var(--font-sans)" }}>
       <NodeToolbar isVisible={selected} position={Position.Top} offset={10}>
-        <div className="node-toolbar">
-          <span>{data.label}</span>
+        <div className="node-toolbar node-toolbar-compact">
+          <span className="sr-only">{data.label} actions</span>
           <DestructiveConfirmButton
             targetKey={id}
             onConfirm={() => useProjectStore.getState().removeComponent(id)}

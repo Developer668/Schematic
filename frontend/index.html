@@ -1,13 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" sizes="256x256" href="/schematic-favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Schematic — Hardware WebMCP Workbench</title>
-    <meta name="description" content="Agent-native hardware workspace for typed graph design, Behavior Plan previews, and editable source handoff via WebMCP." />
-    <meta property="og:title" content="Schematic — Hardware WebMCP Workbench" />
-    <meta property="og:description" content="Design connected hardware, preview typed outcomes, and edit source for external SDK or hardware workflows." />
+    <meta name="theme-color" content="#050505" />
+    <link rel="icon" type="image/svg+xml" href="/schematic-favicon.svg" />
+    <title>Schematic — Design Connected Hardware</title>
+    <meta name="description" content="Plan connected hardware with real components, typed interfaces, editable source, project checks, and a reviewable parts workflow." />
+    <meta property="og:title" content="Schematic — Design Connected Hardware" />
+    <meta property="og:description" content="Keep components, connections, source, checks, and parts in one understandable hardware project." />
+    <style>
+      html, body, #root { min-height: 100%; margin: 0; background: #050505; }
+    </style>
+    <script>
+      try {
+        const theme = localStorage.getItem("schematic-theme");
+        document.documentElement.className = theme === "light" ? "light" : "dark";
+      } catch {
+        document.documentElement.className = "dark";
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

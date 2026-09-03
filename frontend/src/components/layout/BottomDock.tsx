@@ -1,14 +1,55 @@
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  AlertTriangle,
+  Braces,
+  Boxes,
+  Check,
+  ChevronDown,
+  Clock3,
+  CornerDownLeft,
+  Eraser,
+  ListChecks,
+  LoaderCircle,
+  Pause,
+  Play,
+  RotateCcw,
+  Terminal,
+  TriangleAlert,
+} from "lucide-react";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import { useWorkspaceStore } from "../../store/useWorkspaceStore.ts";
 import { useWebMCPStore } from "../../store/useWebMCPStore.ts";
-import { isPreviewRunning, PREVIEW_DISCLAIMER, useBehaviorPreviewStore } from "../../behavior/useBehaviorPreviewStore.ts";
-import type { PreviewDiagnostic, PreviewSnapshot } from "../../behavior/previewTypes.ts";
+import {
+  isPreviewRunning,
+  PREVIEW_DISCLAIMER,
+  useBehaviorPreviewStore,
+} from "../../behavior/useBehaviorPreviewStore.ts";
+import type {
+  PreviewDiagnostic,
+  PreviewSnapshot,
+} from "../../behavior/previewTypes.ts";
 import { getRegisteredToolNames } from "../../webmcp/tools.ts";
 import ValidationPanel from "../validation/ValidationPanel.tsx";
-import { Terminal, ChevronDown, Trash2, Pause, Play, RotateCcw, Clock3, Activity, AlertTriangle } from "lucide-react";
 
-export default function BottomDock({ collapsed, onToggleCollapse, height }: { collapsed: boolean; onToggleCollapse: () => void; height: number }) {
+type DockTab = "webmcp" | "terminal" | "debug" | "validation";
+
+const tabLabels: Record<DockTab, { label: string; icon: typeof Braces }> = {
+  webmcp: { label: "WebMCP", icon: Braces },
+  terminal: { label: "Terminal", icon: Terminal },
+  debug: { label: "Outcome", icon: Activity },
+  validation: { label: "Problems", icon: ListChecks },
+};
+
+export default function BottomDock({
+  collapsed,
+  onToggleCollapse,
+  height,
+}: {
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  height: number;
+}) {
   const tab = useWorkspaceStore((state) => state.bottomPanel);
   const setTab = useWorkspaceStore((state) => state.setBottomPanel);
   const previewStatus = useBehaviorPreviewStore((state) => state.status);
@@ -20,200 +61,410 @@ export default function BottomDock({ collapsed, onToggleCollapse, height }: { co
   const startPreview = useBehaviorPreviewStore((state) => state.startPreview);
   const resetPreview = useBehaviorPreviewStore((state) => state.resetPreview);
   const seekPreview = useBehaviorPreviewStore((state) => state.seekPreview);
-  const project = useProjectStore((s) => s.project);
+  const project = useProjectStore((state) => state.project);
   const toolNames = getRegisteredToolNames();
+
+  const selectTab = (next: DockTab) => {
+    setTab(next);
+    if (collapsed) onToggleCollapse();
+  };
 
   if (collapsed) {
     return (
-      <div className="h-8 border-t border-border bg-card flex items-center px-2 gap-1 shrink-0 text-xs">
-        <button type="button" onClick={() => { setTab("webmcp"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">WebMCP</button>
-        <button type="button" onClick={() => { setTab("terminal"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">Terminal</button>
-        <button type="button" onClick={() => { setTab("debug"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">Preview</button>
-        <button type="button" onClick={() => { setTab("validation"); onToggleCollapse(); }} className="bottom-dock-tab px-2 py-1 rounded hover:bg-muted">Problems</button>
-        <button type="button" onClick={onToggleCollapse} className="ml-auto w-6 h-6 rounded border border-border hover:bg-muted flex items-center justify-center" aria-label="Expand bottom panel" title="Expand bottom panel"><ChevronDown size={12} className="rotate-180" /></button>
+      <div className="bottom-dock-collapsed">
+        {(Object.keys(tabLabels) as DockTab[]).map((key) => {
+          const Icon = tabLabels[key].icon;
+          return (
+            <button type="button" key={key} onClick={() => selectTab(key)}>
+              <Icon size={12} />
+              <span>{tabLabels[key].label}</span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="bottom-dock-expand"
+          aria-label="Expand bottom panel"
+          title="Expand bottom panel"
+        >
+          <ChevronDown size={13} className="rotate-180" />
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="border-t border-border bg-card flex flex-col shrink-0" style={{ height }}>
-      <div className="h-8 flex items-center gap-0 px-2 border-b border-border shrink-0">
-        <div className="flex items-center gap-0">
-          <TabBtn active={tab === "webmcp"} onClick={() => setTab("webmcp")}>WebMCP</TabBtn>
-          <TabBtn active={tab === "terminal"} onClick={() => setTab("terminal")}>Terminal</TabBtn>
-          <TabBtn active={tab === "debug"} onClick={() => setTab("debug")}>Preview</TabBtn>
-          <TabBtn active={tab === "validation"} onClick={() => setTab("validation")}>Problems</TabBtn>
+    <div className="bottom-dock-redesign" style={{ height }}>
+      <div className="bottom-dock-header">
+        <div className="bottom-dock-tabs" role="tablist" aria-label="Workspace tools">
+          {(Object.keys(tabLabels) as DockTab[]).map((key) => {
+            const Icon = tabLabels[key].icon;
+            return (
+              <DockTabButton
+                key={key}
+                active={tab === key}
+                onClick={() => setTab(key)}
+                icon={<Icon size={12} />}
+              >
+                {tabLabels[key].label}
+              </DockTabButton>
+            );
+          })}
         </div>
-        <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span className="hidden sm:inline">{project.components.length} comps · {project.connections.length} wires</span>
-          <span className="font-mono text-[9px] uppercase tracking-wide">{previewStatus}</span>
-          <button type="button" onClick={onToggleCollapse} className="w-6 h-6 rounded hover:bg-muted flex items-center justify-center" aria-label="Collapse bottom panel" title="Collapse bottom panel"><ChevronDown size={12} /></button>
+        <div className="bottom-dock-context">
+          <span>{project.components.length} components</span>
+          <span>{project.connections.length} wires</span>
+          <span className="bottom-dock-preview-state">{previewStatus}</span>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label="Collapse bottom panel"
+            title="Collapse bottom panel"
+          >
+            <ChevronDown size={13} />
+          </button>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto bg-card">
+      <div className="bottom-dock-content">
         {tab === "webmcp" && <WebMCPCLI toolNames={toolNames} />}
         {tab === "terminal" && <TerminalTab status={previewStatus} snapshot={snapshot} />}
-        {tab === "debug" && <PreviewTimeline status={previewStatus} preparationStatus={preparationStatus} snapshot={snapshot} diagnostics={previewDiagnostics} durationMs={previewDurationMs} onPause={() => void pausePreview()} onPlay={() => void startPreview({ durationMs: previewDurationMs })} onReset={() => void resetPreview()} onSeek={(timeMs) => void seekPreview(timeMs)} />}
-        {tab === "validation" && <div className="p-2"><ValidationPanel embedded /></div>}
+        {tab === "debug" && (
+          <PreviewTimeline
+            status={previewStatus}
+            preparationStatus={preparationStatus}
+            snapshot={snapshot}
+            diagnostics={previewDiagnostics}
+            durationMs={previewDurationMs}
+            onPause={() => void pausePreview()}
+            onPlay={() => void startPreview({ durationMs: previewDurationMs })}
+            onReset={() => void resetPreview()}
+            onSeek={(timeMs) => void seekPreview(timeMs)}
+          />
+        )}
+        {tab === "validation" && (
+          <div className="dock-problems">
+            <ValidationPanel embedded />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function DockTabButton({
+  active,
+  onClick,
+  icon,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <button type="button" aria-pressed={active} onClick={onClick} className={`bottom-dock-tab text-xs px-3 h-8 border-b-2 -mb-px ${active ? "border-primary text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-      {children}
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={active ? "is-active" : ""}
+    >
+      {icon}
+      <span>{children}</span>
     </button>
   );
 }
 
-// ---- WebMCP CLI ----
+type CommandEntry = { cmd: string; out: string; isError?: boolean };
+
 function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
-  const [history, setHistory] = useState<{ cmd: string; out: string; isError?: boolean }[]>([
-    { cmd: "help", out: "WebMCP CLI — type a tool name and JSON args. Examples:\n  component.search {\"query\":\"esp32\"}\n  component.add {\"componentId\":\"esp32-devkit-v1\"}\n  component.list_ports {\"componentId\":\"esp32-devkit-v1-1\"}\n  connection.connect {\"source\":{\"componentId\":\"board-1\",\"portId\":\"GPIO18\"},\"target\":{\"componentId\":\"button-1\",\"portId\":\"A\"}}\n  shopping.search {\"query\":\"ESP32-S3\"}\n  project.get_graph\n  validation.check\n\nTools: " + toolNames.join(", ") },
-  ]);
+  const [history, setHistory] = useState<CommandEntry[]>([]);
   const [input, setInput] = useState("");
-  const [filter, setFilter] = useState("");
   const activities = useWebMCPStore((state) => state.activities);
   const clearActivities = useWebMCPStore((state) => state.clearActivities);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history, activities]);
+  const firstToken = input.trimStart().split(/\s/, 1)[0] ?? "";
+  const suggestions =
+    firstToken && !input.includes(" ")
+      ? toolNames
+          .filter((toolName) => toolName.toLowerCase().includes(firstToken.toLowerCase()))
+          .slice(0, 7)
+      : [];
 
-  const filteredTools = toolNames.filter((t) => !filter || t.toLowerCase().includes(filter.toLowerCase()));
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [activities, history]);
 
   const run = async () => {
     const raw = input.trim();
     if (!raw) return;
-    if (raw === "clear") { setHistory([]); clearActivities(); setInput(""); return; }
-    if (raw === "help" || raw === "list" || raw === "tools") {
-      setHistory((h) => [...h, { cmd: raw, out: toolNames.join("\n") }]);
+
+    if (raw === "clear") {
+      setHistory([]);
+      clearActivities();
       setInput("");
       return;
     }
-    // parse: first token is tool name, rest is JSON
+
+    if (raw === "help" || raw === "list" || raw === "tools") {
+      setHistory((current) => [...current, { cmd: raw, out: toolNames.join("\n") }]);
+      setInput("");
+      return;
+    }
+
     const firstSpace = raw.indexOf(" ");
     let name = raw;
-    let args: any = {};
+    let args: Record<string, unknown> = {};
+
     if (firstSpace !== -1) {
       name = raw.slice(0, firstSpace).trim();
       const rest = raw.slice(firstSpace + 1).trim();
       if (rest) {
-        try { args = JSON.parse(rest); }
-        catch {
-          // try to parse as key=value pairs? fallback to single arg
-          setHistory((h) => [...h, { cmd: raw, out: `Invalid JSON args: ${rest}\nUse JSON object, e.g. {"query":"esp32"}`, isError: true }]);
+        try {
+          const parsed: unknown = JSON.parse(rest);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("Arguments must be a JSON object.");
+          }
+          args = parsed as Record<string, unknown>;
+        } catch (error) {
+          setHistory((current) => [
+            ...current,
+            {
+              cmd: raw,
+              out: error instanceof Error
+                ? `Invalid arguments: ${error.message}`
+                : "Invalid JSON arguments.",
+              isError: true,
+            },
+          ]);
           setInput("");
           return;
         }
       }
     }
-    // allow short alias without dot? keep as is
-    const tools: any = (window as any).__schematicTools;
-    const fn = tools?.[name];
-    if (!fn) {
-      const suggestion = toolNames.find((t) => t.includes(name) || name.includes(t.split(".").pop()!));
-      setHistory((h) => [...h, { cmd: raw, out: `Unknown tool "${name}"${suggestion ? `. Did you mean "${suggestion}"?` : ""}\nType "help" to list tools.`, isError: true }]);
+
+    const registry = (window as typeof window & {
+      __schematicTools?: Record<string, (args: Record<string, unknown>) => Promise<{
+        content?: Array<{ type?: string; text?: string }>;
+        data?: unknown;
+        isError?: boolean;
+      }>>;
+    }).__schematicTools;
+    const tool = registry?.[name];
+
+    if (!tool) {
+      const suggestion = toolNames.find(
+        (toolName) => toolName.includes(name) || name.includes(toolName.split(".").pop() ?? ""),
+      );
+      setHistory((current) => [
+        ...current,
+        {
+          cmd: raw,
+          out: `Unknown tool “${name}”.${suggestion ? ` Try “${suggestion}”.` : " Type “tools” to see the available commands."}`,
+          isError: true,
+        },
+      ]);
       setInput("");
       return;
     }
+
     try {
-      const result = await fn(args);
-      const output = result?.content?.filter?.((item: any) => item.type === "text").map?.((item: any) => item.text).join("\n") || (result?.data ? JSON.stringify(result.data, null, 2) : "Tool completed");
-      setHistory((h) => [...h, { cmd: raw, out: output, isError: Boolean(result?.isError) }]);
+      const result = await tool(args);
+      const text = result.content
+        ?.filter((item) => item.type === "text" && typeof item.text === "string")
+        .map((item) => item.text)
+        .join("\n");
+      const output = text || (result.data ? JSON.stringify(result.data, null, 2) : "Tool completed.");
+      setHistory((current) => [
+        ...current,
+        { cmd: raw, out: output, isError: Boolean(result.isError) },
+      ]);
     } catch (error) {
-      setHistory((h) => [...h, { cmd: raw, out: `Tool failed: ${(error as Error).message}`, isError: true }]);
+      setHistory((current) => [
+        ...current,
+        {
+          cmd: raw,
+          out: `Tool failed: ${(error as Error).message}`,
+          isError: true,
+        },
+      ]);
     }
+
     setInput("");
   };
 
+  const clearAll = () => {
+    setHistory([]);
+    clearActivities();
+    inputRef.current?.focus();
+  };
+
+  const empty = history.length === 0 && activities.length === 0;
+
   return (
-    <div className="h-full flex flex-col font-mono text-xs">
-        <div className="flex-1 overflow-auto p-2 space-y-1.5 bg-[#0a0a0a] text-zinc-100" role="log" aria-live="polite" tabIndex={0} aria-label="WebMCP activity log">
-        {history.map((h, i) => (
-          <div key={i} className="space-y-1">
-            <div className="flex gap-2">
-              <span className="text-emerald-400 shrink-0">$</span>
-              <span className="text-zinc-100 break-all">{h.cmd}</span>
+    <div className="dock-console dock-webmcp">
+      <div className="dock-console-log" role="log" aria-live="polite" tabIndex={0} aria-label="WebMCP activity log">
+        {empty && (
+          <div className="dock-console-empty">
+            <Braces size={18} />
+            <div>
+              <b>Run a workspace tool</b>
+              <p>Type a tool name with a JSON object. The output below comes from the live workspace registry.</p>
             </div>
-            <pre className={`ml-4 whitespace-pre-wrap break-words text-[11px] leading-relaxed ${h.isError ? "text-red-300" : "text-zinc-300"}`}>{h.out}</pre>
+            <div className="dock-console-samples">
+              {toolNames.slice(0, 4).map((toolName) => (
+                <button
+                  type="button"
+                  key={toolName}
+                  onClick={() => {
+                    setInput(`${toolName} `);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  {toolName}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {history.map((entry, index) => (
+          <div key={`${entry.cmd}-${index}`} className="dock-command-entry">
+            <div className="dock-command-line">
+              <ChevronDown size={11} className="-rotate-90" />
+              <span>{entry.cmd}</span>
+            </div>
+            <pre className={entry.isError ? "is-error" : ""}>{entry.out}</pre>
           </div>
         ))}
+
         {[...activities].reverse().map((activity) => (
-          <div key={activity.id} className="space-y-1.5 border-t border-zinc-800 pt-1.5">
-            <div className="flex items-center gap-2">
-              <span className={activity.status === "error" ? "text-red-300" : activity.status === "running" ? "text-amber-300" : "text-emerald-400"}>{activity.status === "error" ? "!" : activity.status === "running" ? "·" : "✓"}</span>
-              <span className="text-zinc-100 break-all">{activity.name}</span>
-              <span className="ml-auto text-[10px] text-zinc-500">{activity.status}{activity.finishedAt ? ` · ${activity.finishedAt - activity.startedAt}ms` : ""}</span>
+          <div key={activity.id} className="dock-command-entry is-activity">
+            <div className="dock-command-line">
+              {activity.status === "running" ? (
+                <LoaderCircle size={11} className="animate-spin" />
+              ) : activity.status === "error" ? (
+                <TriangleAlert size={11} />
+              ) : (
+                <Check size={11} />
+              )}
+              <span>{activity.name}</span>
+              <small>
+                {activity.status}
+                {activity.finishedAt ? ` · ${activity.finishedAt - activity.startedAt} ms` : ""}
+              </small>
             </div>
-            <pre className={`ml-4 whitespace-pre-wrap break-words text-[11px] leading-relaxed ${activity.status === "error" ? "text-red-300" : "text-zinc-300"}`}>
-              {JSON.stringify(activity.args)}{activity.resultText ? `\n${activity.resultText}` : ""}
+            <pre className={activity.status === "error" ? "is-error" : ""}>
+              {JSON.stringify(activity.args)}
+              {activity.resultText ? `\n${activity.resultText}` : ""}
             </pre>
           </div>
         ))}
         <div ref={endRef} />
       </div>
 
-      {/* suggestions */}
-      {filter && filteredTools.length > 0 && filteredTools.length < toolNames.length && (
-        <div className="border-t border-zinc-800 bg-zinc-900 px-2 py-1.5 flex flex-wrap gap-1 max-h-20 overflow-auto">
-          {filteredTools.slice(0, 8).map((t) => (
-            <button type="button" key={t} onClick={() => { setInput(t + " "); setFilter(""); inputRef.current?.focus(); }} className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300">
-              {t}
+      {suggestions.length > 0 && (
+        <div className="dock-console-suggestions" role="listbox" aria-label="Tool suggestions">
+          {suggestions.map((toolName) => (
+            <button
+              type="button"
+              role="option"
+              key={toolName}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                setInput(`${toolName} `);
+                inputRef.current?.focus();
+              }}
+            >
+              {toolName}
             </button>
           ))}
         </div>
       )}
 
-      <div className="border-t border-zinc-800 bg-zinc-900 flex items-center gap-2 px-2 py-1.5">
-        <span className="text-emerald-400 text-xs">$</span>
+      <div className="dock-console-input">
+        <Braces size={13} />
         <input
           ref={inputRef}
           value={input}
           aria-label="WebMCP command"
-          onChange={(e) => { setInput(e.target.value); const tok = e.target.value.split(" ")[0]; setFilter(tok); }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void run();
-            if (e.key === "Tab") {
-              e.preventDefault();
-              const match = filteredTools[0];
-              if (match) { setInput(match + " "); setFilter(""); }
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void run();
+            if (event.key === "Tab" && suggestions[0]) {
+              event.preventDefault();
+              setInput(`${suggestions[0]} `);
             }
-            if (e.key === "Escape") setFilter("");
+            if (event.key === "Escape") setInput("");
           }}
-          placeholder='Type tool — e.g. component.search {"query":"esp32"} — Tab to autocomplete, Enter to run'
-          className="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+          placeholder='component.search {"query":"esp32"}'
         />
-        <button type="button" onClick={() => void run()} className="text-xs px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200">Run</button>
-        <button type="button" onClick={() => { setHistory([]); clearActivities(); }} className="text-xs px-2 py-1 rounded border border-zinc-700 hover:bg-zinc-800 text-zinc-400" aria-label="Clear WebMCP activity" title="Clear WebMCP activity"><Trash2 size={11} /></button>
+        <button type="button" onClick={() => void run()} aria-label="Run WebMCP command" title="Run command">
+          <CornerDownLeft size={13} />
+        </button>
+        <button type="button" onClick={clearAll} aria-label="Clear WebMCP output" title="Clear output">
+          <Eraser size={13} />
+        </button>
       </div>
-      <div className="px-2 py-1 border-t border-zinc-800 bg-zinc-900 text-[11px] text-zinc-400 flex items-center gap-3">
-        <span>Enter: run · Tab: autocomplete · clear: reset</span>
-        <span className="ml-auto">{toolNames.length} tools</span>
+
+      <div className="dock-console-footer">
+        <span>Enter to run</span>
+        <span>Tab to complete</span>
+        <span>{toolNames.length} tools</span>
       </div>
     </div>
   );
 }
 
-function TerminalTab({ status, snapshot }: { status: string; snapshot: PreviewSnapshot | null }) {
+function TerminalTab({
+  status,
+  snapshot,
+}: {
+  status: string;
+  snapshot: PreviewSnapshot | null;
+}) {
+  const entries = snapshot?.sessionLog ?? [];
+
   return (
-    <div className="h-full flex flex-col font-mono text-xs">
-      <div className="flex items-center justify-between px-2 py-1.5 border-b border-border bg-muted/20 text-xs font-sans">
-        <span className="flex items-center gap-1.5"><Terminal size={12} /> Preview session log</span>
-        <span className="text-muted-foreground">{status} · {snapshot?.sessionLog.length ?? 0} entries</span>
+    <div className="dock-console">
+      <div className="dock-terminal-heading">
+        <span><Terminal size={13} /> Preview activity</span>
+        <span>{status} · {entries.length} entries</span>
       </div>
-      <div className="flex-1 overflow-auto p-2 bg-[#0a0a0a] text-zinc-100 text-xs" role="log" aria-label="Preview session log">
-        {!snapshot || snapshot.sessionLog.length === 0 ? <div className="text-zinc-500 text-xs">No preview actions yet — choose Preview behavior or trigger a typed event.</div> : snapshot.sessionLog.map((entry) => (
-          <div key={entry.sequence} className="mb-2 border-b border-zinc-800 pb-2 last:border-0">
-            <div className="flex items-center gap-2"><span className={entry.outcome === "accepted" ? "text-emerald-400" : "text-red-300"}>{entry.outcome === "accepted" ? "✓" : "!"}</span><span className="text-zinc-300">{entry.kind}</span><span className="ml-auto text-[10px] text-zinc-500">{entry.logicalTimeMs} ms · #{entry.sequence}</span></div>
-            <pre className="ml-4 mt-1 whitespace-pre-wrap break-words text-[11px] text-zinc-400">{JSON.stringify(entry.request, null, 2)}{entry.diagnosticCodes.length ? `\n${entry.diagnosticCodes.join(", ")}` : ""}</pre>
+      <div className="dock-console-log" role="log" aria-label="Preview session log">
+        {entries.length === 0 ? (
+          <div className="dock-console-empty is-compact">
+            <Terminal size={17} />
+            <div>
+              <b>No preview activity yet</b>
+              <p>Start the project preview or use a typed control in the Inspector.</p>
+            </div>
           </div>
-        ))}
+        ) : (
+          entries.map((entry) => (
+            <div key={entry.sequence} className="dock-command-entry">
+              <div className="dock-command-line">
+                {entry.outcome === "accepted" ? <Check size={11} /> : <TriangleAlert size={11} />}
+                <span>{entry.kind}</span>
+                <small>{entry.logicalTimeMs} ms · {entry.sequence}</small>
+              </div>
+              <pre className={entry.outcome === "accepted" ? "" : "is-error"}>
+                {JSON.stringify(entry.request, null, 2)}
+                {entry.diagnosticCodes.length ? `\n${entry.diagnosticCodes.join(", ")}` : ""}
+              </pre>
+            </div>
+          ))
+        )}
       </div>
-      <div className="border-t border-zinc-800 bg-zinc-900 px-2 py-1.5 text-[11px] leading-snug text-zinc-400">Source code execution: none · accepted and rejected typed actions are replayable.</div>
+      <div className="dock-console-footer">
+        <span>Typed preview activity only</span>
+        <span>Source is not executed here</span>
+      </div>
     </div>
   );
 }
@@ -239,35 +490,141 @@ function PreviewTimeline({
   onReset: () => void;
   onSeek: (timeMs: number) => void;
 }) {
-  const maxTime = Math.max(durationMs, ...(snapshot?.events ?? []).map((event) => event.logicalTimeMs ?? 0), snapshot?.logicalTimeMs ?? 0);
+  const maxTime = Math.max(
+    durationMs,
+    ...(snapshot?.events ?? []).map((event) => event.logicalTimeMs ?? 0),
+    snapshot?.logicalTimeMs ?? 0,
+  );
   const currentTime = Math.min(maxTime, Math.max(0, snapshot?.logicalTimeMs ?? 0));
   const isPlaying = isPreviewRunning(status);
+
   return (
-    <div className="h-full overflow-auto p-2 space-y-2 text-xs">
-      <div className="preview-timeline-header flex items-start justify-between gap-3 rounded border border-border bg-muted/20 p-2">
-        <div><div className="flex items-center gap-1.5 font-medium"><Activity size={12} /> Behavior Preview <span className="preview-status-dot" aria-hidden="true" /></div><p className="mt-1 text-[11px] leading-snug text-muted-foreground">{PREVIEW_DISCLAIMER}</p></div>
-        <span className="shrink-0 rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[10px] uppercase">{status}</span>
+    <div className="outcome-workbench">
+      <header className="outcome-workbench-header">
+        <div className="outcome-title-block">
+          <span className="outcome-title-icon"><Activity size={14} /></span>
+          <span>
+            <b>Outcome timeline</b>
+            <small>{PREVIEW_DISCLAIMER}</small>
+          </span>
+        </div>
+        <span className="outcome-status-label">{status}</span>
+      </header>
+
+      {preparationStatus === "partial" && (
+        <div className="outcome-warning outcome-workbench-warning">
+          <AlertTriangle size={14} />
+          <span>Some unsupported rules or actions were skipped. Review the diagnostics before using this as the complete intended outcome.</span>
+        </div>
+      )}
+
+      <div className="outcome-transport">
+        <div className="outcome-transport-actions">
+          <button type="button" onClick={isPlaying ? onPause : onPlay} aria-label={isPlaying ? "Pause outcome" : "Play outcome"} title={isPlaying ? "Pause outcome" : "Play outcome"}>
+            {isPlaying ? <Pause size={12} /> : <Play size={12} />}
+            <span>{isPlaying ? "Pause" : "Play"}</span>
+          </button>
+          <button type="button" onClick={onReset} aria-label="Reset outcome" title="Reset outcome">
+            <RotateCcw size={12} />
+            <span>Reset</span>
+          </button>
+        </div>
+        <label className="outcome-time-label" htmlFor="preview-time-seek">
+          <Clock3 size={11} />
+          <span>{currentTime} / {maxTime} ms</span>
+        </label>
+        <input
+          id="preview-time-seek"
+          type="range"
+          min={0}
+          max={maxTime}
+          step={1}
+          value={currentTime}
+          onChange={(event) => onSeek(Number(event.target.value))}
+        />
       </div>
-      {preparationStatus === "partial" && <div className="rounded border border-amber-400/60 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200"><strong>Partial plan:</strong> unsupported rules or actions were skipped. Review the preparation diagnostics below before treating this preview as the intended complete outcome.</div>}
-      <div className="flex flex-wrap items-center gap-1.5 rounded border border-border bg-muted/20 p-2">
-        <button type="button" onClick={isPlaying ? onPause : onPlay} className="secondary-button !h-7 !px-2" aria-label={isPlaying ? "Pause preview" : "Play preview"}>{isPlaying ? <Pause size={11} /> : <Play size={11} />}{isPlaying ? "Pause" : "Play"}</button>
-        <button type="button" onClick={onReset} className="secondary-button !h-7 !px-2" aria-label="Reset preview"><RotateCcw size={11} /> Reset</button>
-        <span className="ml-auto font-mono text-[10px] text-muted-foreground"><Clock3 size={10} className="mr-1 inline" />{currentTime} / {maxTime} ms</span>
-        <label className="sr-only" htmlFor="preview-time-seek">Preview time</label>
-        <input id="preview-time-seek" type="range" min={0} max={maxTime} step={1} value={currentTime} onChange={(event) => onSeek(Number(event.target.value))} className="w-full accent-[hsl(var(--accent))]" />
+
+      <div className="outcome-workspace">
+        <aside className="outcome-summary-rail">
+          <section>
+            <h3>Session</h3>
+            <dl>
+              <div><dt>Time</dt><dd>{currentTime} ms</dd></div>
+              <div><dt>Actions</dt><dd>{snapshot?.sessionLog.length ?? 0}</dd></div>
+              <div><dt>Sequence</dt><dd>{snapshot?.sequence ?? 0}</dd></div>
+              <div><dt>Source</dt><dd>Not executed</dd></div>
+            </dl>
+          </section>
+          <section>
+            <h3>Recorded hashes</h3>
+            <div className="outcome-hashes">
+              <span>Snapshot</span><code title={snapshot?.snapshotSha256}>{snapshot?.snapshotSha256 ?? "Not created"}</code>
+              <span>Session</span><code title={snapshot?.sessionLogSha256}>{snapshot?.sessionLogSha256 ?? "Not created"}</code>
+            </div>
+          </section>
+        </aside>
+
+        <main className="outcome-stream">
+          <section className="outcome-stream-section">
+            <header>
+              <div><Activity size={12} /><h3>Timeline</h3></div>
+              <span>{snapshot?.events.length ?? 0} events</span>
+            </header>
+            {!snapshot || snapshot.events.length === 0 ? (
+              <div className="outcome-stream-empty">
+                <Activity size={18} />
+                <span><b>No outcome events yet</b><small>Start the project preview or use a typed control in the Inspector.</small></span>
+              </div>
+            ) : (
+              <div className="outcome-event-list">
+                {snapshot.events.slice(-40).map((event) => (
+                  <div key={`${event.sequence}-${event.logicalTimeMs}`}>
+                    <code>{event.logicalTimeMs ?? 0} ms</code>
+                    <span>{event.actionId ?? event.eventId ?? event.kind ?? "event"}{event.message ? ` · ${event.message}` : ""}</span>
+                    <b className={event.outcome === "rejected" ? "is-rejected" : ""}>{event.outcome ?? "unknown"}</b>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="outcome-stream-section">
+            <header>
+              <div><AlertTriangle size={12} /><h3>Diagnostics</h3></div>
+              <span>{diagnostics.length}</span>
+            </header>
+            {diagnostics.length === 0 ? (
+              <p className="outcome-empty">No project preview diagnostics.</p>
+            ) : (
+              <div className="outcome-diagnostics">
+                {diagnostics.slice(0, 20).map((diagnostic, index) => (
+                  <div key={`${diagnostic.code}-${index}`} className={diagnostic.severity === "error" ? "is-error" : ""}>
+                    <code>{diagnostic.code}</code>
+                    <span>{diagnostic.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {snapshot && (
+            <section className="outcome-stream-section">
+              <header>
+                <div><Boxes size={12} /><h3>Component outcomes</h3></div>
+                <span>{Object.keys(snapshot.components).length}</span>
+              </header>
+              <div className="outcome-components">
+                {Object.entries(snapshot.components).map(([componentId, projection]) => (
+                  <div key={componentId}>
+                    <code>{componentId}</code>
+                    <span>{projection.accessibleSummary}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </main>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Session</div><div className="space-y-1 text-[11px] text-muted-foreground"><div className="flex justify-between"><span>Time</span><span className="font-mono text-foreground">{currentTime} ms</span></div><div className="flex justify-between"><span>Actions</span><span className="font-mono text-foreground">{snapshot?.sessionLog.length ?? 0}</span></div><div className="flex justify-between"><span>Sequence</span><span className="font-mono text-foreground">{snapshot?.sequence ?? 0}</span></div><div className="flex justify-between"><span>Source</span><span className="font-mono text-foreground">none</span></div></div></div>
-        <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Hashes</div><div className="space-y-1 break-all font-mono text-[10px] text-muted-foreground"><div>snapshot · {snapshot?.snapshotSha256 ?? "—"}</div><div>session · {snapshot?.sessionLogSha256 ?? "—"}</div></div></div>
-      </div>
-      <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Workflow boundary</div><div className="grid gap-x-3 gap-y-1 text-[11px] text-muted-foreground sm:grid-cols-2"><BoundaryClaim label="Preview basis" value="Behavior Plan" /><BoundaryClaim label="Source" value="Editable handoff" /><BoundaryClaim label="Build + upload" value="External hardware" /><BoundaryClaim label="Modeled wiring" value="Graph checks" /><BoundaryClaim label="Physical outcome" value="Connected board" /></div></div>
-      <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Timeline</div>{!snapshot || snapshot.events.length === 0 ? <div className="text-[11px] text-muted-foreground">No accepted or rejected typed events yet.</div> : <div className="max-h-28 space-y-1 overflow-auto">{snapshot.events.slice(-40).map((event) => <div key={`${event.sequence}-${event.logicalTimeMs}`} className="flex items-start gap-2 rounded bg-muted/30 px-2 py-1 text-[11px]"><span className="shrink-0 font-mono text-muted-foreground">{event.logicalTimeMs ?? 0} ms</span><span className="min-w-0 flex-1 truncate">{event.actionId ?? event.eventId ?? event.kind ?? "event"}{event.message ? ` · ${event.message}` : ""}</span><span className={`shrink-0 font-mono ${event.outcome === "rejected" ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>{event.outcome ?? "—"}</span></div>)}</div>}</div>
-      <div className="rounded border border-border p-2"><div className="mb-1 flex items-center gap-1.5 font-medium"><AlertTriangle size={12} /> Diagnostics <span className="font-mono text-[10px] text-muted-foreground">{diagnostics.length}</span></div>{diagnostics.length === 0 ? <div className="text-[11px] text-muted-foreground">No Behavior Plan diagnostics.</div> : <div className="space-y-1">{diagnostics.slice(0, 20).map((diagnostic, index) => <div key={`${diagnostic.code}-${index}`} className={`rounded border px-2 py-1 text-[11px] ${diagnostic.severity === "error" ? "border-red-300/60 bg-red-50/70 text-red-800 dark:border-red-800 dark:bg-red-950/20 dark:text-red-200" : "border-border bg-muted/20 text-muted-foreground"}`}><span className="font-mono">{diagnostic.code}</span> · {diagnostic.message}</div>)}</div>}</div>
-      {snapshot && <div className="rounded border border-border p-2"><div className="mb-1 font-medium">Component outcomes</div><div className="max-h-24 space-y-1 overflow-auto">{Object.entries(snapshot.components).map(([componentId, projection]) => <div key={componentId} className="flex items-start gap-2 rounded bg-muted/30 px-2 py-1 text-[11px]"><span className="font-mono text-muted-foreground">{componentId}</span><span>{projection.accessibleSummary}</span></div>)}</div></div>}
     </div>
   );
-}
-
-function BoundaryClaim({ label, value }: { label: string; value: string }) {
-  return <div className="flex items-center justify-between gap-2"><span>{label}</span><span className="font-mono text-foreground">{value}</span></div>;
 }

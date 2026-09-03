@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from app.api.routes.compile import CompileReq, SketchFile, _source_sha256, compile as compile_firmware
 from app.api.routes import compile as compile_route
 from app.api.routes.components import CATALOG, get_one, search
+from app.api.routes import parts as parts_route
 from app.api.routes.parts import search as search_parts
 from app.simulation.orchestrator import SimulationOrchestrator
 from test_orchestrator import rtc_led_project
@@ -28,11 +29,50 @@ def test_unknown_component_is_a_real_not_found_error():
     assert error.value.status_code == 404
 
 
-def test_parts_provider_boundary_is_explicitly_unavailable_until_configured():
-    with pytest.raises(HTTPException) as error:
-        search_parts(query="bmp280", quantity=2)
-    assert error.value.status_code == 503
-    assert error.value.detail["liveOffers"] is False
+def test_parts_provider_returns_live_brightdata_discovery_without_promoting_cart_records(monkeypatch):
+    parts_route._cache.clear()
+    parts_route._inflight.clear()
+    monkeypatch.setattr(parts_route.settings, "BRIGHTDATA_API_KEY", "test-key")
+    monkeypatch.setattr(parts_route.settings, "BRIGHTDATA_SERP_ZONE", "serp_api1")
+
+    async def fake_fetch(_query: str):
+        return 200, {"content-type": "application/json"}, json.dumps({
+            "general": {"search_type": "shopping"},
+            "shopping": [{
+                "title": "Bosch BMP280 pressure sensor breakout",
+                "price": "$8.95",
+                "shop": "Example Electronics",
+                "link": "https://retailer.example/bmp280",
+                "shipping": "Free shipping",
+                "rating": 4.7,
+                "reviews_cnt": 128,
+                "rank": 1,
+            }],
+        })
+
+    monkeypatch.setattr(parts_route, "_fetch_brightdata", fake_fetch)
+    response = asyncio.run(search_parts(query="BMP280", quantity=2, request_id="parts-test-brightdata"))
+    body = json.loads(response.body)
+    assert response.status_code == 200
+    assert body["code"] == "LIVE_SHOPPING_RESULTS"
+    assert body["source"] == "brightdata-serp"
+    assert body["cartEligible"] is False
+    assert body["candidates"][0]["price"] == pytest.approx(8.95)
+    assert body["candidates"][0]["rating"] == pytest.approx(4.7)
+    assert body["candidates"][0]["retailer"] == "Example Electronics"
+    assert body["candidates"][0]["verificationUrl"] == "https://retailer.example/bmp280"
+    assert body["publication"]["required"] is True
+
+
+def test_parts_provider_is_explicitly_unavailable_without_server_credential(monkeypatch):
+    parts_route._cache.clear()
+    parts_route._inflight.clear()
+    monkeypatch.setattr(parts_route.settings, "BRIGHTDATA_API_KEY", "")
+    response = asyncio.run(search_parts(query="bmp280", quantity=2, request_id="parts-test-no-key"))
+    body = json.loads(response.body)
+    assert response.status_code == 503
+    assert body["code"] == "PARTS_PROVIDER_NOT_CONFIGURED"
+    assert body["liveOffers"] is False
 
 
 def test_compile_contract_refuses_unknown_or_mismatched_board_identity():

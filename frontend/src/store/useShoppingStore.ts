@@ -48,9 +48,11 @@ export interface ShoppingResult {
  * deliberately not a ShoppingResult. It has no canonical Schematic identity
  * or verified retailer offer and therefore can never be added to the cart.
  */
+export type ShoppingDiscoverySource = "jlcsearch" | "adafruit" | "brightdata-serp";
+
 export interface ShoppingDiscoveryCandidate {
   id: string;
-  source: "jlcsearch" | "adafruit";
+  source: ShoppingDiscoverySource;
   sourcePartId: string;
   title: string;
   manufacturer?: string;
@@ -63,10 +65,18 @@ export interface ShoppingDiscoveryCandidate {
   currency: string | null;
   verificationUrl: string;
   verificationRequired: true;
+  retailer?: string;
+  shipping?: string;
+  imageUrl?: string;
+  rating?: number;
+  reviewCount?: number;
+  rank?: number;
+  catalogId?: string;
+  matchNote?: string;
 }
 
 export interface ShoppingDiscoveryAttempt {
-  source: "jlcsearch" | "adafruit" | "request";
+  source: ShoppingDiscoverySource | "request";
   status: "success" | "empty" | "error" | "timeout" | "rate_limited" | "circuit_open" | "skipped";
   durationMs: number;
   resultCount: number;
@@ -275,7 +285,7 @@ export function createShoppingHandoff(query: string, quantity = 1, requiredCatal
     query: query.trim().slice(0, MAX_SHOPPING_QUERY_LENGTH),
     quantity: safeQuantity(quantity),
     requiredCatalogIds: [...new Set(requiredCatalogIds.slice(0, 500).map(String).map((id) => id.trim().slice(0, 120)).filter(Boolean))],
-    providerFallbackOrder: ["jlcsearch", "adafruit", "web-search"],
+    providerFallbackOrder: ["brightdata-serp"],
     returnTool: "shopping.search",
     returnFormat: "json",
     constraints: {
@@ -370,7 +380,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     // A discovery/publication attempt is not a destructive replacement. Keep
     // the last accepted listings and cart usable while the next handoff is
     // pending or rejected; only a successful publication replaces results.
-    set({ requestStatus: "failed", discovery: null, publicationError: "Parts shopping needs a connected, authenticated WebMCP agent before listings can be shown. The lookup request is ready to hand off." });
+    set({ requestStatus: "failed", discovery: null, publicationError: "Live shopping discovery is available through Bright Data. Canonical cart publication still requires a reviewed catalog identity." });
     persist(get());
   },
   publishAgentResults(rawResults, publication) {

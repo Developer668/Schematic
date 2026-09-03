@@ -8,6 +8,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      "virtual:schematic-component-metadata": path.resolve(__dirname, "public/components-metadata.json"),
       "@schematic/hardware-graph": path.resolve(__dirname, "../packages/hardware-graph/src"),
       "@schematic/behavior/canonicalize": path.resolve(__dirname, "../packages/behavior/src/canonicalize.ts"),
       "@schematic/behavior": path.resolve(__dirname, "../packages/behavior/src/index.ts"),

@@ -3,7 +3,7 @@ import { useSelectionStore } from "../../store/useSelectionStore.ts";
 import { getCatalogComponent } from "../../data/catalog.ts";
 import { useEffect, useMemo, useRef } from "react";
 import { useState } from "react";
-import { Check, X, Trash2, Play, Zap, Info } from "lucide-react";
+import { Box, Check, MousePointer2, X, Trash2, Play, Zap, Info } from "lucide-react";
 import ComponentArtwork from "../ComponentArtwork.tsx";
 import DestructiveConfirmButton from "../DestructiveConfirmButton.tsx";
 import { capabilitiesForCatalogComponent } from "../../behavior/capabilities.ts";
@@ -139,19 +139,22 @@ export default function Inspector() {
 
   if (!active || !def) {
     return (
-      <div className="p-3 text-sm text-muted-foreground">
-        <div className="font-medium mb-1 text-foreground text-xs">Inspector</div>
-        <div className="text-xs leading-snug">Select a component on the canvas.</div>
-        <div className="mt-3 p-2 rounded border border-border bg-muted/30 text-xs">
-          <div className="font-mono">{project.name}</div>
-          <div className="text-muted-foreground">{project.components.length} comps · {project.connections.length} wires</div>
+      <div className="inspector-redesign inspector-empty-v2">
+        <span className="inspector-empty-icon"><MousePointer2 size={18} /></span>
+        <div>
+          <h2>Nothing selected</h2>
+          <p>Select a component on the canvas to inspect its ports, properties, and available outcome controls.</p>
+        </div>
+        <div className="inspector-project-context">
+          <Box size={13} />
+          <span><b>{project.name}</b><small>{project.components.length} components · {project.connections.length} wires</small></span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-3 space-y-3 overflow-auto text-xs">
+    <div className="inspector-redesign p-3 space-y-3 overflow-auto text-xs">
       <div className="inspector-hero">
         <ComponentArtwork definition={def} className="inspector-artwork" />
         <div className="min-w-0">

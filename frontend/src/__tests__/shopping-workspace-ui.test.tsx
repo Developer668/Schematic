@@ -32,11 +32,11 @@ describe("parts workspace agent scaffold", () => {
     host = undefined;
   });
 
-  it("shows the public search handoff scaffold and keeps cart sourcing agent-gated", () => {
+  it("shows the live parts search scaffold and keeps canonical cart publication gated", () => {
     const container = renderWorkspace();
-    expect(container.textContent).toContain("Ready for a sourcing request");
-    expect(container.textContent).toContain("Start with an exact part or board");
-    expect(container.textContent).toContain("shopping.search");
+    expect(container.textContent).toContain("Search parts for sale");
+    expect(container.textContent).toContain("Start with a part or the current design");
+    expect(container.textContent).toContain("Bright Data SERP");
     expect(Array.from(container.querySelectorAll("button")).some((button) => /search/i.test(button.textContent ?? ""))).toBe(true);
 
     const input = container.querySelector<HTMLInputElement>("input[aria-label='Search exact parts']");

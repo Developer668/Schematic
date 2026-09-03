@@ -1,0 +1,116 @@
+:root {
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --background: 0 0% 99%;
+  --foreground: 240 6% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 6% 10%;
+  --primary: 222 47% 11%;
+  --primary-foreground: 0 0% 98%;
+  --muted: 240 5% 96%;
+  --muted-foreground: 240 4% 46%;
+  --border: 240 6% 92%;
+  --input: 240 6% 92%;
+  --ring: 222 47% 11%;
+  --accent: var(--schematic-accent);
+  --accent-soft: var(--schematic-accent-soft);
+}
+
+.dark {
+  --background: 240 5% 7%;
+  --foreground: 0 0% 93%;
+  --card: 240 4% 10%;
+  --card-foreground: 0 0% 93%;
+  --primary: 0 0% 93%;
+  --primary-foreground: 240 6% 10%;
+  --muted: 240 4% 15%;
+  --muted-foreground: 240 5% 62%;
+  --border: 240 4% 18%;
+  --input: 240 4% 16%;
+  --ring: 0 0% 93%;
+  --accent: var(--schematic-accent);
+  --accent-soft: var(--schematic-accent-soft);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { min-height: 100%; color-scheme: light; scroll-behavior: smooth; background: #050505; }
+html.dark { color-scheme: dark; }
+body { min-width: 320px; min-height: 100%; margin: 0; overflow: hidden; color: hsl(var(--foreground)); background: hsl(var(--background)); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
+body.landing-body { overflow-x: hidden; overflow-y: auto; background: #050505; }
+#root { min-height: 100vh; }
+button, input, select, textarea { font: inherit; }
+button { padding: 0; border: 0; cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+a { color: inherit; }
+img, svg, canvas { max-width: 100%; }
+.logo-mark { display: block; width: 100%; height: 100%; object-fit: contain; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+.route-loading { min-height: 100vh; display: grid; place-items: center; padding: 24px; color: hsl(var(--foreground)); background: hsl(var(--background)); }
+.route-loading-card { display: flex; max-width: 340px; flex-direction: column; align-items: center; text-align: center; }
+.route-loading-mark { width: 40px; height: 40px; display: grid; place-items: center; margin-bottom: 14px; border: 1px solid hsl(var(--border)); border-radius: 11px; background: hsl(var(--card)); }
+.route-loading-mark .logo-mark { width: 30px; height: 30px; }
+.route-loading-card h1 { margin: 0; font-size: 13px; }
+.route-loading-card p { margin: 5px 0 0; color: hsl(var(--muted-foreground)); font-size: 10px; line-height: 1.55; }
+
+.schematic-loading-state {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 10px;
+  color: hsl(var(--foreground));
+}
+
+.schematic-loading-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 4px);
+  gap: 2px;
+  flex: none;
+}
+
+.schematic-loading-grid > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.schematic-loading-label {
+  color: transparent;
+  background-image: linear-gradient(90deg, hsl(var(--muted-foreground)) 30%, hsl(var(--foreground)) 50%, hsl(var(--muted-foreground)) 70%);
+  background-size: 210% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  font-size: 12px;
+  font-weight: 600;
+  animation: schematic-shimmer-text 1.5s linear infinite;
+}
+
+.schematic-loading-elapsed {
+  color: hsl(var(--muted-foreground));
+  font: 500 10px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.schematic-loading-state.is-compact { gap: 7px; }
+.schematic-loading-state.is-compact .schematic-loading-label { font-size: 9px; }
+.schematic-loading-state.is-compact .schematic-loading-elapsed { font-size: 8px; }
+.schematic-loading-state.is-compact .schematic-loading-grid { grid-template-columns: repeat(3, 3px); gap: 1.5px; }
+.schematic-loading-state.is-compact .schematic-loading-grid > span { width: 3px; height: 3px; }
+
+@keyframes schematic-pixel-on {
+  0%, 100% { opacity: 0.12; }
+  50% { opacity: 1; }
+}
+
+@keyframes schematic-shimmer-text {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

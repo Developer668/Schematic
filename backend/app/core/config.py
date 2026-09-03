@@ -1,4 +1,9 @@
-from pydantic_settings import BaseSettings
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
 
 class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
@@ -6,6 +11,19 @@ class Settings(BaseSettings):
     RENODE_BIN: str = "renode"
     NGSPICE_LIB: str = ""
     WASMTIME_CACHE: str = "./data/wasmtime-cache"
+
+    # Bright Data stays on the API boundary. The browser never receives this
+    # token and can only call Schematic's bounded /api/parts/search route.
+    BRIGHTDATA_API_KEY: str = ""
+    BRIGHTDATA_SERP_ZONE: str = "serp_api1"
+    BRIGHTDATA_SERP_ENDPOINT: str = "https://api.brightdata.com/request"
+    BRIGHTDATA_SERP_COUNTRY: str = "us"
+    BRIGHTDATA_SERP_LANGUAGE: str = "en"
+    BRIGHTDATA_SERP_CURRENCY: str = "USD"
+    BRIGHTDATA_SERP_TIMEOUT_SECONDS: float = 25.0
+    BRIGHTDATA_SERP_CACHE_TTL_SECONDS: int = 180
+    BRIGHTDATA_SERP_MAX_RESULTS: int = 16
+
     # One platform-aware session boundary. Development intentionally uses a
     # stable local identity so the project runs without Docker or a second
     # auth service. Production must set this to cloudflare-access or
@@ -25,8 +43,12 @@ class Settings(BaseSettings):
     CF_ACCESS_TEAM_DOMAIN: str = ""
     CF_ACCESS_AUDIENCE: str = ""
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=_BACKEND_ENV_FILE,
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
 
 settings = Settings()

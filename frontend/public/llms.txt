@@ -1,0 +1,19 @@
+# Schematic
+
+Schematic is a browser workspace for planning connected hardware projects. It keeps component identities, modeled connections, editable source, graph checks, outcome previews, and sourcing tied to one active project.
+
+## Primary pages
+
+- [Home](/)
+- [Studio](/studio)
+- [Parts desk](/parts)
+- [Workspace settings](/settings)
+
+## Core capabilities
+
+- Place real hardware components from the catalog
+- Connect typed hardware interfaces
+- Edit and export project source
+- Run project graph checks
+- Inspect plan-driven outcome previews
+- Review supplier candidates before adding listings to the build cart

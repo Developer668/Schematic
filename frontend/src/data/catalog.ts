@@ -1,5 +1,5 @@
 import type { HardwarePort } from "@schematic/hardware-graph";
-import metadata from "../../public/components-metadata.json";
+import metadata from "virtual:schematic-component-metadata";
 
 export type CatalogCategory =
   | "board"

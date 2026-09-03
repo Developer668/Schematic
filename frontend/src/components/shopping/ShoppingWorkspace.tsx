@@ -5,30 +5,34 @@ import {
   Ban,
   Check,
   CircleAlert,
-  Clock3,
   LoaderCircle,
   PackageCheck,
+  PackageSearch,
   RefreshCw,
   RotateCcw,
   Search,
   ShieldCheck,
   ShoppingCart,
-  Sparkles,
+  Star,
   Trash2,
   Undo2,
   Wifi,
 } from "lucide-react";
 import { getCatalogComponent } from "../../data/catalog.ts";
+import { componentArtworkHref } from "../../data/componentArtwork.ts";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import {
   createShoppingHandoff,
   useShoppingStore,
   type PartOffer,
+  type ShoppingDiscovery,
+  type ShoppingDiscoveryCandidate,
   type ShoppingRequestStatus,
   type ShoppingResult,
   type ShoppingState,
 } from "../../store/useShoppingStore.ts";
-import { createPartsSearchCoordinator } from "../../shopping/partsSearchClient.ts";
+import { createPartsSearchCoordinator, requestPartsSearch } from "../../shopping/partsSearchClient.ts";
+import GooeyInput from "../ui/gooey-input.tsx";
 
 type ShoppingSnapshot = ShoppingState;
 type ShoppingQuote = ReturnType<ShoppingSnapshot["getQuote"]>;
@@ -62,31 +66,41 @@ type DiscoveryCandidate = {
   exactMatch: boolean;
   matchNote?: string;
   provider?: string;
+  retailer?: string;
+  imageUrl?: string;
+  shipping?: string;
+  rating?: number;
+  reviewCount?: number;
+  rank?: number;
   offers: DiscoveryOffer[];
 };
 
 type LookupRequest = { query: string; quantity: number };
+type LookupMode = "single" | "design";
+
+const MAX_DESIGN_SEARCHES = 12;
+const RESULTS_PER_DESIGN_PART = 3;
 
 const phaseMeta: Record<
   PartsUiPhase,
   { label: string; title: string; copy: string; tone: string }
 > = {
   idle: {
-    label: "Ready to source",
-    title: "Ready for a sourcing request",
-    copy: "Start with an exact part or board. An authenticated agent can review the catalog ID and retailer offers.",
+    label: "Ready to search",
+    title: "Search the live parts market",
+    copy: "Use an exact manufacturer part number, board name, sensor, module, tool, or build component.",
     tone: "idle",
   },
   searching: {
-    label: "Checking sources",
-    title: "Checking public sources",
-    copy: "The provider lookup is running. Cancel before anything is published to the cart.",
+    label: "Searching live listings",
+    title: "Searching Google Shopping",
+    copy: "Bright Data is collecting current indexed shopping results. You can cancel without changing the cart.",
     tone: "active",
   },
   candidates: {
-    label: "Needs review",
-    title: "Candidates need review",
-    copy: "Public records are ready for review. An authenticated agent must check each record and publish a canonical ID claim before cart actions.",
+    label: "Live results",
+    title: "Shopping results ready",
+    copy: "Compare the reported seller, price, rating, shipping, and product link. Confirm the exact model before purchasing.",
     tone: "active",
   },
   verification: {
@@ -114,9 +128,9 @@ const phaseMeta: Record<
     tone: "ready",
   },
   failed: {
-    label: "Could not complete",
-    title: "Couldn’t complete lookup",
-    copy: "No agent-published listing was received. Check the connection and retry the request.",
+    label: "Search unavailable",
+    title: "Couldn’t complete the live search",
+    copy: "Check the provider connection, use a more exact part number, or retry the request.",
     tone: "error",
   },
   cancelled: {
@@ -218,6 +232,13 @@ function normalizeDiscoveryCandidates(value: unknown): DiscoveryCandidate[] {
       "mpn",
       "manufacturerPartNumber",
     ]);
+    const retailer = firstString(item, ["retailer", "shop", "seller"]);
+    const provider = firstString(item, ["provider", "source"]);
+    const imageUrl = safeRetailerUrl(item.imageUrl ?? item.image_url ?? item.thumbnail);
+    const shipping = firstString(item, ["shipping", "delivery"]);
+    const rating = safeDiscoveryPrice(item.rating);
+    const reviewCount = safeDiscoveryPrice(item.reviewCount ?? item.reviews_cnt ?? item.reviews);
+    const rank = safeDiscoveryPrice(item.rank);
     const rawOffers = Array.isArray(item.offers)
       ? item.offers
       : item.verificationUrl
@@ -225,8 +246,7 @@ function normalizeDiscoveryCandidates(value: unknown): DiscoveryCandidate[] {
             {
               ...item,
               url: item.verificationUrl,
-              retailer:
-                firstString(item, ["source", "provider"]) || "Public source",
+              retailer: retailer || provider || "Google Shopping",
             },
           ]
         : item.url
@@ -280,9 +300,13 @@ function normalizeDiscoveryCandidates(value: unknown): DiscoveryCandidate[] {
         ...(firstString(item, ["matchNote"])
           ? { matchNote: firstString(item, ["matchNote"]) }
           : {}),
-        ...(firstString(item, ["provider", "source"])
-          ? { provider: firstString(item, ["provider", "source"]) }
-          : {}),
+        ...(provider ? { provider } : {}),
+        ...(retailer ? { retailer } : {}),
+        ...(imageUrl ? { imageUrl } : {}),
+        ...(shipping ? { shipping } : {}),
+        ...(rating !== null && rating <= 5 ? { rating } : {}),
+        ...(reviewCount !== null ? { reviewCount: Math.round(reviewCount) } : {}),
+        ...(rank !== null ? { rank: Math.round(rank) } : {}),
         offers,
       },
     ];
@@ -322,14 +346,14 @@ function SourcingProgress({
   projectPartCount: number;
 }) {
   const active = progressLevel(phase);
-  const steps = ["Request", "Compare", "Publish"];
+  const steps = ["Search", "Compare", "Review"];
   const title =
     phase === "verified" || phase === "partial"
       ? `${resultCount} agent-published design part${resultCount === 1 ? "" : "s"} ready to compare`
       : phase === "candidates"
-        ? `${candidateCount} public candidate${candidateCount === 1 ? "" : "s"} awaiting agent review`
+        ? `${candidateCount} live shopping result${candidateCount === 1 ? "" : "s"} ready to compare`
         : phase === "searching"
-          ? "Checking configured public sources"
+          ? "Searching indexed shopping listings"
           : `${projectPartCount} design part${projectPartCount === 1 ? "" : "s"} queued for supplier lookup`;
   return (
     <div
@@ -341,7 +365,7 @@ function SourcingProgress({
         {phase === "searching" ? (
           <LoaderCircle size={15} className="shopping-spin" />
         ) : (
-          <Sparkles size={15} />
+          <PackageSearch size={15} />
         )}
       </div>
       <div className="min-w-0 flex-1">
@@ -394,10 +418,9 @@ function LookupStatus({
   // Published listings already carry their concise status in the result zone;
   // keep this panel for transitions and actionable states so status copy does
   // not repeat directly above the results.
-  if (phase === "idle" || phase === "verified" || (phase === "partial" && !message)) return null;
+  if (phase === "idle" || phase === "candidates" || phase === "verified" || (phase === "partial" && !message)) return null;
   const meta = phaseMeta[phase];
   const retryable =
-    phase === "candidates" ||
     phase === "rate-limited" ||
     phase === "failed" ||
     phase === "cancelled";
@@ -422,7 +445,7 @@ function LookupStatus({
       <div className="min-w-0 flex-1">
         <div className="kicker">Lookup state</div>
         <h3>{meta.title}</h3>
-        {message && <p>{message}</p>}
+        <p>{message || meta.copy}</p>
       </div>
       <div className="shopping-state-actions">
         {phase === "searching" && (
@@ -449,7 +472,7 @@ function LookupStatus({
             onClick={onStageDesign}
             className="shopping-secondary-action"
           >
-            <PackageCheck size={12} /> Source current design
+            <PackageCheck size={12} /> Search current design
           </button>
         )}
       </div>
@@ -481,10 +504,10 @@ function RetailerLink({ retailer, url }: { retailer: string; url?: string }) {
       target="_blank"
       rel="noreferrer"
       className="shopping-retailer-link"
-      aria-label={`Open ${retailer} listing`}
-      title="Open retailer listing; confirm live stock, shipping, and final price"
+      aria-label={`View ${retailer} shopping result`}
+      title="Open the shopping result; confirm the exact model, seller, stock, shipping, and final price"
     >
-      <span>Open retailer</span>
+      <span>View result</span>
       <ArrowUpRight size={11} />
     </a>
   );
@@ -570,6 +593,8 @@ function ResultCard({
     Boolean(getCatalogComponent(alternative.catalogId)),
   );
   const lowestOfferId = cheapestOfferId(result);
+  const catalogEntry = getCatalogComponent(result.id);
+  const artworkHref = catalogEntry ? componentArtworkHref(catalogEntry) : null;
   return (
     <article
       className="shopping-verified-card"
@@ -577,8 +602,16 @@ function ResultCard({
       data-testid={`verified-result-${result.id}`}
     >
       <div className="shopping-result-head">
-        <div className="shopping-result-mark">
-          <PackageCheck size={15} strokeWidth={1.7} />
+        <div className={`shopping-result-mark ${catalogEntry ? "has-artwork" : ""}`}>
+          {artworkHref ? (
+            <img
+              src={artworkHref}
+              alt=""
+              loading="lazy"
+            />
+          ) : (
+            <PackageCheck size={15} strokeWidth={1.7} />
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -723,12 +756,21 @@ function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
   return (
     <article
       className="shopping-discovery-card"
-      aria-label={`Public discovery candidate ${candidate.title}`}
+      aria-label={`Live shopping result ${candidate.title}`}
       data-testid={`discovery-candidate-${candidate.id}`}
     >
       <div className="shopping-discovery-head">
-        <div className="shopping-discovery-mark">
-          <CircleAlert size={14} />
+        <div className={`shopping-discovery-mark ${candidate.imageUrl ? "has-image" : ""}`}>
+          {candidate.imageUrl ? (
+            <img
+              src={candidate.imageUrl}
+              alt=""
+              loading="lazy"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <PackageSearch size={15} />
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -736,38 +778,46 @@ function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
               {candidate.title}
             </h3>
             <span className="shopping-unverified-badge">
-              Unverified candidate
+              Live shopping result
             </span>
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
-            <span>{candidate.manufacturer ?? "Public provider record"}</span>
-            <span aria-hidden="true">·</span>
-            <code className="font-mono">
-              {candidate.partNumber || "part number unavailable"}
-            </code>
+            <span>{candidate.retailer ?? candidate.manufacturer ?? "Google Shopping"}</span>
+            {candidate.partNumber && (
+              <>
+                <span aria-hidden="true">·</span>
+                <code className="font-mono">{candidate.partNumber}</code>
+              </>
+            )}
+            {candidate.rating !== undefined && (
+              <span className="shopping-result-rating" title={`${candidate.rating.toFixed(1)} out of 5${candidate.reviewCount ? ` from ${candidate.reviewCount.toLocaleString()} reviews` : ""}`}>
+                <Star size={10} /> {candidate.rating.toFixed(1)}
+                {candidate.reviewCount ? <small>({candidate.reviewCount.toLocaleString()})</small> : null}
+              </span>
+            )}
           </div>
         </div>
-        <span className="shopping-no-cart-badge">Cart locked</span>
+        <span className="shopping-no-cart-badge">Review first</span>
       </div>
       <div className="shopping-discovery-identity">
-        <span className="kicker">Reported catalog ID</span>
-        <code>{candidate.catalogId || "No canonical catalog ID supplied"}</code>
+        <span className="kicker">Identity to confirm</span>
+        <code>{candidate.partNumber || candidate.catalogId || candidate.title}</code>
       </div>
       {candidate.matchNote && (
         <p className="shopping-discovery-note">{candidate.matchNote}</p>
       )}
+      {candidate.shipping && (
+        <p className="shopping-discovery-shipping">{candidate.shipping}</p>
+      )}
       <p className="shopping-discovery-warning">
-        <ShieldCheck size={12} /> Provider data is public discovery only. An
-        authenticated WebMCP agent must check this candidate and publish a
-        record claiming a canonical catalog ID plus recent HTTPS offers through
-        <code>shopping.search</code> before any cart action.
+        <ShieldCheck size={12} /> This result came from a live web search, not a verified Schematic catalog match. Confirm the model number, seller, stock, shipping, and checkout total before buying.
       </p>
       {candidate.offers.length > 0 ? (
         <div className="shopping-discovery-offers">
           <div className="shopping-offers-head">
-            <span className="kicker">Reported offers</span>
+            <span className="kicker">Reported offer</span>
             <span className="font-mono text-[9px] text-muted-foreground">
-              No cart actions
+              Open to verify
             </span>
           </div>
           {candidate.offers.slice(0, 3).map((offer) => (
@@ -776,8 +826,7 @@ function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
         </div>
       ) : (
         <p className="shopping-discovery-empty">
-          No retailer offer was supplied. Keep this candidate out of the cart
-          until an agent publishes a listing with a claimed canonical catalog ID.
+          The search result did not include a retailer link or price. Try the exact manufacturer part number for a more specific result.
         </p>
       )}
     </article>
@@ -785,22 +834,22 @@ function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
 }
 
 function DiscoveryZone({ candidates }: { candidates: DiscoveryCandidate[] }) {
+  const liveShopping = candidates.some((candidate) => candidate.provider === "brightdata-serp");
   return (
     <section
       className="shopping-discovery-zone"
-      aria-label="Public discovery candidates"
+      aria-label="Live shopping results"
       data-testid="public-discovery"
     >
       <div className="shopping-zone-head">
         <div>
-          <div className="kicker">Public discovery / unverified</div>
+          <div className="kicker">{liveShopping ? "Live shopping results" : "Public discovery"}</div>
           <p className="mt-1 text-[10px] text-muted-foreground">
-            {candidates.length} provider candidate
-            {candidates.length === 1 ? "" : "s"} · review only
+            {candidates.length} result{candidates.length === 1 ? "" : "s"} · prices and availability may change
           </p>
         </div>
         <span className="shopping-zone-lock">
-          <Ban size={11} /> No cart access
+          <ShieldCheck size={11} /> Verify before purchase
         </span>
       </div>
       <div className="shopping-discovery-grid">
@@ -948,26 +997,16 @@ function CartSummary({
 }
 
 function AgentEmptyState({
-  query,
   requiredIds,
   phase,
-  onStageQuery,
-  onStageDesign,
-  onRetry,
 }: {
-  query: string;
   requiredIds: string[];
   phase: PartsUiPhase;
-  onStageQuery: () => void;
-  onStageDesign: () => void;
-  onRetry: () => void;
 }) {
   const requiredParts = requiredIds
     .map((catalogId) => getCatalogComponent(catalogId))
     .filter(Boolean);
   const meta = phaseMeta[phase];
-  const canRetry =
-    phase === "failed" || phase === "rate-limited" || phase === "cancelled";
   return (
     <div className={`shopping-empty-state is-${phase}`} aria-live="polite">
       <div className="flex items-start gap-3">
@@ -982,14 +1021,14 @@ function AgentEmptyState({
         </div>
         <div className="min-w-0 flex-1">
           <div className="kicker">
-            {phase === "idle" ? "Ready when you are" : "Parts lookup"}
+            {phase === "idle" ? "No sourced parts yet" : "Parts lookup"}
           </div>
           <h2 className="mt-1 text-sm font-semibold">
-            {phase === "idle" ? "Ready for a sourcing request" : meta.title}
+            {phase === "idle" ? "Start with a part or the current design" : meta.title}
           </h2>
           <p className="mt-1 max-w-[62ch] text-[10px] leading-relaxed text-muted-foreground">
             {phase === "idle"
-              ? "Start with an exact part or board. A connected agent can review the catalog ID and publish offers for review before they enter the cart."
+              ? "Enter an exact part above or send the active design. Nothing enters the cart until a reviewed listing is selected."
               : meta.copy}
           </p>
         </div>
@@ -999,99 +1038,33 @@ function AgentEmptyState({
           {meta.label}
         </span>
       </div>
-      <div className="shopping-empty-actions">
-        <button
-          type="button"
-          onClick={onStageQuery}
-          disabled={!query.trim() || phase === "searching"}
-          className="shopping-primary-action"
-        >
-          <Search size={12} /> Request this part
-        </button>
-        <button
-          type="button"
-          onClick={onStageDesign}
-          disabled={!requiredIds.length || phase === "searching"}
-          className="shopping-secondary-action"
-        >
-          <PackageCheck size={12} /> Source current design
-        </button>
-        {canRetry && (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="shopping-secondary-action"
-          >
-            <RefreshCw size={12} /> Retry lookup
-          </button>
-        )}
-        <span className="shopping-empty-note">
-          <Clock3 size={12} /> Supplier results stay reviewable until added to
-          the cart.
-        </span>
-      </div>
-      <div className="shopping-empty-lower">
-        <div className="shopping-empty-flow">
-          <div className="shopping-empty-flow-item">
-            <span>01</span>
-            <div>
-              <p>Claim a catalog ID</p>
-              <small>Associate the request with a canonical part identity.</small>
-            </div>
+      {requiredParts.length > 0 && (
+        <div className="shopping-required-parts">
+          <div className="shopping-required-heading">
+            <span className="kicker">Parts in this design</span>
+            <b>{requiredParts.length}</b>
           </div>
-          <div className="shopping-empty-flow-item">
-            <span>02</span>
-            <div>
-              <p>Compare offers</p>
-              <small>
-                Keep public discovery separate until an agent reviews it.
-              </small>
-            </div>
+          <div className="shopping-required-list">
+            {requiredParts.slice(0, 8).map((part, index) => (
+              <div key={`${part?.id}-${index}`} className="shopping-required-part">
+                <span className="shopping-required-index">{String(index + 1).padStart(2, "0")}</span>
+                <span className="shopping-required-thumb" aria-hidden="true">
+                  {part && componentArtworkHref(part) ? (
+                    <img src={componentArtworkHref(part) ?? undefined} alt="" loading="lazy" />
+                  ) : (
+                    <PackageSearch size={12} />
+                  )}
+                </span>
+                <span className="truncate">{part?.title ?? part?.id}</span>
+                <code>{part?.id}</code>
+              </div>
+            ))}
           </div>
-          <div className="shopping-empty-flow-item">
-            <span>03</span>
-            <div>
-              <p>Build the cart</p>
-              <small>
-                Choose quantities after the listing claims a canonical catalog ID.
-              </small>
-            </div>
-          </div>
+          {requiredParts.length > 8 && (
+            <span className="shopping-required-more">+ {requiredParts.length - 8} more components</span>
+          )}
         </div>
-        {requiredParts.length > 0 && (
-          <div className="shopping-required-parts">
-            <div className="kicker">Parts in this design</div>
-            <div className="shopping-required-list">
-              {requiredParts.slice(0, 8).map((part, index) => (
-                <div
-                  key={`${part?.id}-${index}`}
-                  className="shopping-required-part"
-                >
-                  <span className="shopping-required-index">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="truncate">{part?.title ?? part?.id}</span>
-                  <code>{part?.id}</code>
-                </div>
-              ))}
-            </div>
-            {requiredParts.length > 8 && (
-              <span className="shopping-required-more">
-                + {requiredParts.length - 8} more components
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-[10px]">
-        <span className="kicker">Agent request</span>
-        <code className="min-w-0 truncate font-mono text-foreground">
-          {query || "Enter a part or board above"}
-        </code>
-        <span className="sr-only">
-          Return agent-published listings through shopping.search.
-        </span>
-      </div>
+      )}
     </div>
   );
 }
@@ -1110,6 +1083,7 @@ export default function ShoppingWorkspace({
   const [message, setMessage] = useState("");
   const [quantityInput, setQuantityInput] = useState("1");
   const [lastRequest, setLastRequest] = useState<LookupRequest | null>(null);
+  const [lastLookupMode, setLastLookupMode] = useState<LookupMode>("single");
   const requestSequence = useRef(0);
   const activeRequest = useRef<{
     sequence: number;
@@ -1225,6 +1199,7 @@ export default function ShoppingWorkspace({
       requiredIds,
     );
     setLastRequest({ query: trimmed, quantity });
+    setLastLookupMode("single");
     setDiscoveryCandidates([]);
     setMessage("");
     setPhase("searching");
@@ -1246,7 +1221,7 @@ export default function ShoppingWorkspace({
       if (outcome.status === "cancelled") {
         setPhase("cancelled");
         setMessage(
-          "Lookup cancelled before publication; nothing was added to the cart.",
+          "Search cancelled; nothing was added to the cart.",
         );
         return;
       }
@@ -1270,8 +1245,9 @@ export default function ShoppingWorkspace({
           outcome.status === "rate-limited" ? "rate-limited" : "candidates",
         );
         setMessage(
-          outcome.error ??
-            "Public candidates are ready for review. An authenticated agent can check them and publish records with claimed canonical IDs.",
+          outcome.discovery?.message ??
+            outcome.error ??
+            "Live shopping results are ready. Confirm the exact part identity, seller, stock, shipping, and checkout total before purchasing.",
         );
         return;
       }
@@ -1288,8 +1264,9 @@ export default function ShoppingWorkspace({
         shopping.setRequestStatus("staged");
         setPhase("verification");
         setMessage(
-          outcome.error ??
-            "The provider handoff is ready. Return agent-published listings through shopping.search.",
+          outcome.discovery?.message ??
+            outcome.error ??
+            "No live retailer result was returned. Try an exact manufacturer part number or a more specific board name.",
         );
         return;
       }
@@ -1297,7 +1274,7 @@ export default function ShoppingWorkspace({
       setPhase("failed");
       setMessage(
         outcome.error ??
-            "No agent-published listing was received. Retry the request.",
+          "No live shopping result was received. Retry with a more specific component name or manufacturer part number.",
       );
     } catch (error) {
       if (
@@ -1337,20 +1314,140 @@ export default function ShoppingWorkspace({
     submitLookup();
   };
 
-  const stageDesign = () => {
-    if (!requiredIds.length) {
-      setMessage(
-        "Add a component to the design before sourcing the current design.",
-      );
+  const stageDesign = async () => {
+    const uniqueTargets = [...new Set(requiredIds)]
+      .map((catalogId) => {
+        const definition = getCatalogComponent(catalogId);
+        return definition ? { catalogId, title: definition.title } : null;
+      })
+      .filter((target): target is { catalogId: string; title: string } => Boolean(target));
+
+    if (!uniqueTargets.length) {
+      setMessage("Add a component to the design before searching its parts.");
       return;
     }
+
+    const targets = uniqueTargets.slice(0, MAX_DESIGN_SEARCHES);
     const quantity = quantityValue(quantityInput) ?? 1;
-    const designQuery = `${project.name} required parts`;
+    const summaryQuery = `${project.name} · ${targets.length} design component${targets.length === 1 ? "" : "s"}`;
+    const sequence = requestSequence.current + 1;
+    requestSequence.current = sequence;
+    activeRequest.current?.controller.abort();
+    partsSearch.cancel();
+    const controller = new AbortController();
+    activeRequest.current = { sequence, controller };
+    const requestHandoff = createShoppingHandoff(summaryQuery, quantity, targets.map((target) => target.catalogId));
+
+    setLastLookupMode("design");
+    setLastRequest({ query: summaryQuery, quantity });
     setQuantityInput(String(quantity));
-    void performLookup({ query: designQuery, quantity });
+    setDiscoveryCandidates([]);
+    setMessage(`Searching ${targets.length} unique design component${targets.length === 1 ? "" : "s"}…`);
+    setPhase("searching");
+    shopping.setQuery(summaryQuery);
+    shopping.setHandoff(requestHandoff);
+    shopping.setRequestStatus("searching");
+
+    const candidateMap = new Map<string, ShoppingDiscoveryCandidate>();
+    const attempts: ShoppingDiscovery["attempts"] = [];
+    const sourceOrder = new Set<string>();
+    let cacheHit = true;
+    let staleCache = false;
+    let rateLimited = false;
+    let completed = 0;
+    let cursor = 0;
+
+    const worker = async () => {
+      while (cursor < targets.length && !controller.signal.aborted) {
+        const index = cursor;
+        cursor += 1;
+        const target = targets[index];
+        const lookupQuery = `${target.title} ${target.catalogId}`.slice(0, 240);
+        const outcome = await requestPartsSearch(
+          {
+            requestId: `${requestHandoff.requestId}-${String(index + 1).padStart(2, "0")}`,
+            query: lookupQuery,
+            quantity,
+            requiredCatalogIds: [target.catalogId],
+            requestedAt: requestHandoff.requestedAt,
+          },
+          {},
+          controller.signal,
+        );
+        if (controller.signal.aborted || activeRequest.current?.sequence !== sequence) return;
+
+        completed += 1;
+        setMessage(`Searching design components · ${completed}/${targets.length}`);
+        const discovery = outcome.discovery;
+        if (!discovery) continue;
+        cacheHit = cacheHit && discovery.cacheHit;
+        staleCache = staleCache || discovery.staleCache;
+        rateLimited = rateLimited || discovery.rateLimited || outcome.status === "rate-limited";
+        discovery.sourceOrder.forEach((source) => sourceOrder.add(source));
+        attempts.push(...discovery.attempts);
+        for (const candidate of discovery.candidates.slice(0, RESULTS_PER_DESIGN_PART)) {
+          const key = `${target.catalogId}|${candidate.id}`;
+          if (candidateMap.has(key)) continue;
+          candidateMap.set(key, {
+            ...candidate,
+            id: `${candidate.id}:${target.catalogId}`,
+            catalogId: target.catalogId,
+            matchNote: `Requested for ${target.title}. Confirm that the retailer listing is the same component and package before purchasing.`,
+          });
+        }
+      }
+    };
+
+    try {
+      const workerCount = Math.min(2, targets.length);
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+      if (controller.signal.aborted || activeRequest.current?.sequence !== sequence) return;
+
+      const candidates = [...candidateMap.values()].slice(0, 24);
+      const omitted = uniqueTargets.length - targets.length;
+      const resultMessage = candidates.length
+        ? `Found ${candidates.length} live result${candidates.length === 1 ? "" : "s"} across ${completed} design component search${completed === 1 ? "" : "es"}.${omitted > 0 ? ` The first ${targets.length} of ${uniqueTargets.length} unique components were searched to limit provider cost.` : ""}`
+        : rateLimited
+          ? "The live provider rate limited the design search. Wait briefly and retry."
+          : `No indexed shopping listings matched the ${completed} design component search${completed === 1 ? "" : "es"}. Try an exact part number manually.`;
+      const discovery: ShoppingDiscovery = {
+        candidates,
+        sourceOrder: [...sourceOrder],
+        attempts: attempts.slice(0, 24),
+        cacheHit: completed > 0 && cacheHit,
+        staleCache,
+        rateLimited,
+        message: resultMessage,
+      };
+      shopping.setDiscovery(discovery);
+      const normalized = normalizeDiscoveryCandidates(discovery);
+      setDiscoveryCandidates(normalized);
+      if (normalized.length > 0) {
+        shopping.setRequestStatus("staged");
+        setPhase("candidates");
+      } else if (rateLimited) {
+        shopping.setRequestStatus("rate-limited");
+        setPhase("rate-limited");
+      } else {
+        shopping.setRequestStatus("failed");
+        setPhase("failed");
+      }
+      setMessage(resultMessage);
+    } catch (error) {
+      if (controller.signal.aborted || activeRequest.current?.sequence !== sequence) return;
+      shopping.setRequestStatus("failed");
+      setPhase("failed");
+      setMessage(error instanceof Error && error.message ? `Couldn’t search the design: ${error.message}` : "Couldn’t search the design. Check the provider connection and retry.");
+    } finally {
+      if (activeRequest.current?.sequence === sequence) activeRequest.current = null;
+    }
   };
 
   const retryLookup = () => {
+    if (lastLookupMode === "design") {
+      void stageDesign();
+      return;
+    }
     const request =
       lastRequest ??
       (quantityValue(quantityInput) === null || !query.trim()
@@ -1373,7 +1470,7 @@ export default function ShoppingWorkspace({
     setDiscoveryCandidates([]);
     setPhase("cancelled");
     setMessage(
-      "Lookup cancelled before publication; nothing was added to the cart.",
+      "Search cancelled; nothing was added to the cart.",
     );
   };
 
@@ -1384,22 +1481,17 @@ export default function ShoppingWorkspace({
         (effectivePhase === "failed" ? (shopping.publicationError ?? "") : "");
 
   return (
-    <div className="shopping-workspace flex h-full min-h-0 flex-col bg-card text-xs">
+    <div className={`shopping-workspace ${fullPage ? "is-full-page" : "is-compact-panel"} flex h-full min-h-0 flex-col bg-card text-xs`}>
       <div className="shopping-header shrink-0 border-b border-border bg-muted/10 px-3 py-3 sm:px-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="kicker">Sourcing workspace</div>
+            <div className="kicker">Live parts market</div>
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <h2 className="text-sm font-semibold tracking-tight">
-                Build-ready parts
-              </h2>
-              <span className="shopping-agent-chip">
-                <span className="shopping-agent-dot" /> WebMCP handoff
-              </span>
+              <h2 className="text-sm font-semibold tracking-tight">Search parts for sale</h2>
+              <span className="shopping-agent-chip">Bright Data SERP</span>
             </div>
             <p className="mt-1 max-w-[70ch] text-[10px] leading-relaxed text-muted-foreground">
-              Search exact parts or source the current design. An authenticated
-              agent reviews listings before they can enter the build cart.
+              Search current indexed shopping listings by exact part number, board, sensor, module, tool, or manufacturer.
             </p>
           </div>
           <div className="shopping-header-stats hidden shrink-0 sm:flex">
@@ -1419,7 +1511,7 @@ export default function ShoppingWorkspace({
               <span className="shopping-stat-value">
                 {discoveryCandidates.length}
               </span>
-              <span className="shopping-stat-label">public</span>
+              <span className="shopping-stat-label">live results</span>
             </div>
             <div>
               <span className="shopping-stat-value">
@@ -1436,39 +1528,33 @@ export default function ShoppingWorkspace({
         >
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <label htmlFor="shopping-agent-request" className="kicker">
-              Find a part
+              Part or board
             </label>
             <span className="text-[10px] text-muted-foreground">
-              Explicit request only · Enter to submit
+              Enter to search
             </span>
           </div>
           <div className="shopping-search-row">
-            <div className="shopping-query-field relative min-w-0 flex-1">
-              <Search
-                size={13}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <input
+            <div className="shopping-query-field min-w-0 flex-1">
+              <GooeyInput
                 id="shopping-agent-request"
-                type="search"
                 value={query}
+                onValueChange={shopping.setQuery}
                 maxLength={240}
-                onChange={(event) => shopping.setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                     event.preventDefault();
                     submitLookup();
                   }
                 }}
-                placeholder="Exact part, board, or manufacturer"
+                placeholder="Part number, board, sensor, module, or tool"
                 aria-label="Search exact parts"
                 aria-keyshortcuts="Enter"
                 aria-describedby="shopping-search-help"
-                className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-16 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-foreground/30 focus:ring-2 focus:ring-ring/10"
+                shortcut="Enter"
+                tone={fullPage ? "page" : "panel"}
+                rootClassName="shopping-gooey-search"
               />
-              <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
-                Enter
-              </kbd>
             </div>
             <label className="shopping-quantity-field">
               <span>Qty</span>
@@ -1489,30 +1575,32 @@ export default function ShoppingWorkspace({
               disabled={!query.trim() || effectivePhase === "searching"}
               className="shopping-request-button"
             >
-              <Search size={12} /> Search parts
+              <Search size={12} /> Search
             </button>
           </div>
           <div className="shopping-form-foot">
             <span id="shopping-search-help" className="shopping-form-note">
-              Quantity is attached to this handoff; no lookup runs while you
-              type.
+              Nothing runs while you type. Quantity stays attached to this request.
             </span>
             <button
               type="button"
               onClick={stageDesign}
               disabled={!requiredIds.length || effectivePhase === "searching"}
               className="shopping-design-button"
+              title={requiredIds.length ? `Runs up to ${Math.min(new Set(requiredIds).size, MAX_DESIGN_SEARCHES)} cached Bright Data shopping searches for the unique components in this project` : "Add components before searching the design"}
             >
-              <PackageCheck size={12} /> Source current design
+              <PackageCheck size={12} /> Search current design
             </button>
           </div>
         </form>
-        <SourcingProgress
-          phase={effectivePhase}
-          resultCount={shopping.results.length}
-          candidateCount={discoveryCandidates.length}
-          projectPartCount={project.components.length}
-        />
+        {effectivePhase === "searching" && (
+          <SourcingProgress
+            phase={effectivePhase}
+            resultCount={shopping.results.length}
+            candidateCount={discoveryCandidates.length}
+            projectPartCount={project.components.length}
+          />
+        )}
         <LookupStatus
           phase={effectivePhase}
           message={displayMessage}
@@ -1527,24 +1615,13 @@ export default function ShoppingWorkspace({
             <span>{displayMessage}</span>
           </div>
         )}
-        <div className="shopping-trust-note mt-2 flex items-start gap-2 rounded-md border border-border/70 bg-card/70 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground">
-          <ShieldCheck
-            size={13}
-            className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-          />
-          <span>
-            <strong className="font-semibold text-foreground">
-              Safe by default.
-            </strong>{" "}
-            Public candidates stay review-only. Agent-published records include
-            a claimed catalog identity, source, timestamp, secure retailer URL,
-            and pricing; confirm the part identity, stock, shipping, and final
-            checkout details with the retailer.
-          </span>
-        </div>
+        <details className="shopping-trust-note">
+          <summary><ShieldCheck size={13} /> How sourcing stays reviewable</summary>
+          <p>Bright Data returns live indexed shopping results. Prices, seller identity, stock, shipping, and model compatibility can change, so open the result and confirm the checkout details before purchasing. Canonical project-cart records still require a reviewed catalog identity.</p>
+        </details>
       </div>
       <div
-        className={`${fullPage ? "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-1" : "flex min-h-0 flex-1 flex-col"}`}
+        className={`${fullPage ? "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_310px] lg:grid-rows-1" : "flex min-h-0 flex-1 flex-col"}`}
       >
         <section
           className="shopping-results-scroll min-h-0 overflow-y-auto px-3 py-3 sm:px-4"
@@ -1554,16 +1631,9 @@ export default function ShoppingWorkspace({
           {discoveryCandidates.length > 0 && (
             <DiscoveryZone candidates={discoveryCandidates} />
           )}
-          {shopping.results.length === 0 ? (
-            <AgentEmptyState
-              query={query}
-              requiredIds={requiredIds}
-              phase={effectivePhase}
-              onStageQuery={submitLookup}
-              onStageDesign={stageDesign}
-              onRetry={retryLookup}
-            />
-          ) : (
+          {shopping.results.length === 0 && discoveryCandidates.length === 0 && effectivePhase === "idle" ? (
+            <AgentEmptyState requiredIds={requiredIds} phase={effectivePhase} />
+          ) : shopping.results.length > 0 ? (
             <section
               className="shopping-verified-zone"
               aria-label="Agent-published listings"
@@ -1620,7 +1690,7 @@ export default function ShoppingWorkspace({
                 })}
               </div>
             </section>
-          )}
+          ) : null}
         </section>
         {fullPage && (
           <aside className="min-h-0 max-h-[min(38vh,320px)] overflow-y-auto border-t border-border bg-muted/10 lg:max-h-none lg:border-l lg:border-t-0">

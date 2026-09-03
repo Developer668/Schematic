@@ -1,425 +1,319 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { Link } from "react-router-dom";
 import {
+  ArrowDown,
+  ArrowRight,
   ArrowUpRight,
-  Boxes,
+  Braces,
   Cable,
-  Code2,
-  Cpu,
-  Layers,
-  ShieldCheck,
-  Sparkles,
-  Terminal,
-  Zap,
-  Search,
-  GitBranch,
-  Activity,
-  ShoppingCart,
-  ChevronRight,
-  Play,
+  FileCheck2,
+  Menu,
+  PackageSearch,
+  X,
 } from "lucide-react";
 import LogoMark from "../components/LogoMark.tsx";
-import { WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
+import LoadingState from "../components/ui/loading-state.tsx";
+import MotionFooter from "../components/ui/motion-footer.tsx";
+import "../landing-v2.css";
 
-const bento = [
+const HardwareModelStage = lazy(() => import("../components/ui/hardware-model-stage.tsx"));
+const OptimizedBlackHole = lazy(() => import("../components/ui/optimized-black-hole.tsx"));
+
+const decisions = [
   {
-    span: "lg:col-span-7 lg:row-span-2",
-    icon: Boxes,
-    kicker: "CATALOG • 500+ DEFINITIONS",
-    title: "A catalog that shows preview coverage",
-    body: "Boards, sensors, displays, power and passives share typed identities. Each part exposes its port contract and exact preview coverage, so unmapped parts are never presented as if they produced an outcome.",
-    accent: "from-amber-500/10 via-transparent to-transparent",
-    stat: "500+",
-    statLabel: "definitions",
+    number: "01",
+    title: "Choose",
+    copy: "Start with the exact controller, sensor, display, radio, or power part that belongs in the build.",
+    icon: PackageSearch,
   },
   {
-    span: "lg:col-span-5",
+    number: "02",
+    title: "Connect",
+    copy: "Wire power and data interfaces without losing the reason each connection exists.",
     icon: Cable,
-    kicker: "TYPED GRAPH",
-    title: "Wires that know their domain",
-    body: "Explicit power, I²C, SPI, UART, PWM, and ADC ports support on-demand static typed graph-rule checks for short-like conflicts, missing pull-ups, and ground connectivity. This is validation, not analog circuit simulation.",
-    accent: "from-amber-500/10 via-transparent to-transparent",
   },
   {
-    span: "lg:col-span-5",
-    icon: Code2,
-    kicker: "FIRMWARE",
-    title: "Code lives next to copper",
-    body: "Monaco and per-board editable source documents keep agent and human work in the same project, ready for an external SDK or hardware toolchain.",
-    accent: "from-amber-500/10 via-transparent to-transparent",
+    number: "03",
+    title: "Review",
+    copy: "Keep source, graph checks, expected outcomes, and purchasing decisions attached to one project.",
+    icon: FileCheck2,
   },
-  {
-    span: "lg:col-span-5",
-    icon: Terminal,
-    kicker: `WEBMCP • ${WEBMCP_TOOL_COUNT} TOOLS`,
-    title: "Agent-native, not bolted on",
-    body: "project.get_graph → component.add → connection.connect → behavior.plan.write → behavior.preview — the same validated application path as the UI.",
-    accent: "from-amber-500/10 via-transparent to-transparent",
-  },
-  {
-    span: "lg:col-span-7",
-    icon: ShoppingCart,
-    kicker: "SHOPPING DESK",
-    title: "From graph to cart without copy-paste",
-    body: "Agent-supplied offers, retailer links, alternatives, and budget quotes stay in the same room alongside the graph — with unavailable prices clearly marked until a provider supplies them.",
-    accent: "from-amber-500/10 via-transparent to-transparent",
-  },
-];
+] as const;
 
-const workflow = [
-  { n: "01", title: "Search & place", desc: "500+ catalog definitions and domain filters. Click or drag — every drop is a typed node with visible support coverage.", icon: Search },
-  { n: "02", title: "Wire & validate", desc: "Side pins sit 6px from the artwork edge. Run on-demand static typed graph checks for short-like conflicts, TX→TX, and I²C collisions before export.", icon: GitBranch },
-  { n: "03", title: "Plan & preview", desc: "Write ordinary source for later external use while a typed Behavior Plan drives clear component outcomes and a replayable event timeline.", icon: Activity },
-];
+const projectViews = [
+  { label: "Hardware graph", copy: "Real component identities and explicit interfaces." },
+  { label: "Editable source", copy: "Code remains beside the hardware it controls." },
+  { label: "Project checks", copy: "Problems point back to the affected connection." },
+  { label: "Parts handoff", copy: "Supplier offers stay reviewable before they enter the cart." },
+] as const;
+
+const preloadWorkspace = () => {
+  void import("../WorkspaceApp.tsx");
+};
+
+function BlackHolePoster() {
+  return (
+    <div className="optimized-black-hole hardware-black-hole-poster" aria-hidden="true">
+      <div className="optimized-black-hole-fallback" />
+    </div>
+  );
+}
+
+function ModelStageFallback() {
+  return (
+    <div className="curated-stage-loading" aria-busy="true">
+      <LoadingState label="Preparing 3D hardware" variant="Drive" />
+    </div>
+  );
+}
 
 export default function LandingPage() {
-  const [menuOpen, setMenuOpen] = useState(false);
   const heroRef = useRef<HTMLElement>(null);
-  const [heroInView, setHeroInView] = useState(false);
+  const pointerFrameRef = useRef(0);
+  const latestPointerRef = useRef({ x: 0, y: 0 });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [compactNav, setCompactNav] = useState(false);
+  const [visualsReady, setVisualsReady] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.body.classList.add("landing-body");
-    const obs = new IntersectionObserver(
-      ([e]) => setHeroInView(e.isIntersecting),
-      { threshold: 0.2 }
-    );
-    if (heroRef.current) obs.observe(heroRef.current);
+    document.documentElement.classList.add("landing-html");
     return () => {
-      obs.disconnect();
+      window.cancelAnimationFrame(pointerFrameRef.current);
       document.body.classList.remove("landing-body");
+      document.documentElement.classList.remove("landing-html");
     };
   }, []);
 
+  useEffect(() => {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    const idleHandle = idleWindow.requestIdleCallback?.(() => setVisualsReady(true), { timeout: 500 });
+    const timeoutHandle = idleHandle === undefined
+      ? window.setTimeout(() => setVisualsReady(true), 120)
+      : undefined;
+
+    return () => {
+      if (idleHandle !== undefined) idleWindow.cancelIdleCallback?.(idleHandle);
+      if (timeoutHandle !== undefined) window.clearTimeout(timeoutHandle);
+    };
+  }, []);
+
+  useEffect(() => {
+    let frame = 0;
+    const updateNavigation = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        setCompactNav(window.scrollY > 54);
+      });
+    };
+
+    const revealItems = Array.from(document.querySelectorAll<HTMLElement>("[data-landing-reveal]"));
+    const observer = typeof IntersectionObserver === "undefined"
+      ? null
+      : new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            entry.target.setAttribute("data-visible", "true");
+            observer?.unobserve(entry.target);
+          }
+        }, { threshold: 0.12, rootMargin: "0px 0px -7%" });
+
+    if (observer) revealItems.forEach((item) => observer.observe(item));
+    else revealItems.forEach((item) => item.setAttribute("data-visible", "true"));
+
+    updateNavigation();
+    window.addEventListener("scroll", updateNavigation, { passive: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("scroll", updateNavigation);
+    };
+  }, []);
+
+  const updateSpotlight = (event: ReactPointerEvent<HTMLElement>) => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    latestPointerRef.current = { x: event.clientX, y: event.clientY };
+    if (pointerFrameRef.current) return;
+
+    pointerFrameRef.current = window.requestAnimationFrame(() => {
+      pointerFrameRef.current = 0;
+      const hero = heroRef.current;
+      if (!hero) return;
+      const rect = hero.getBoundingClientRect();
+      const x = latestPointerRef.current.x - rect.left;
+      const y = latestPointerRef.current.y - rect.top;
+      hero.style.setProperty("--spotlight-x", `${x}px`);
+      hero.style.setProperty("--spotlight-y", `${y}px`);
+    });
+  };
+
   return (
-    <div className="landing-shell">
-      {/* Noise + mesh */}
-      <div className="landing-noise" aria-hidden />
-      <div className="landing-mesh" aria-hidden>
-        <span className="mesh-a" />
-        <span className="mesh-b" />
-        <span className="mesh-c" />
-      </div>
+    <div className="hardware-landing">
+      <a href="#main-content" className="hardware-skip-link">Skip to content</a>
 
-      {/* Floating glass nav */}
-      <nav className={`landing-nav ${menuOpen ? "is-open" : ""}`}>
-        <Link to="/" className="landing-brand">
-          <span className="brand-mark landing-logo">
+      <header className={`hardware-nav ${compactNav ? "is-compact" : ""}`}>
+        <div className="hardware-nav-inner">
+          <Link to="/" className="hardware-brand" aria-label="Schematic home">
             <LogoMark />
-          </span>
-          <span>Schematic</span>
-          <span className="brand-dot" />
-        </Link>
-
-        <div className="landing-nav-pill hidden md:flex">
-          <a href="#platform">Platform</a>
-          <a href="#workflow">Workflow</a>
-          <a href="#showcase">Showcase</a>
-          <Link to="/settings">Settings</Link>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Link to="/studio" className="landing-cta-pill hidden sm:inline-flex">
-            <span>Open studio</span>
-            <span className="cta-icon">
-              <ArrowUpRight size={14} strokeWidth={1.6} />
-            </span>
+            <span>Schematic</span>
           </Link>
+
+          <nav className="hardware-nav-links" aria-label="Primary navigation">
+            <a href="#workflow">Workflow</a>
+            <a href="#project">Project</a>
+            <Link to="/parts" onPointerEnter={preloadWorkspace} onFocus={preloadWorkspace}>Parts</Link>
+          </nav>
+
+          <Link
+            to="/studio"
+            className="hardware-nav-action"
+            onPointerEnter={preloadWorkspace}
+            onFocus={preloadWorkspace}
+          >
+            Open Studio
+            <ArrowUpRight size={14} />
+          </Link>
+
           <button
             type="button"
-            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            className="hardware-menu-button"
+            onClick={() => setMenuOpen((open) => !open)}
             aria-expanded={menuOpen}
-            aria-controls="landing-menu"
-            onClick={() => setMenuOpen((v) => !v)}
-            className="hamburger"
+            aria-controls="hardware-mobile-menu"
+            aria-label={menuOpen ? "Close navigation" : "Open navigation"}
           >
-            <span className={menuOpen ? "line1 open" : "line1"} />
-            <span className={menuOpen ? "line2 open" : "line2"} />
+            {menuOpen ? <X size={17} /> : <Menu size={17} />}
           </button>
         </div>
-      </nav>
+      </header>
 
       {menuOpen && (
-        <div id="landing-menu" className="landing-menu">
-          <a href="#platform" onClick={() => setMenuOpen(false)} style={{ transitionDelay: "60ms" }}>
-            Platform
-          </a>
-          <a href="#workflow" onClick={() => setMenuOpen(false)} style={{ transitionDelay: "110ms" }}>
-            Workflow
-          </a>
-          <a href="#showcase" onClick={() => setMenuOpen(false)} style={{ transitionDelay: "160ms" }}>
-            Showcase
-          </a>
-          <Link to="/settings" onClick={() => setMenuOpen(false)} style={{ transitionDelay: "210ms" }}>
-            Settings
-          </Link>
-          <Link to="/studio" className="landing-menu-cta" onClick={() => setMenuOpen(false)} style={{ transitionDelay: "260ms" }}>
-            Open studio <ArrowUpRight size={16} />
-          </Link>
-        </div>
+        <nav id="hardware-mobile-menu" className="hardware-mobile-menu" aria-label="Mobile navigation">
+          <a href="#workflow" onClick={() => setMenuOpen(false)}>Workflow</a>
+          <a href="#project" onClick={() => setMenuOpen(false)}>Project</a>
+          <Link to="/parts" onClick={() => setMenuOpen(false)}>Parts</Link>
+          <Link to="/studio" onClick={() => setMenuOpen(false)}>Open Studio</Link>
+        </nav>
       )}
 
-      <main>
-        {/* HERO */}
-        <section ref={heroRef} className={`landing-hero ${heroInView ? "in-view" : ""}`}>
-          <div className="landing-copy">
-            <div className="landing-eyebrow">
-              <span className="eyebrow-dot" />
-              AGENT-NATIVE • LOCAL-FIRST • 500+ DEFINITIONS
-              <Sparkles size={12} strokeWidth={1.4} className="ml-1 opacity-60" />
-            </div>
-            <h1>
-              Design the system.
-              <br />
-              <span>Understand every connection.</span>
-            </h1>
-            <p>
-              One serious workspace for hardware architecture, editable source, Behavior Plans, and WebMCP control. The canvas is a typed graph — every surface, tool, and agent share it.
-            </p>
-            <div className="landing-actions">
-              <Link to="/studio" className="landing-primary group">
-                <span>Start building</span>
-                <span className="btn-icon">
-                  <ArrowUpRight size={16} strokeWidth={1.6} />
-                </span>
-              </Link>
-              <a href="#platform" className="landing-secondary">
-                Explore platform <ChevronRight size={14} strokeWidth={1.6} />
-              </a>
-            </div>
-            <div className="landing-proof">
-              <span>
-                <ShieldCheck size={14} strokeWidth={1.4} /> Projects stay on this device
-              </span>
-              <span>
-                <Cpu size={14} strokeWidth={1.4} /> 500+ defs • {WEBMCP_TOOL_COUNT} tools
-              </span>
-              <span className="hidden lg:inline-flex">
-                <Zap size={14} strokeWidth={1.4} /> Typed outcomes preview in-browser
-              </span>
-            </div>
-          </div>
+      <main id="main-content">
+        <section
+          ref={heroRef}
+          className="hardware-hero"
+          onPointerMove={updateSpotlight}
+        >
+          <div className="hardware-hero-spotlight" aria-hidden="true" />
+          <div className="hardware-hero-inner">
+            <div className="hardware-hero-copy">
+              <p className="hardware-overline">Connected hardware, clearly planned</p>
+              <h1>See the whole build before you touch the bench.</h1>
+              <p className="hardware-hero-intro">
+                Schematic keeps real parts, interfaces, source, project checks, and the buying handoff together so the system stays understandable while it changes.
+              </p>
 
-          <div className="landing-visual-wrap">
-            <div className="double-bezel">
-              <div className="landing-visual" role="img" aria-label="Hardware workspace preview">
-                <div className="landing-window-bar">
-                  <span className="window-dots">
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                  <LogoMark />
-                  <span>environment-controller.vlx — Untitled • 3 components</span>
-                  <span className="window-badge">
-                    <Play size={10} strokeWidth={1.6} /> PREVIEW
-                  </span>
-                </div>
-                <div className="landing-window-body">
-                  <div className="landing-rail">
-                    <b>COMPONENTS</b>
-                    <div className="landing-part">
-                      <img src="/component-svgs/esp32-board.svg" alt="" loading="lazy" /> ESP32-C3
-                    </div>
-                    <div className="landing-part">
-                      <img src="/component-svgs/pushbutton.svg" alt="" loading="lazy" /> Pushbutton
-                    </div>
-                    <div className="landing-part">
-                      <img src="/component-svgs/led.svg" alt="" loading="lazy" /> LED
-                    </div>
-                    <div className="landing-rail-foot">
-                      <Search size={12} strokeWidth={1.4} /> 500+ defs • GPIO • ADC • I²C
-                    </div>
-                  </div>
-                  <div className="landing-canvas">
-                    <svg className="landing-connections" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                      <path className="landing-connection landing-connection-signal" d="M32 49 C 46 49, 55 25, 75 25" />
-                      <path className="landing-connection landing-connection-signal" d="M32 55 C 48 55, 56 77, 75 77" />
-                      <circle className="landing-connection-dot landing-connection-dot-main" cx="32" cy="49" r="1.1" />
-                      <circle className="landing-connection-dot landing-connection-dot-main" cx="32" cy="55" r="1.1" />
-                      <circle className="landing-connection-dot landing-connection-dot-device" cx="75" cy="25" r="1.1" />
-                      <circle className="landing-connection-dot landing-connection-dot-device" cx="75" cy="77" r="1.1" />
-                    </svg>
-                    <div className="landing-board board-main">
-                      <img src="/component-svgs/esp32-board.svg" alt="" loading="lazy" />
-                      <span>ESP32-C3 • GPIO4/GPIO13</span>
-                    </div>
-                    <div className="landing-board board-sensor">
-                      <img src="/component-svgs/pushbutton.svg" alt="" loading="lazy" />
-                      <span>Pushbutton • GPIO4</span>
-                    </div>
-                    <div className="landing-board board-display">
-                      <img src="/component-svgs/led.svg" alt="" loading="lazy" />
-                      <span>LED • GPIO13</span>
-                    </div>
-                  </div>
-                  <div className="landing-code">
-                    <b>EDITABLE CODE</b>
-                    <pre>
-                      <em>void</em> setup() {"{"}
-                      {"\n"}  pinMode(4, INPUT_PULLUP);
-                      {"\n"}  pinMode(13, OUTPUT);
-                      {"\n"}
-                      {"}"}
-                      {"\n\n"}
-                      <em>void</em> loop() {"{"}
-                      {"\n"}  <em>if</em>(digitalRead(4) == LOW) {"{"}
-                      {"\n"}    digitalWrite(13, HIGH);
-                      {"\n"}  {"}"} <em>else</em> {"{"}
-                      {"\n"}    digitalWrite(13, LOW);
-                      {"\n"}  {"}"}
-                      {"\n"}
-                      {"}"}
-                    </pre>
-                    <div className="code-foot">
-                      <span className="dot on" /> AI draft • not run
-                    </div>
-                  </div>
-                </div>
+              <div className="hardware-hero-actions">
+                <Link
+                  to="/studio"
+                  className="hardware-primary-action"
+                  onPointerEnter={preloadWorkspace}
+                  onFocus={preloadWorkspace}
+                >
+                  Open Studio
+                  <ArrowUpRight size={16} />
+                </Link>
+                <a href="#workflow" className="hardware-text-action">
+                  See the workflow
+                  <ArrowDown size={14} />
+                </a>
+              </div>
+
+              <p className="hardware-hero-note">
+                Real component identities. Explicit connections. One project.
+              </p>
+            </div>
+
+            <div className="hardware-hero-visual" aria-label="Curated interactive hardware preview">
+              <div className="hardware-black-hole" aria-hidden="true">
+                {visualsReady ? (
+                  <Suspense fallback={<BlackHolePoster />}>
+                    <OptimizedBlackHole intensity={1.16} interactive={false} />
+                  </Suspense>
+                ) : <BlackHolePoster />}
+              </div>
+
+              <div className="hardware-hero-model">
+                {visualsReady ? (
+                  <Suspense fallback={<ModelStageFallback />}>
+                    <HardwareModelStage />
+                  </Suspense>
+                ) : <ModelStageFallback />}
               </div>
             </div>
-              <div className="visual-caption">Typed graph → Behavior Plan → visible outcome. The code remains an editable artifact for later hardware work.</div>
           </div>
         </section>
 
-        {/* PLATFORM BENTO */}
-        <section id="platform" className="landing-section">
-          <div className="landing-section-head">
-            <div className="eyebrow">THE PLATFORM</div>
-            <h2>
-              Everything stays connected.
-              <br />
-              <span>Not a picture — a graph.</span>
-            </h2>
-            <p>Graph panels and WebMCP tools read the active `HardwareProject`. Shopping and editable source stay in the same room without becoming graph fields.</p>
+        <section id="workflow" className="hardware-workflow-section" data-landing-reveal>
+          <header className="hardware-section-heading">
+            <p className="hardware-overline">A direct workflow</p>
+            <h2>Choose. Connect. Review.</h2>
+            <p>Three decisions carry the project from a part on the canvas to a build another person can understand.</p>
+          </header>
+
+          <ol className="hardware-decision-list">
+            {decisions.map(({ number, title, copy, icon: Icon }) => (
+              <li key={number}>
+                <span className="hardware-decision-number">{number}</span>
+                <Icon size={18} strokeWidth={1.5} />
+                <div>
+                  <h3>{title}</h3>
+                  <p>{copy}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section id="project" className="hardware-project-section" data-landing-reveal>
+          <div className="hardware-project-copy">
+            <p className="hardware-overline">The project stays intact</p>
+            <h2>Every working view refers to the same hardware.</h2>
+            <p>
+              The canvas is not a disposable mockup. Source, checks, outcomes, and supplier choices continue from the active graph.
+            </p>
+            <Link to="/studio" onPointerEnter={preloadWorkspace} onFocus={preloadWorkspace}>
+              Enter the workbench
+              <ArrowRight size={14} />
+            </Link>
           </div>
 
-          <div className="landing-bento">
-            {bento.map(({ icon: Icon, kicker, title, body, span, accent, stat, statLabel }) => (
-              <article key={title} className={`bento-card ${span}`}>
-                <div className={`bento-accent ${accent}`} />
-                <div className="bento-top">
-                  <span className="bento-icon">
-                    <Icon size={16} strokeWidth={1.4} />
-                  </span>
-                  <span className="bento-kicker">{kicker}</span>
+          <div className="hardware-project-views">
+            {projectViews.map((view, index) => (
+              <article key={view.label}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <h3>{view.label}</h3>
+                  <p>{view.copy}</p>
                 </div>
-                <h3>{title}</h3>
-                <p>{body}</p>
-                {stat && (
-                  <div className="bento-stat">
-                    <strong>{stat}</strong>
-                    <span>{statLabel}</span>
-                  </div>
-                )}
+                {index === 1 ? <Braces size={17} /> : index === 2 ? <FileCheck2 size={17} /> : index === 3 ? <PackageSearch size={17} /> : <Cable size={17} />}
               </article>
             ))}
           </div>
         </section>
-
-        {/* WORKFLOW */}
-        <section id="workflow" className="landing-section">
-          <div className="landing-section-head">
-            <div className="eyebrow">WORKFLOW</div>
-            <h2>Search. Wire. Preview.</h2>
-          </div>
-          <div className="workflow">
-            {workflow.map(({ n, title, desc, icon: Icon }) => (
-              <div key={n} className="workflow-step">
-                <div className="step-num">{n}</div>
-                <div className="step-icon">
-                  <Icon size={18} strokeWidth={1.4} />
-                </div>
-                <h3>{title}</h3>
-                <p>{desc}</p>
-              </div>
-            ))}
-          </div>
-          <div className="workflow-bar">
-            <span>
-              <ShieldCheck size={14} strokeWidth={1.4} /> validation: missing pull-up, TX→TX, I²C collision
-            </span>
-            <span>
-              <Activity size={14} strokeWidth={1.4} /> deterministic Behavior Plan • typed actions + events
-            </span>
-            <span>
-              <Layers size={14} strokeWidth={1.4} /> netlist • Union-Find • 8 resolved nets in demo
-            </span>
-          </div>
-        </section>
-
-        {/* SHOWCASE */}
-        <section id="showcase" className="landing-section">
-          <div className="landing-section-head">
-            <div className="eyebrow">SHOWCASE</div>
-            <h2>From graph to cart without context loss.</h2>
-          </div>
-          <div className="showcase">
-            <div className="showcase-main">
-              <div className="showcase-label">SUPPORTED FLOW • button-led • 3 comps • 3 signal paths</div>
-              <div className="showcase-canvas">
-                <img src="/component-svgs/esp32-board.svg" alt="" loading="lazy" style={{ left: "18%", top: "28%" }} />
-                <img src="/component-svgs/pushbutton.svg" alt="" loading="lazy" style={{ left: "8%", top: "62%" }} />
-                <img src="/component-svgs/led.svg" alt="" loading="lazy" style={{ right: "12%", top: "34%" }} />
-                <svg className="showcase-connections" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                  <path className="showcase-connection showcase-connection-signal" d="M34 44 C 48 44, 57 39, 72 39" />
-                  <path className="showcase-connection showcase-connection-signal" d="M24 74 C 38 74, 47 57, 55 48" />
-                  <path className="showcase-connection showcase-connection-power" d="M34 50 C 45 50, 50 69, 55 74" />
-                  <circle className="showcase-connection-dot" cx="34" cy="44" r="1.1" />
-                  <circle className="showcase-connection-dot" cx="24" cy="74" r="1.1" />
-                  <circle className="showcase-connection-dot" cx="34" cy="50" r="1.1" />
-                  <circle className="showcase-connection-dot" cx="72" cy="39" r="1.1" />
-                  <circle className="showcase-connection-dot" cx="55" cy="74" r="1.1" />
-                </svg>
-              </div>
-              <div className="showcase-foot">
-                <span>500+ defs • exact search “pushbutton” → typed GPIO input</span>
-                <Link to="/studio" className="mini-cta">
-                  Open <ArrowUpRight size={12} />
-                </Link>
-              </div>
-            </div>
-            <div className="showcase-side">
-              <div className="mini-card">
-                <b>Validation</b>
-                <code>✓ valid true • GPIO4 → GPIO13</code>
-                <code className="muted">input: pressed → LED ACTIVE</code>
-              </div>
-              <div className="mini-card">
-                <b>Shopping</b>
-                <code>Exact part • provider/agent offers when connected</code>
-                <code className="muted">quote → cart_undo → cart_reset</code>
-              </div>
-              <div className="mini-card">
-                <b>Code</b>
-                <code>if(digitalRead(4)==LOW) digitalWrite(13,HIGH);</code>
-                <code className="muted">editable source · not compiled or checked</code>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* CTA */}
-        <section className="landing-cta">
-          <div className="cta-bezel">
-            <div className="cta-inner">
-              <div>
-                <div className="eyebrow light">READY TO BUILD</div>
-                <h2>Open an empty world and make it yours.</h2>
-                <p>Local-first in development; hosted workspaces use one platform identity. Your project is a JSON graph you can carry anywhere.</p>
-              </div>
-              <Link to="/studio" className="landing-primary large group">
-                <span>Launch studio</span>
-                <span className="btn-icon">
-                  <ArrowUpRight size={18} strokeWidth={1.6} />
-                </span>
-              </Link>
-            </div>
-          </div>
-          <div className="cta-foot">AGPL-3.0 • WebMCP {WEBMCP_TOOL_COUNT} tools • typed outcome previews • provider-backed prices when connected</div>
-        </section>
       </main>
 
-      <footer className="landing-footer">© 2026 Schematic • Built for builders, not slides.</footer>
+      <MotionFooter />
     </div>
   );
 }

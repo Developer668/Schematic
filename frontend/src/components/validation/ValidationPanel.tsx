@@ -3,6 +3,7 @@ import { validateProject, useValidationStore } from "../../store/useValidationSt
 import { useSelectionStore } from "../../store/useSelectionStore.ts";
 import { useGraphFocusStore } from "../../store/useGraphFocusStore.ts";
 import { explainIssue } from "@schematic/validation";
+import { Check, ListChecks, ShieldCheck, TriangleAlert } from "lucide-react";
 
 export default function ValidationPanel({ embedded = false }: { embedded?: boolean }) {
   const project = useProjectStore((s) => s.project);
@@ -13,9 +14,9 @@ export default function ValidationPanel({ embedded = false }: { embedded?: boole
   };
 
   return (
-    <div className={`${embedded ? "border border-border rounded bg-card overflow-hidden" : "p-3 border-t border-border bg-card"}`}>
+    <div className={`validation-panel-redesign ${embedded ? "border border-border rounded bg-card overflow-hidden" : "p-3 border-t border-border bg-card"}`}>
       <div className={`flex items-center justify-between ${embedded ? "px-2 py-2 bg-muted/20 border-b border-border" : "mb-2"}`}>
-        <div className="text-xs font-medium">Graph checks {valid !== null && <span className={`ml-1 text-[11px] px-1 py-0 rounded border ${valid ? "bg-emerald-500 text-white border-emerald-600" : "bg-red-500 text-white border-red-600"}`}>{valid ? "pass" : "fail"}</span>}</div>
+        <div className="validation-title-row"><ListChecks size={13} /><span>Graph checks</span>{valid !== null && <span className={`validation-result-label ${valid ? "is-pass" : "is-fail"}`}>{valid ? <Check size={10} /> : <TriangleAlert size={10} />}{valid ? "Pass" : "Needs work"}</span>}</div>
         <div className="flex gap-1">
           <button type="button" className="text-xs px-2 py-1 border border-border rounded hover:bg-muted" onClick={runCheck}>Run graph checks</button>
         </div>
@@ -55,8 +56,8 @@ export default function ValidationPanel({ embedded = false }: { embedded?: boole
               </li>;
             })()
           ))}
-          {valid === null && <li className="text-muted-foreground text-xs p-2 rounded border border-dashed border-border bg-muted/20">Run graph checks to inspect the modeled connections. Behavior Preview demonstrates the plan; source stays editable for board bring-up.</li>}
-          {valid !== null && issues.length === 0 && <li className="text-muted-foreground text-xs p-2 rounded border border-dashed border-border bg-muted/20">No graph-rule conflicts reported. Behavior Preview follows the plan, and the editable source is ready for external board testing.</li>}
+          {valid === null && <li className="validation-empty-state"><ListChecks size={18} /><span><b>Check the project graph</b><small>Review modeled connections and component constraints before hardware bring-up. Source remains editable and separate from the outcome preview.</small></span></li>}
+          {valid !== null && issues.length === 0 && <li className="validation-empty-state is-success"><ShieldCheck size={18} /><span><b>No graph conflicts found</b><small>The modeled connections pass the current rules. Continue with the outcome preview, then test the exported source on the connected board.</small></span></li>}
         </ul>
       </div>
     </div>

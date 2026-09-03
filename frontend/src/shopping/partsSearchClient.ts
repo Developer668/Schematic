@@ -90,6 +90,17 @@ function text(value: unknown, max = 240) {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "";
 }
 
+function safeHttpsUrl(value: unknown, max = 2_000) {
+  const candidate = text(value, max);
+  if (!candidate || candidate.startsWith("data:")) return "";
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 function finiteNumber(value: unknown, fallback: number | null = null) {
   if (value === null || value === undefined || value === "") return fallback;
   const number = typeof value === "number" ? value : Number(value);
@@ -132,44 +143,55 @@ export function normalizePartsSearchRequest(input: PartsSearchInput, options: { 
 
 function normalizeCandidate(value: unknown): ShoppingDiscoveryCandidate | null {
   const item = asRecord(value);
-  if (!item || (item.source !== "jlcsearch" && item.source !== "adafruit")) return null;
+  const source = String(item?.source ?? "");
+  if (!item || !["jlcsearch", "adafruit", "brightdata-serp"].includes(source)) return null;
   const id = text(item.id, 160);
-  const sourcePartId = text(item.sourcePartId, 80);
+  const sourcePartId = text(item.sourcePartId, 120);
   const title = text(item.title, 240);
   const partNumber = text(item.partNumber, 120);
-  const verificationUrl = text(item.verificationUrl, 500);
-  if (!id || !sourcePartId || !title || !partNumber || item.verificationRequired !== true) return null;
-  try {
-    const url = new URL(verificationUrl);
-    if (url.protocol !== "https:" || url.username || url.password) return null;
-  } catch {
-    return null;
-  }
-  const price = item.price === null ? null : nonNegativeNumber(item.price);
-  const stock = item.stock === null ? null : nonNegativeNumber(item.stock);
-  const rawCurrency = item.currency === null ? null : text(item.currency, 3).toUpperCase();
-  if ((item.price !== null && price === null) || (item.stock !== null && stock === null) || (rawCurrency !== null && !/^[A-Z]{3}$/.test(rawCurrency))) return null;
+  const verificationUrl = safeHttpsUrl(item.verificationUrl);
+  if (!id || !sourcePartId || !title || !verificationUrl || item.verificationRequired !== true) return null;
+  if (source !== "brightdata-serp" && !partNumber) return null;
+
+  const hasPrice = item.price !== null && item.price !== undefined && item.price !== "";
+  const hasStock = item.stock !== null && item.stock !== undefined && item.stock !== "";
+  const price = hasPrice ? nonNegativeNumber(item.price) : null;
+  const stock = hasStock ? nonNegativeNumber(item.stock) : null;
+  const rawCurrency = item.currency === null || item.currency === undefined || item.currency === "" ? null : text(item.currency, 3).toUpperCase();
+  const rating = nonNegativeNumber(item.rating);
+  const reviewCount = nonNegativeNumber(item.reviewCount);
+  const rank = nonNegativeNumber(item.rank);
+  if ((hasPrice && price === null) || (hasStock && stock === null) || (rawCurrency !== null && !/^[A-Z]{3}$/.test(rawCurrency)) || (rating !== null && rating > 5)) return null;
+
   return {
     id,
-    source: item.source,
+    source: source as ShoppingDiscoveryCandidate["source"],
     sourcePartId,
     title,
     ...(text(item.manufacturer, 120) ? { manufacturer: text(item.manufacturer, 120) } : {}),
     partNumber,
     ...(text(item.package, 100) ? { package: text(item.package, 100) } : {}),
-    ...(text(item.description, 300) ? { description: text(item.description, 300) } : {}),
+    ...(text(item.description, 420) ? { description: text(item.description, 420) } : {}),
     stock,
-    ...(text(item.availability, 80) ? { availability: text(item.availability, 80) } : {}),
+    ...(text(item.availability, 120) ? { availability: text(item.availability, 120) } : {}),
     price,
     currency: rawCurrency,
     verificationUrl,
     verificationRequired: true,
+    ...(text(item.retailer, 160) ? { retailer: text(item.retailer, 160) } : {}),
+    ...(text(item.shipping, 180) ? { shipping: text(item.shipping, 180) } : {}),
+    ...(safeHttpsUrl(item.imageUrl) ? { imageUrl: safeHttpsUrl(item.imageUrl) } : {}),
+    ...(rating !== null ? { rating } : {}),
+    ...(reviewCount !== null ? { reviewCount: Math.round(reviewCount) } : {}),
+    ...(rank !== null ? { rank: Math.round(rank) } : {}),
+    ...(text(item.catalogId, 160) ? { catalogId: text(item.catalogId, 160) } : {}),
+    ...(text(item.matchNote, 240) ? { matchNote: text(item.matchNote, 240) } : {}),
   };
 }
 
 function normalizeAttempt(value: unknown): ShoppingDiscoveryAttempt | null {
   const item = asRecord(value);
-  if (!item || !["jlcsearch", "adafruit", "request"].includes(String(item.source))) return null;
+  if (!item || !["jlcsearch", "adafruit", "brightdata-serp", "request"].includes(String(item.source))) return null;
   const allowedStatuses = ["success", "empty", "error", "timeout", "rate_limited", "circuit_open", "skipped"];
   if (!allowedStatuses.includes(String(item.status))) return null;
   const durationMs = nonNegativeNumber(item.durationMs, 0) ?? 0;
@@ -191,7 +213,7 @@ export function normalizeShoppingDiscovery(value: unknown): ShoppingDiscovery | 
   if (!item) return null;
   const candidates = (Array.isArray(item.candidates) ? item.candidates : []).slice(0, 24).map(normalizeCandidate).filter((candidate): candidate is ShoppingDiscoveryCandidate => Boolean(candidate));
   const attempts = (Array.isArray(item.attempts) ? item.attempts : []).slice(0, 8).map(normalizeAttempt).filter((attempt): attempt is ShoppingDiscoveryAttempt => Boolean(attempt));
-  const sourceOrder = (Array.isArray(item.sourceOrder) ? item.sourceOrder : ["jlcsearch", "adafruit", "web-search"]).map((source) => text(source, 40)).filter(Boolean).slice(0, 8);
+  const sourceOrder = (Array.isArray(item.sourceOrder) ? item.sourceOrder : ["brightdata-serp"]).map((source) => text(source, 40)).filter(Boolean).slice(0, 8);
   const retryAfterSeconds = nonNegativeNumber(item.retryAfterSeconds);
   const hasDiscoveryEnvelope = candidates.length > 0 || attempts.length > 0 || typeof item.code === "string" || typeof item.source === "string" || Boolean(item.handoff);
   if (!hasDiscoveryEnvelope) return null;
@@ -203,7 +225,7 @@ export function normalizeShoppingDiscovery(value: unknown): ShoppingDiscovery | 
     staleCache: item.staleCache === true,
     rateLimited: item.rateLimited === true || item.code === "PUBLIC_SOURCE_RATE_LIMITED",
     ...(retryAfterSeconds !== null ? { retryAfterSeconds: Math.max(1, Math.round(retryAfterSeconds)) } : {}),
-    message: text(item.message, 240) || "Public candidates are ready for agent verification.",
+    message: text(item.message, 240) || "Live shopping results are ready to compare.",
   };
 }
 
@@ -294,7 +316,10 @@ export async function requestPartsSearch(request: PartsSearchRequest, options: P
   if (signal?.aborted) return cancelled(request);
   try {
     const send = async (force: boolean) => {
-      const headers = new Headers({ Accept: "application/json" });
+      const headers = new Headers({
+        Accept: "application/json",
+        "X-Schematic-Request-Id": request.requestId,
+      });
       for (const [key, value] of Object.entries(await auth(force, signal))) headers.set(key, value);
       return fetchImpl(requestUrl(path, request), { method: "GET", credentials: "include", headers, signal });
     };

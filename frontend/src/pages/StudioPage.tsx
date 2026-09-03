@@ -7,7 +7,6 @@ import ImportDialog from "../components/import/ImportDialog.tsx";
 import { useComponentCatalogStore } from "../store/useComponentCatalogStore.ts";
 import { useProjectStore, WorkspaceCapacityError } from "../store/useProjectStore.ts";
 import { useValidationStore, validateProject } from "../store/useValidationStore.ts";
-import { getRegisteredToolNames } from "../webmcp/tools.ts";
 import { triggerDownloadVlx } from "../utils/vllxFile.ts";
 import { useThemeStore } from "../store/useThemeStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
@@ -15,11 +14,15 @@ import { isPreviewRunning, PREVIEW_DISCLAIMER, useBehaviorPreviewStore } from ".
 import { catalog, categories as allCategories, getCatalogComponent } from "../data/catalog.ts";
 import ComponentArtwork from "../components/ComponentArtwork.tsx";
 import LogoMark from "../components/LogoMark.tsx";
-import { useAuth, signOut, getCurrentUserId } from "../auth/session.ts";
-import { getProjectPersistenceStatus, subscribeProjectPersistenceStatus } from "../store/projectPersistence.ts";
-import { Search, X, Settings, Download, Trash2, Play, Pause, RotateCcw, PanelLeft, PanelRight, ChevronDown, Box, Wrench, Wifi, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User, Menu, Save, AlertTriangle, Info, LoaderCircle } from "lucide-react";
+import GooeyInput from "../components/ui/gooey-input.tsx";
+import { useAuth, signOut } from "../auth/session.ts";
+import { flushProjectPersistence, getProjectPersistenceStatus, subscribeProjectPersistenceStatus } from "../store/projectPersistence.ts";
+import { X, Settings, Download, Trash2, Play, Pause, RotateCcw, PanelLeft, PanelRight, ChevronDown, Box, Pencil, PanelBottom, Copy, Plus, ShoppingCart, Check, LogOut, User, Menu, Save, AlertTriangle, Info, LoaderCircle, SlidersHorizontal } from "lucide-react";
 
 const LIBRARY_PAGE_SIZE = 60;
+type PortFilter = "all" | "compact" | "standard" | "dense";
+type CoverageFilter = "all" | "modeled" | "catalog";
+type LibrarySort = "relevance" | "name" | "ports";
 
 function ThemeIcon({ theme }: { theme: string }) {
   return theme === "dark" ? (
@@ -36,22 +39,30 @@ function ThemeIcon({ theme }: { theme: string }) {
 
 function UserRoomBadge() {
   const { session } = useAuth();
-  const roomId = getCurrentUserId() || "global";
-  const shortRoom = roomId.slice(0, 10);
   if (!session) {
     return (
-      <Link to="/auth" className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-300 sm:px-2.5" aria-label="Sign in for your room">
-        <User size={12} /> <span className="hidden sm:inline">Sign in for your room</span><span className="sm:hidden">Sign in</span>
+      <Link to="/auth" className="secondary-button" aria-label="Sign in to the workspace">
+        <User size={12} />
+        <span className="hidden sm:inline">Sign in</span>
       </Link>
     );
   }
+
+  const email = session.email?.trim() || "Signed in";
+  const isLocalSession = email.toLowerCase().endsWith("@localhost");
+  const initial = (email.charAt(0) || "U").toUpperCase();
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="hidden items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300 sm:inline-flex" title={`Room ${roomId} — stored on your device, isolated per user. WebMCP mutates only this room.`}>
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-        Room {shortRoom} • {session.email || "local"}
+    <div className="user-room-actions">
+      <span className={`user-avatar ${isLocalSession ? "is-local" : ""}`} title={isLocalSession ? "Local workspace session" : email} aria-label={isLocalSession ? "Local workspace session" : `Signed in as ${email}`}>
+        {isLocalSession ? <User size={13} /> : initial}
       </span>
-      <button onClick={() => signOut()} className="grid h-7 w-7 place-items-center rounded-full border border-border hover:bg-muted" title="Sign out of the workspace" aria-label="Sign out of the workspace">
+      <button
+        type="button"
+        onClick={() => signOut()}
+        className="workspace-icon-button"
+        title="Sign out"
+        aria-label="Sign out of the workspace"
+      >
         <LogOut size={12} />
       </button>
     </div>
@@ -81,6 +92,10 @@ export default function StudioPage() {
   const [query, setQuery] = useState("");
   const [activeCat, setActiveCat] = useState<string | null>(category);
   const [orgFilter, setOrgFilter] = useState<string | null>(null);
+  const [portFilter, setPortFilter] = useState<PortFilter>("all");
+  const [coverageFilter, setCoverageFilter] = useState<CoverageFilter>("all");
+  const [librarySort, setLibrarySort] = useState<LibrarySort>("relevance");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
@@ -103,7 +118,6 @@ export default function StudioPage() {
   const projectMenuRef = useRef<HTMLDivElement>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const toolNames = getRegisteredToolNames();
 
   useEffect(() => subscribeProjectPersistenceStatus(() => setPersistenceStatus(getProjectPersistenceStatus())), []);
 
@@ -222,8 +236,12 @@ export default function StudioPage() {
   const createProjectFromMenu = () => {
     setRunError("");
     try {
-      createProject(`Project ${projects.length + 1}`);
-      setShowProjectMenu(false);
+      const nextName = `Project ${projects.length + 1}`;
+      const nextProjectId = createProject(nextName);
+      setEditingProjectId(nextProjectId);
+      setEditingProjectName(nextName);
+      setDeleteProjectArmedId(null);
+      setShowProjectMenu(true);
     } catch (cause) {
       projectMutationError("Creating a project", cause);
     }
@@ -252,11 +270,22 @@ export default function StudioPage() {
   }, []);
 
   const filteredResults = useMemo(() => {
-    if (!orgFilter) return results;
-    return results.filter((c) => c.manufacturer === orgFilter);
-  }, [results, orgFilter]);
+    const filtered = results.filter((component) => {
+      if (orgFilter && component.manufacturer !== orgFilter) return false;
+      if (portFilter === "compact" && component.ports.length > 8) return false;
+      if (portFilter === "standard" && (component.ports.length < 9 || component.ports.length > 20)) return false;
+      if (portFilter === "dense" && component.ports.length < 21) return false;
+      if (coverageFilter === "modeled" && !component.behavior) return false;
+      if (coverageFilter === "catalog" && component.behavior) return false;
+      return true;
+    });
 
-  useEffect(() => setVisibleLibraryCount(LIBRARY_PAGE_SIZE), [deferredQuery, activeCat, orgFilter]);
+    if (librarySort === "name") return [...filtered].sort((a, b) => a.title.localeCompare(b.title));
+    if (librarySort === "ports") return [...filtered].sort((a, b) => b.ports.length - a.ports.length || a.title.localeCompare(b.title));
+    return filtered;
+  }, [results, orgFilter, portFilter, coverageFilter, librarySort]);
+
+  useEffect(() => setVisibleLibraryCount(LIBRARY_PAGE_SIZE), [deferredQuery, activeCat, orgFilter, portFilter, coverageFilter, librarySort]);
 
   useEffect(() => {
     search(deferredQuery);
@@ -276,8 +305,27 @@ export default function StudioPage() {
     if (target.scrollHeight - target.scrollTop - target.clientHeight < 180) loadMoreLibraryResults();
   };
 
-  const deleteProjectArmed = deleteProjectArmedId === activeProjectId;
   const clearWorkspaceArmed = clearWorkspaceArmedId === activeProjectId;
+  const hasLibraryFilters = Boolean(
+    query || activeCat || orgFilter || portFilter !== "all" || coverageFilter !== "all" || librarySort !== "relevance",
+  );
+  const activeFilterCount = [
+    Boolean(activeCat),
+    Boolean(orgFilter),
+    portFilter !== "all",
+    coverageFilter !== "all",
+  ].filter(Boolean).length;
+
+  const resetLibraryFilters = () => {
+    setActiveCat(null);
+    setCategory(null);
+    setOrgFilter(null);
+    setPortFilter("all");
+    setCoverageFilter("all");
+    setLibrarySort("relevance");
+    setFiltersOpen(false);
+    handleSearch("");
+  };
 
   const handleDragStart = (e: React.DragEvent, compId: string) => {
     e.dataTransfer.setData("application/x-schematic-component", compId);
@@ -327,7 +375,7 @@ export default function StudioPage() {
   };
 
   return (
-    <div className="workbench flex h-screen flex-col overflow-hidden bg-background text-foreground">
+    <div className="workbench studio-redesign flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <header className="workbench-header relative z-40 h-11 shrink-0 gap-2 overflow-visible border-b border-border px-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <Link to="/" aria-label="Schematic home" className="flex items-center gap-1.5">
@@ -341,31 +389,32 @@ export default function StudioPage() {
               onClick={() => setShowProjectMenu((open) => !open)}
               aria-haspopup="menu"
               aria-expanded={showProjectMenu}
-              className="flex min-w-0 max-w-full items-center gap-1 rounded px-1.5 py-1 text-xs font-medium hover:bg-muted"
+              className="studio-project-trigger flex min-w-0 max-w-full items-center gap-1 text-xs font-medium"
               title="Switch project"
             >
               <span className="min-w-0 max-w-[min(34vw,190px)] flex-1 truncate">{project.name}</span>
               <ChevronDown size={11} className={`shrink-0 transition-transform ${showProjectMenu ? "rotate-180" : ""}`} />
             </button>
-            <span
+            <button
+              type="button"
               className={`status-pill hidden sm:inline-flex ${persistenceStatus.state === "error" ? "!border-red-500/35 !bg-red-500/10 !text-red-600 dark:!text-red-300" : ""}`}
-              role="status"
+              onClick={() => void flushProjectPersistence()}
               aria-live="polite"
-              title={persistenceStatus.error ?? "Projects are stored on this device"}
+              title={persistenceStatus.error ?? (persistenceStatus.state === "saving" ? "Save now" : "Project saved")}
             >
               {persistenceStatus.state === "error" ? <AlertTriangle size={10} /> : <Save size={10} />}
-              {persistenceStatus.state === "loading" ? "Loading…" : persistenceStatus.state === "saving" ? "Saving…" : persistenceStatus.state === "error" ? "Save failed" : "Saved on this device"}
-            </span>
+              {persistenceStatus.state === "loading" ? "Loading" : persistenceStatus.state === "saving" ? "Saving" : persistenceStatus.state === "error" ? "Save issue" : "Saved"}
+            </button>
             {showProjectMenu && (
-              <div role="menu" aria-label="Projects" className="absolute left-0 top-full z-[70] mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+              <div role="menu" aria-label="Projects" className="studio-project-menu absolute left-0 top-full z-[70] mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden border bg-card">
                 <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                  <div><div className="kicker">Projects</div><div className="text-[11px] text-muted-foreground">Double-click a name to rename</div></div>
+                  <div><div className="kicker">Projects</div><div className="text-[11px] text-muted-foreground">Create, switch, rename, or remove a project</div></div>
                   <span className="count-badge">{projects.length}</span>
                 </div>
                 <div className="max-h-[min(16rem,calc(100vh-10rem))] overflow-auto p-1">
                   {projects.map((item) => editingProjectId === item.id ? (
-                    <div key={item.id} className="flex w-full items-center gap-2 rounded bg-muted px-2.5 py-2">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                    <div key={item.id} className="project-menu-row is-editing">
+                      <Check size={11} className="shrink-0 text-accent" />
                       <input
                         autoFocus
                         value={editingProjectName}
@@ -377,49 +426,65 @@ export default function StudioPage() {
                         }}
                         onBlur={commitProjectRename}
                         aria-label={`Rename ${item.name}`}
-                        className="min-w-0 flex-1 select-text rounded border border-border bg-background px-1.5 py-1 text-xs font-medium outline-none focus:border-foreground/40 focus:ring-2 focus:ring-ring/10"
+                        className="project-menu-name-input"
                       />
-                      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={commitProjectRename} className="grid h-6 w-6 shrink-0 place-items-center rounded border border-border hover:bg-background" aria-label="Save project name"><Check size={12} /></button>
+                      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={commitProjectRename} className="project-menu-action" aria-label="Save project name"><Check size={12} /></button>
+                      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={cancelProjectRename} className="project-menu-action" aria-label="Cancel project rename"><X size={12} /></button>
                     </div>
                   ) : (
-                    <button
-                      key={item.id}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => switchProjectFromMenu(item)}
-                      onDoubleClick={(event) => { event.stopPropagation(); beginProjectRename(item); }}
-                      className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left hover:bg-muted ${item.id === activeProjectId ? "bg-muted" : ""}`}
-                    >
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${item.id === activeProjectId ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
-                      <span className="min-w-0 flex-1" title="Double-click to rename"><span className="block truncate text-xs font-medium">{item.name}</span><span className="block text-[10px] text-muted-foreground">{item.components.length} comps · {item.connections.length} wires</span></span>
-                      {item.id === activeProjectId && <span className="text-[10px] text-emerald-600 dark:text-emerald-400">active</span>}
-                    </button>
+                    <div key={item.id} className={`project-menu-row ${item.id === activeProjectId ? "is-active" : ""}`}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => switchProjectFromMenu(item)}
+                        onDoubleClick={(event) => { event.stopPropagation(); beginProjectRename(item); }}
+                        className="project-menu-select"
+                      >
+                        <Box size={11} />
+                        <span className="min-w-0 flex-1" title="Double click to rename">
+                          <span className="block truncate text-xs font-medium">{item.name}</span>
+                          <span className="block text-[10px] text-muted-foreground">{item.components.length} components · {item.connections.length} wires</span>
+                        </span>
+                        {item.id === activeProjectId && <Check size={11} className="shrink-0 text-accent" aria-label="Active project" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => { event.stopPropagation(); beginProjectRename(item); }}
+                        className="project-menu-action"
+                        aria-label={`Rename ${item.name}`}
+                        title="Rename project"
+                      >
+                        <Pencil size={11} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={projects.length <= 1}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (deleteProjectArmedId !== item.id) {
+                            setDeleteProjectArmedId(item.id);
+                            return;
+                          }
+                          try {
+                            deleteProject(item.id);
+                            setDeleteProjectArmedId(null);
+                          } catch (cause) {
+                            projectMutationError("Deleting the project", cause);
+                          }
+                        }}
+                        className={`project-menu-action is-danger ${deleteProjectArmedId === item.id ? "is-armed" : ""}`}
+                        aria-label={deleteProjectArmedId === item.id ? `Confirm deletion of ${item.name}` : `Delete ${item.name}`}
+                        title={deleteProjectArmedId === item.id ? "Choose again to confirm" : "Delete project"}
+                      >
+                        {deleteProjectArmedId === item.id ? <Check size={11} /> : <Trash2 size={11} />}
+                      </button>
+                    </div>
                   ))}
                 </div>
                 <div className="flex gap-1 border-t border-border bg-muted/20 p-1.5">
                   <button type="button" onClick={createProjectFromMenu} className="flex flex-1 items-center justify-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] hover:bg-muted"><Plus size={11} /> New</button>
                   <button type="button" onClick={duplicateProjectFromMenu} className="flex flex-1 items-center justify-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] hover:bg-muted"><Copy size={11} /> Duplicate</button>
-                  <button
-                    type="button"
-                    disabled={projects.length <= 1}
-                    onClick={() => {
-                      const currentProjectId = useProjectStore.getState().activeProjectId;
-                      if (deleteProjectArmedId !== currentProjectId) {
-                        setDeleteProjectArmedId(currentProjectId);
-                        return;
-                      }
-                      try {
-                        const deleted = deleteProject(deleteProjectArmedId);
-                        setDeleteProjectArmedId(null);
-                        if (deleted) setShowProjectMenu(false);
-                      } catch (cause) {
-                        projectMutationError("Deleting the project", cause);
-                      }
-                    }}
-                    className={`flex items-center justify-center gap-1 rounded border px-2 py-1.5 text-[11px] text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 ${deleteProjectArmed ? "border-red-500/40 bg-red-500/10" : "border-border hover:bg-red-50 dark:hover:bg-red-950/20"}`}
-                    aria-label={deleteProjectArmed ? `Confirm deletion of ${project.name}` : `Delete ${project.name}`}
-                    title={deleteProjectArmed ? "Choose again to confirm" : "Delete current project"}
-                  ><Trash2 size={11} />{deleteProjectArmed && <span>Confirm</span>}</button>
+
                 </div>
               </div>
             )}
@@ -427,8 +492,6 @@ export default function StudioPage() {
         </div>
 
         <div className="flex min-w-0 shrink items-center justify-end gap-1.5">
-          <span className="status-pill hidden lg:inline-flex"><Wifi size={11} /> WebMCP · {toolNames.length}</span>
-          {previewSnapshot && <span className="status-pill preview-disclaimer-pill hidden xl:inline-flex" title={PREVIEW_DISCLAIMER}><span className="preview-status-dot" aria-hidden="true" /> Preview · no code</span>}
           <Link to="/parts" className="workspace-icon-button md:hidden" aria-label="Open parts desk" title="Open parts desk">
             <ShoppingCart size={12} strokeWidth={1.8} />
           </Link>
@@ -436,12 +499,24 @@ export default function StudioPage() {
             <ShoppingCart size={12} strokeWidth={1.8} /> Parts
           </Link>
           {running ? (
-            <button type="button" onClick={doStop} className="run-button is-running" aria-label="Pause behavior preview">
-              <Pause size={10} className="fill-white" /> Pause preview
+            <button
+              type="button"
+              onClick={doStop}
+              className="studio-run-control is-running"
+              aria-label="Pause project preview"
+              title="Pause project preview"
+            >
+              <Pause size={12} className="fill-current" />
             </button>
           ) : (
-            <button type="button" onClick={doRun} className="run-button" aria-label={previewStatus === "paused" ? "Resume behavior preview" : "Preview behavior"}>
-              <Play size={9} className="fill-current" /> {previewStatus === "paused" ? "Resume preview" : "Preview behavior"}
+            <button
+              type="button"
+              onClick={doRun}
+              className="studio-run-control"
+              aria-label={previewStatus === "paused" ? "Resume project preview" : "Run project preview"}
+              title={previewStatus === "paused" ? "Resume project preview" : "Run project preview"}
+            >
+              <Play size={12} className="fill-current" />
             </button>
           )}
           {previewSnapshot && <button type="button" onClick={() => void resetPreview()} className="workspace-icon-button hidden sm:grid" aria-label="Reset behavior preview" title="Reset preview"><RotateCcw size={12} /></button>}
@@ -492,7 +567,7 @@ export default function StudioPage() {
         {!leftCollapsed && <button type="button" className="absolute inset-0 z-20 bg-background/70 backdrop-blur-[1px] md:hidden" onClick={() => setLeftCollapsed(true)} aria-label="Close component library" />}
         {/* LEFT — compact 260px */}
         {!leftCollapsed && (
-          <aside aria-label="Component library" className="panel-enter z-30 flex w-[292px] shrink-0 flex-col border-r border-border bg-card max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:shadow-2xl">
+          <aside aria-label="Component library" className="studio-library panel-enter z-30 flex shrink-0 flex-col border-r border-border bg-card max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:shadow-2xl">
             <div className="flex h-11 items-center justify-between border-b border-border px-3">
               <div className="flex items-center gap-2"><Box size={14} /><div><div className="text-xs font-semibold">Components</div><div className="text-[10px] text-muted-foreground">Click to add · drag to place</div></div></div>
               <div className="flex items-center gap-1.5">
@@ -503,63 +578,106 @@ export default function StudioPage() {
               </div>
             </div>
 
-            <div className="space-y-2.5 border-b border-border p-3">
-              <div className="relative">
-                <Search size={13} strokeWidth={1.8} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  ref={searchInputRef}
-                  value={query}
-                  onChange={(e) => handleSearch(e.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape" && query) {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      handleSearch("");
-                    }
-                  }}
-                  placeholder="Search parts, boards, or IDs"
-                  aria-label="Search component library"
-                  aria-controls="component-library-results"
-                  aria-keyshortcuts="/ Control+K"
-                  inputMode="search"
-                  className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:border-foreground/30 focus:outline-none focus:ring-2 focus:ring-ring/10"
-                />
-                {query ? (
-                  <button type="button" onClick={() => handleSearch("")} className="absolute right-0.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded hover:bg-muted text-muted-foreground" aria-label="Clear component search">
-                    <X size={10} strokeWidth={1.8} />
-                  </button>
-                ) : (
-                  <span className="absolute right-1.5 top-1/2 -translate-y-1/2 hidden sm:inline text-[9px] font-mono text-muted-foreground border border-border rounded px-1 leading-none py-0.5">/</span>
-                )}
-              </div>
+            <div className="studio-library-tools border-b border-border p-3">
+              <GooeyInput
+                ref={searchInputRef}
+                value={query}
+                onValueChange={handleSearch}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && query) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handleSearch("");
+                  }
+                }}
+                placeholder="Search parts, boards, or IDs"
+                aria-label="Search component library"
+                aria-controls="component-library-results"
+                aria-keyshortcuts="/ Control+K"
+                inputMode="search"
+                shortcut="/"
+                rootClassName="studio-gooey-search"
+              />
 
-              <div className="grid grid-cols-2 gap-2">
-                <label className="space-y-1">
-                  <span className="kicker !text-[8px] !tracking-[0.06em]">Category</span>
-                  <div className="relative">
-                    <select value={activeCat ?? ""} onChange={(e) => handleCategory(e.target.value || null)} className="h-8 w-full appearance-none rounded-md border border-border bg-background pl-2 pr-6 text-xs focus:outline-none focus:ring-2 focus:ring-ring/10">
-                      <option value="">All ({catalog.length})</option>
-                      {allCategories.map((c) => <option key={c} value={c}>{c} · {categoryCounts.get(c) ?? 0}</option>)}
-                    </select>
-                    <ChevronDown size={10} strokeWidth={1.7} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  </div>
-                </label>
-                <label className="space-y-1">
-                  <span className="kicker !text-[8px]">Mfr</span>
-                  <div className="relative">
-                    <select value={orgFilter ?? ""} onChange={(e) => setOrgFilter(e.target.value || null)} className="h-8 w-full appearance-none rounded-md border border-border bg-background pl-2 pr-6 text-xs focus:outline-none focus:ring-2 focus:ring-ring/10">
-                      <option value="">All manufacturers</option>
-                      {manufacturers.map(([m, count]) => <option key={m} value={m}>{m} · {count}</option>)}
-                    </select>
-                    <ChevronDown size={10} strokeWidth={1.7} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  </div>
+              <div className="library-tools-row">
+                <button
+                  type="button"
+                  className={`library-filter-toggle ${filtersOpen ? "is-open" : ""}`}
+                  onClick={() => setFiltersOpen((open) => !open)}
+                  aria-expanded={filtersOpen}
+                  aria-controls="component-library-filters"
+                >
+                  <SlidersHorizontal size={12} />
+                  <span>Filters</span>
+                  {activeFilterCount > 0 && <b>{activeFilterCount}</b>}
+                  <ChevronDown size={11} className={filtersOpen ? "rotate-180" : ""} />
+                </button>
+
+                <label className="library-sort-control">
+                  <span>Sort</span>
+                  <select value={librarySort} onChange={(event) => setLibrarySort(event.target.value as LibrarySort)}>
+                    <option value="relevance">Best match</option>
+                    <option value="name">Name</option>
+                    <option value="ports">Most ports</option>
+                  </select>
                 </label>
               </div>
 
-              {(activeCat || orgFilter || query) && (
-                <div className="flex items-center gap-1">
-                  {activeCat && <span className="inline-flex rounded border border-foreground bg-foreground text-background px-1 py-0 text-[10px] font-medium">{activeCat}</span>}
-                  <button type="button" onClick={() => { setActiveCat(null); setCategory(null); setOrgFilter(null); handleSearch(""); }} className="ml-auto text-[11px] underline decoration-muted-foreground/30 underline-offset-2 hover:decoration-foreground">Reset</button>
+              {filtersOpen && (
+                <div id="component-library-filters" className="library-filter-drawer">
+                  <div className="library-filter-grid">
+                    <label className="library-filter">
+                      <span className="kicker !text-[8px] !tracking-[0.06em]">Category</span>
+                      <div className="relative">
+                        <select value={activeCat ?? ""} onChange={(event) => handleCategory(event.target.value || null)}>
+                          <option value="">All ({catalog.length})</option>
+                          {allCategories.map((item) => <option key={item} value={item}>{item} · {categoryCounts.get(item) ?? 0}</option>)}
+                        </select>
+                        <ChevronDown size={10} strokeWidth={1.7} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      </div>
+                    </label>
+
+                    <label className="library-filter">
+                      <span className="kicker !text-[8px]">Manufacturer</span>
+                      <div className="relative">
+                        <select value={orgFilter ?? ""} onChange={(event) => setOrgFilter(event.target.value || null)}>
+                          <option value="">All makers</option>
+                          {manufacturers.map(([maker, count]) => <option key={maker} value={maker}>{maker} · {count}</option>)}
+                        </select>
+                        <ChevronDown size={10} strokeWidth={1.7} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      </div>
+                    </label>
+
+                    <label className="library-filter">
+                      <span className="kicker !text-[8px]">Port count</span>
+                      <div className="relative">
+                        <select value={portFilter} onChange={(event) => setPortFilter(event.target.value as PortFilter)}>
+                          <option value="all">Any port count</option>
+                          <option value="compact">Up to 8 ports</option>
+                          <option value="standard">9 to 20 ports</option>
+                          <option value="dense">21 or more ports</option>
+                        </select>
+                        <ChevronDown size={10} strokeWidth={1.7} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      </div>
+                    </label>
+
+                    <label className="library-filter">
+                      <span className="kicker !text-[8px]">Outcome coverage</span>
+                      <div className="relative">
+                        <select value={coverageFilter} onChange={(event) => setCoverageFilter(event.target.value as CoverageFilter)}>
+                          <option value="all">Any coverage</option>
+                          <option value="modeled">Modeled outcome</option>
+                          <option value="catalog">Catalog only</option>
+                        </select>
+                        <ChevronDown size={10} strokeWidth={1.7} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      </div>
+                    </label>
+                  </div>
+                  {hasLibraryFilters && (
+                    <button type="button" className="library-reset-button" onClick={resetLibraryFilters}>
+                      Reset search and filters
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -569,14 +687,12 @@ export default function StudioPage() {
                 {filteredResults.length === 0 ? (
                   <div className="component-library-empty mx-1 my-4 rounded border border-dashed border-border p-4 text-center" role="status">
                     <Info size={14} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
-                    <p className="text-[11px] font-medium">{isLibrarySearchPending ? "Updating parts" : query || activeCat || orgFilter ? `No parts match ${query ? `“${query}”` : "these filters"}` : "No parts in the catalog"}</p>
-                    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{query || activeCat || orgFilter ? "Try a broader term or clear the filters." : "Parts added to the catalog will appear here."}</p>
-                    {(query || activeCat || orgFilter) && <button type="button" onClick={() => { setActiveCat(null); setCategory(null); setOrgFilter(null); handleSearch(""); }} className="mt-3 rounded border border-border px-2 py-1 text-[10px] font-medium hover:bg-muted">Clear filters</button>}
+                    <p className="text-[11px] font-medium">{isLibrarySearchPending ? "Updating parts" : hasLibraryFilters ? `No parts match ${query ? `“${query}”` : "these filters"}` : "No parts in the catalog"}</p>
+                    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{hasLibraryFilters ? "Try a broader term or clear the filters." : "Parts added to the catalog will appear here."}</p>
+                    {hasLibraryFilters && <button type="button" onClick={resetLibraryFilters} className="mt-3 rounded border border-border px-2 py-1 text-[10px] font-medium hover:bg-muted">Clear filters</button>}
                   </div>
                 ) : (
                   visibleResults.map((c) => {
-                    const dot = c.category === "board" || c.category === "display" ? "bg-blue-500" : "bg-zinc-400";
-                    const previewMapped = Boolean(c.behavior);
                     return (
                       <button
                         key={c.id}
@@ -592,16 +708,9 @@ export default function StudioPage() {
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs font-semibold leading-tight">{c.title}</div>
                           <div className="truncate text-[10px] text-muted-foreground">{c.manufacturer ?? c.id}</div>
-                          <div className="mt-0.5 flex items-center gap-1">
-                            <span className={`h-3 w-[2px] rounded-sm ${dot}`} />
-                            <span className="text-[10px] capitalize text-muted-foreground">{c.category}</span>
-                            <span className="text-muted-foreground text-[10px]" aria-hidden="true">·</span>
-                            <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{c.ports.length}</span>
-                            <span
-                              className={`component-preview-status ${previewMapped ? "is-mapped" : ""}`}
-                              title={previewMapped ? "Inspector exposes typed visual outcome controls" : "Place and validate this part now; a typed visual outcome profile can be added later"}
-                              aria-hidden="true"
-                            />
+                          <div className="component-meta-row">
+                            <span className="component-meta-badge">{c.category}</span>
+                            <span className="font-mono tabular-nums">{c.ports.length} ports</span>
                           </div>
                         </div>
                         <span className="component-add">+</span>
@@ -614,9 +723,6 @@ export default function StudioPage() {
               </div>
             </div>
 
-            <div className="border-t border-border bg-muted/20 px-3 py-2">
-              <p className="component-library-guidance flex items-start gap-1.5 text-[10px] leading-relaxed text-muted-foreground"><Wrench size={11} className="mt-0.5 shrink-0" /> Preview controls appear in the Inspector for parts with a typed profile.</p>
-            </div>
           </aside>
         )}
 
@@ -629,9 +735,9 @@ export default function StudioPage() {
             </button>
           )}
           <div className="relative min-h-0 flex-1">
-            <HardwareCanvas key={project.id} onBrowseComponents={() => { setLeftCollapsed(false); window.setTimeout(() => searchInputRef.current?.focus(), 0); }} />
+            <HardwareCanvas key={project.id} />
             {(runError || previewError || (previewStatus === "blocked" ? previewAnnouncement : "")) && <div className="run-error" role="alert">{runError || previewError || previewAnnouncement}</div>}
-            {previewSnapshot && <div role="status" className="preview-disclaimer absolute left-3 right-3 top-3 z-10 flex items-start gap-2 rounded-md border border-amber-300/70 bg-amber-50/95 px-3 py-2 text-xs leading-snug text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/85 dark:text-amber-100"><span className="preview-status-dot mt-1" aria-hidden="true" /> <span>{PREVIEW_DISCLAIMER}</span></div>}
+            {previewSnapshot && <div role="status" className="preview-disclaimer absolute left-3 right-3 top-3 z-10 flex items-start gap-2 rounded-xl border border-border bg-card/95 px-3 py-2 text-xs leading-snug text-muted-foreground shadow-sm backdrop-blur"><Info size={13} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" /> <span>{PREVIEW_DISCLAIMER}</span></div>}
             {runNotice && <div role="status" className="absolute bottom-3 left-3 right-3 z-10 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/80 dark:text-amber-100">{runNotice}</div>}
           </div>
           {!bottomCollapsed && <div role="separator" aria-orientation="horizontal" aria-label="Resize bottom panel" aria-valuemin={140} aria-valuemax={360} aria-valuenow={Math.round(bottomHeight)} tabIndex={0} onPointerDown={onResizeStart} onKeyDown={(event) => { if (event.key === "ArrowUp") { event.preventDefault(); setBottomHeight(bottomHeight + 16); } if (event.key === "ArrowDown") { event.preventDefault(); setBottomHeight(bottomHeight - 16); } if (event.key === "Home") { event.preventDefault(); setBottomHeight(140); } if (event.key === "End") { event.preventDefault(); setBottomHeight(360); } }} className="flex h-2 shrink-0 cursor-row-resize items-center justify-center bg-border/40 hover:bg-foreground/20 focus-visible:bg-accent/10">
@@ -697,12 +803,15 @@ export default function StudioPage() {
 
       {showImport && <ImportDialog onClose={closeImport} />}
 
-      <footer className="flex h-5 items-center gap-2 border-t border-border bg-muted/40 px-2.5 text-[10px] font-mono tabular-nums text-muted-foreground shrink-0">
-        <span>{project.components.length}c · {project.connections.length}w</span>
-        <span className="hidden sm:inline">· {toolNames.length} tools</span>
-        <span className="hidden md:inline">· room {getCurrentUserId()?.slice(0, 8) || "global"} • device-local</span>
-        <span className="hidden lg:inline">· WebMCP scoped to your room • <span className="text-emerald-600 dark:text-emerald-400">agent can place on your behalf</span></span>
-        <span className="ml-auto">{running ? "previewing" : previewStatus}</span>
+      <footer className="studio-footer flex shrink-0 items-center font-mono tabular-nums">
+        <span>{project.components.length} components</span>
+        <span className="studio-footer-separator">·</span>
+        <span>{project.connections.length} wires</span>
+        <span className="hidden sm:inline studio-footer-separator">·</span>
+        <span className="hidden sm:inline">Local room</span>
+        <span className="hidden md:inline studio-footer-separator">·</span>
+        <span className="hidden md:inline">{window.location.hostname === "localhost" ? "development · localhost" : window.location.host}</span>
+        <span className="ml-auto">{running ? "preview active" : previewStatus}</span>
       </footer>
     </div>
   );

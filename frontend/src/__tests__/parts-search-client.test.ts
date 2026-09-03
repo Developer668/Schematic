@@ -16,12 +16,55 @@ function publicEnvelope(overrides: Record<string, unknown> = {}) {
 
 describe("parts search client", () => {
   it("normalizes public candidates without treating them as verified offers", async () => {
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(publicEnvelope()), { status: 200, headers: { "content-type": "application/json" } }));
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(publicEnvelope()), { status: 200, headers: { "content-type": "application/json" } }));
     const outcome = await requestPartsSearch({ requestId: "parts-test-1", query: "ESP32-S3", quantity: 2, requiredCatalogIds: [], requestedAt: new Date().toISOString() }, { fetchImpl, getAuthHeaders: async () => ({}) });
 
     expect(outcome.status).toBe("agent-required");
     expect(outcome.discovery?.candidates[0]).toMatchObject({ source: "jlcsearch", partNumber: "ESP32-S3-WROOM-1", verificationRequired: true });
     expect(fetchImpl).toHaveBeenCalledWith(expect.stringContaining("query=ESP32-S3"), expect.objectContaining({ credentials: "include" }));
+    const requestHeaders = new Headers(fetchImpl.mock.calls[0]?.[1]?.headers);
+    expect(requestHeaders.get("X-Schematic-Request-Id")).toBe("parts-test-1");
+  });
+
+  it("normalizes Bright Data shopping results without making them cart-trusted listings", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      code: "LIVE_SHOPPING_RESULTS",
+      source: "brightdata-serp",
+      candidates: [{
+        id: "brightdata:result-1",
+        source: "brightdata-serp",
+        sourcePartId: "result-1",
+        title: "BMP280 pressure sensor breakout",
+        partNumber: "BMP280",
+        stock: null,
+        price: 8.95,
+        currency: "USD",
+        retailer: "Example Electronics",
+        shipping: "Free shipping",
+        rating: 4.7,
+        reviewCount: 128,
+        verificationUrl: "https://retailer.example/bmp280",
+        verificationRequired: true,
+      }],
+      sourceOrder: ["brightdata-serp"],
+      attempts: [{ source: "brightdata-serp", status: "success", durationMs: 220, resultCount: 1 }],
+      cacheHit: false,
+      staleCache: false,
+      rateLimited: false,
+      message: "Live Google Shopping result returned.",
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const outcome = await requestPartsSearch({ requestId: "parts-brightdata-1", query: "BMP280", quantity: 1, requiredCatalogIds: [], requestedAt: new Date().toISOString() }, { fetchImpl, getAuthHeaders: async () => ({}) });
+
+    expect(outcome.status).toBe("agent-required");
+    expect(outcome.discovery?.candidates[0]).toMatchObject({
+      source: "brightdata-serp",
+      retailer: "Example Electronics",
+      price: 8.95,
+      rating: 4.7,
+      reviewCount: 128,
+      verificationRequired: true,
+    });
   });
 
   it("refreshes authentication once after an expired session response", async () => {
