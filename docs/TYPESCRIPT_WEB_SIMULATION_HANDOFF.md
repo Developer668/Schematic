@@ -1560,9 +1560,9 @@ currently persists Sites project ID
 `appgprj_6a913ce4a58881918a47ea49fa0ca505` in
 `chatgpt-site/.openai/hosting.json`; the published canonical URL is
 <https://schematic-hardware-workspace.decipherer71.chatgpt.site>.
-The release was pushed at commit `e1eb2a775e6318ecc2e69fca17d5e8c3a87f1b4e`,
-saved as Site version 14, and deployed successfully as
-`appgdep_6a98e9b392d881918019962a9187b6d5` at 2026-09-03T03:30:13Z. The
+The release was pushed at commit `1504f7ab56e2851fcd3a881e2b38bac601d37e2e`,
+saved as Site version 15, and deployed successfully as
+`appgdep_6a98ecd1baec8191a8a94a52779e6ba4` at 2026-09-03T03:43:26Z. The
 authenticated in-app browser opened `/studio`, kept the code panel docked beside
 the canvas, and ran `behavior.get_capabilities` with 45 WebMCP tools registered.
 If a

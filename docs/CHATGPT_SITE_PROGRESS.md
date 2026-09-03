@@ -158,9 +158,9 @@ reference workspaces; that is separate from the Site runtime dependency graph.
 ## Evidence to record after publication
 
 Published evidence: GitHub commit
-`e1eb2a775e6318ecc2e69fca17d5e8c3a87f1b4e`; Sites version 14; deployment
-`appgdep_6a98e9b392d881918019962a9187b6d5`; deployment status `succeeded` at
-2026-09-03T03:30:13Z; live URL
+`1504f7ab56e2851fcd3a881e2b38bac601d37e2e`; Sites version 15; deployment
+`appgdep_6a98ecd1baec8191a8a94a52779e6ba4`; deployment status `succeeded` at
+2026-09-03T03:43:26Z; live URL
 `https://schematic-hardware-workspace.decipherer71.chatgpt.site`.
 Live HTTP smoke checks returned 200 for `/`, `/api/health`, `/api/docs`, and
 `/capabilities`, and 404 for `/api/compile` and `/api/simulation/state`.

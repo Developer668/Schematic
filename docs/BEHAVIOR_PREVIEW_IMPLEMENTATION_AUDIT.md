@@ -159,14 +159,14 @@ Record the exact commands and observed outputs after the last code change:
   preview, code handoff, and retired-route results in the ChatGPT in-app
   browser.
 
-The release candidate was checked on 2026-09-01 with `pnpm run verify`:
-workspace typecheck/lint passed; frontend reported 173 tests across 31 files;
-the Behavior package reported 28 tests; all workspace builds passed; Site
+The release candidate was checked on 2026-09-03 with `pnpm run verify`:
+workspace typecheck/lint passed; frontend reported 187 tests across 31 files;
+the Behavior package reported 29 tests; all workspace builds passed; Site
 lint/typecheck/tests/build and the static compiler-free asset scan passed; and
 `git diff --check` passed. The source was pushed at commit
-`e1eb2a775e6318ecc2e69fca17d5e8c3a87f1b4e`; Site version 14 was saved from
-that commit and deployment `appgdep_6a98e9b392d881918019962a9187b6d5` reached
-`succeeded` at 2026-09-03T03:30:13Z. Authenticated in-app browser acceptance
+`1504f7ab56e2851fcd3a881e2b38bac601d37e2e`; Site version 15 was saved from
+that commit and deployment `appgdep_6a98ecd1baec8191a8a94a52779e6ba4` reached
+`succeeded` at 2026-09-03T03:43:26Z. Authenticated in-app browser acceptance
 opened `/studio`, kept the code panel docked beside the canvas, and ran
 `behavior.get_capabilities` with 45 WebMCP tools registered. These are
 repository/deployment observations, not proof that physical hardware works.

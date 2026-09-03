@@ -26,9 +26,9 @@ Ship Schematic as a web workspace where:
 - GitHub issue tracking this release: `https://github.com/Developer668/Schematic/issues/1`
 
 Latest release: GitHub commit
-`e1eb2a775e6318ecc2e69fca17d5e8c3a87f1b4e` is pushed to `main`; the active
-Site source is pushed, Site version 14 is saved, and deployment
-`appgdep_6a98e9b392d881918019962a9187b6d5` succeeded. Authenticated in-app
+`1504f7ab56e2851fcd3a881e2b38bac601d37e2e` is pushed to `main`; the active
+Site source is pushed, Site version 15 is saved, and deployment
+`appgdep_6a98ecd1baec8191a8a94a52779e6ba4` succeeded. Authenticated in-app
 browser acceptance opened `/studio`, kept the code panel docked beside the
 canvas, and ran `behavior.get_capabilities` with 45 WebMCP tools registered.
 GitHub issue #1 still needs its final close/comment update.
