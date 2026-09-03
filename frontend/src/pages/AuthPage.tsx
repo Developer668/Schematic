@@ -1,13 +1,32 @@
-import { Link } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import LogoMark from "../components/LogoMark";
 import { authLoginUrl, getAuthMode } from "../auth/session";
+import { chatGPTOAuthConfigured, startChatGPTSignIn } from "../auth/chatgptOAuth";
+import { firebaseConfigured, signInWithFirebase } from "../auth/firebase";
 
-function authLabel() {
+function platformLabel() {
   return getAuthMode() === "chatgpt-sites" ? "ChatGPT" : "workspace";
 }
 
 export default function AuthPage() {
-  const label = authLabel();
+  const navigate = useNavigate();
+  const [pending, setPending] = useState<"firebase" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const showFirebase = firebaseConfigured();
+  const showChatGPT = chatGPTOAuthConfigured();
+
+  const continueWithFirebase = async () => {
+    setPending("firebase");
+    setError(null);
+    try {
+      await signInWithFirebase();
+      navigate("/studio", { replace: true });
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Firebase sign-in failed.");
+      setPending(null);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -27,14 +46,42 @@ export default function AuthPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Schematic studio</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">Continue to your workspace</h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Sign-in is handled by your {label} identity. Your projects, WebMCP actions, and preview sessions are scoped to that verified account.
+            Sign-in is handled by your {platformLabel()} identity. Your projects, WebMCP actions, and preview sessions are scoped to that verified account.
           </p>
-          <a
-            href={authLoginUrl("/studio")}
-            className="mt-7 flex w-full items-center justify-center rounded-lg bg-foreground px-4 py-3 text-sm font-semibold text-background transition hover:opacity-90"
-          >
-            Continue with {label} →
-          </a>
+          <div className="mt-7 flex flex-col gap-2">
+            {showFirebase ? (
+              <button
+                type="button"
+                onClick={() => void continueWithFirebase()}
+                disabled={pending !== null}
+                className="flex w-full items-center justify-center rounded-lg bg-foreground px-4 py-3 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-60"
+              >
+                {pending === "firebase" ? "Waiting for Google…" : "Continue with Google →"}
+              </button>
+            ) : null}
+            {showChatGPT ? (
+              <button
+                type="button"
+                onClick={() => startChatGPTSignIn("/studio")}
+                className="flex w-full items-center justify-center rounded-lg border border-border px-4 py-3 text-sm font-semibold transition hover:bg-muted"
+              >
+                Continue with ChatGPT →
+              </button>
+            ) : null}
+            <a
+              href={authLoginUrl("/studio")}
+              className={
+                showFirebase || showChatGPT
+                  ? "flex w-full items-center justify-center rounded-lg border border-border px-4 py-3 text-sm font-semibold transition hover:bg-muted"
+                  : "flex w-full items-center justify-center rounded-lg bg-foreground px-4 py-3 text-sm font-semibold text-background transition hover:opacity-90"
+              }
+            >
+              Continue with {platformLabel()} →
+            </a>
+          </div>
+          {error ? (
+            <p role="alert" className="mt-4 text-sm leading-6 text-destructive">{error}</p>
+          ) : null}
           <p className="mt-5 text-center text-xs leading-5 text-muted-foreground">
             No Schematic password is stored here. Local development uses a private development session; hosted builds use the platform identity boundary.
           </p>

@@ -243,6 +243,40 @@ describe("WebMCP tools", () => {
     expect(useProjectStore.getState().project.components).toHaveLength(0);
   });
 
+  it("keeps fallback Outcome ready during model assembly but prefers an explicit model-authored plan", async () => {
+    const led: any = await invokeWebMCPTool("component.add", { componentId: "led" });
+    expect(led.isError).not.toBe(true);
+    expect(led.data.behaviorSetup).toMatchObject({ ready: true, status: "ready", previewStarted: false });
+    expect(useProjectStore.getState().project.behaviorPlans?.some((plan) => plan.id === "starter-behavior-plan")).toBe(true);
+
+    const project = useProjectStore.getState().project;
+    const authoredPlan = {
+      schemaVersion: 1,
+      id: "model-authored-outcome",
+      projectId: project.id,
+      name: "Model-authored outcome",
+      revision: 1,
+      rules: [{
+        id: "model-led-on",
+        enabled: true,
+        when: { type: "preview.started" },
+        then: [{
+          componentId: led.data.instanceId,
+          definitionId: "led",
+          actionId: "indicator.set",
+          payload: { kind: "literal", value: { on: true } },
+        }],
+      }],
+    };
+    const written: any = await invokeWebMCPTool("behavior.plan.write", { plan: authoredPlan, expectedRevision: null });
+    expect(written.isError).not.toBe(true);
+    expect(useProjectStore.getState().getBehaviorPlan()?.id).toBe(authoredPlan.id);
+
+    const preview: any = await invokeWebMCPTool("behavior.preview", {});
+    expect(preview.isError).not.toBe(true);
+    expect(preview.data.planId).toBe(authoredPlan.id);
+  });
+
   it("uses safe automatic placement and rejects malformed WebMCP coordinates", async () => {
     const first: any = await invokeWebMCPTool("component.add", { componentId: "esp32-devkit-v1" });
     const second: any = await invokeWebMCPTool("component.add", { componentId: "led" });

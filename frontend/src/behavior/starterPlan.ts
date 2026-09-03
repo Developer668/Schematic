@@ -1,5 +1,5 @@
 import { writeBehaviorPlan } from "../application/behaviorCommands.ts";
-import { useProjectStore } from "../store/useProjectStore.ts";
+import { GENERATED_STARTER_BEHAVIOR_PLAN_ID, useProjectStore } from "../store/useProjectStore.ts";
 import { capabilitiesForCatalogComponent } from "./capabilities.ts";
 import { useBehaviorPreviewStore } from "./useBehaviorPreviewStore.ts";
 
@@ -12,7 +12,7 @@ import { useBehaviorPreviewStore } from "./useBehaviorPreviewStore.ts";
  * can press Play without needing an external MCP agent.
  */
 
-const STARTER_PLAN_ID = "starter-behavior-plan";
+export const STARTER_PLAN_ID = GENERATED_STARTER_BEHAVIOR_PLAN_ID;
 const STARTER_DURATION_MS = 2_400;
 
 /** Demo payloads keyed by action id. Every payload must satisfy the exact JSON schema its profile declares. */
@@ -36,7 +36,7 @@ interface StarterComponent {
   definitionId: string;
 }
 
-function buildStarterPlan(project: { id: string; components: readonly StarterComponent[] }) {
+function buildStarterPlan(project: { id: string; components: readonly StarterComponent[] }, revision: number) {
   const rules: Array<Record<string, unknown>> = [];
   const cues: Array<Record<string, unknown>> = [];
   let ruleIndex = 0;
@@ -90,6 +90,7 @@ function buildStarterPlan(project: { id: string; components: readonly StarterCom
     projectId: project.id,
     name: "Starter demo plan",
     intent: "Auto-generated starter Behavior Plan: one typed action per capable component, plus an indicator blink timeline.",
+    revision,
     rules,
     ...(cues.length ? { cues } : {}),
   };
@@ -107,19 +108,102 @@ export function canvasHasActionableBehavior(): boolean {
  * then start the preview through the same adapter the Play button uses.
  * Returns null on success or an honest failure message for the UI.
  */
-export async function createStarterPlanAndPreview(): Promise<string | null> {
+export type StarterPlanPreparation =
+  | {
+      ready: true;
+      status: "ready";
+      planId: string;
+      revision: number;
+      previewStarted: false;
+      planSha256: string;
+      projectSha256: string;
+    }
+  | {
+      ready: false;
+      status: "unavailable" | "blocked";
+      planId: string;
+      revision: number | null;
+      previewStarted: false;
+      message: string;
+      code?: string;
+    };
+
+/**
+ * Ensure the current canvas has a durable, valid starter Behavior Plan, but do
+ * not start the ephemeral Outcome session. Agent build flows use this after
+ * graph mutations so a visually-built project does not end up with an empty
+ * Outcome tab. Keeping preparation separate from playback also means adding a
+ * part never unexpectedly starts animation for the user.
+ */
+export async function prepareStarterPlan(): Promise<StarterPlanPreparation> {
   const state = useProjectStore.getState();
+  const currentRevision = state.getBehaviorPlan(STARTER_PLAN_ID)?.revision ?? null;
   if (!canvasHasActionableBehavior()) {
-    return "None of the parts on this canvas have mappable behavior actions yet. Add an LED, button, buzzer, display, relay, servo, motor, or sensor part and try again.";
+    return {
+      ready: false,
+      status: "unavailable",
+      planId: STARTER_PLAN_ID,
+      revision: currentRevision,
+      previewStarted: false,
+      message: "None of the parts on this canvas have mappable behavior actions yet. Add an LED, button, buzzer, display, relay, servo, motor, or sensor part and try again.",
+    };
   }
 
-  const plan = buildStarterPlan(state.project);
-  const revision = state.getBehaviorPlan(STARTER_PLAN_ID)?.revision ?? null;
-  const written = await writeBehaviorPlan(plan, revision);
+  const plan = buildStarterPlan(state.project, currentRevision ?? 1);
+  const written = await writeBehaviorPlan(plan, currentRevision);
   if (!written.ok) {
-    const error = (written as { error?: { code?: string; message?: string } }).error;
-    return error?.message ?? `Could not save the starter Behavior Plan${error?.code ? ` (${error.code})` : ""}.`;
+    return {
+      ready: false,
+      status: "blocked",
+      planId: STARTER_PLAN_ID,
+      revision: currentRevision,
+      previewStarted: false,
+      message: written.error.message,
+      code: written.error.code,
+    };
   }
+
+  return {
+    ready: true,
+    status: "ready",
+    planId: STARTER_PLAN_ID,
+    revision: written.data.revision,
+    previewStarted: false,
+    planSha256: written.data.planSha256,
+    projectSha256: written.data.projectSha256,
+  };
+}
+
+/**
+ * Agent graph mutations should keep the generated starter plan synchronized
+ * only while it is the project's behavior source of truth. If a user/model has
+ * already authored another explicit plan and no starter plan exists, preserve
+ * that authored behavior instead of silently introducing a competing default.
+ */
+export async function ensureStarterPlanForAgentBuild(): Promise<StarterPlanPreparation | {
+  ready: true;
+  status: "custom-plan";
+  planId: string;
+  revision: number;
+  previewStarted: false;
+}> {
+  const plans = useProjectStore.getState().project.behaviorPlans ?? [];
+  const authored = plans.find((plan) => plan.id !== STARTER_PLAN_ID);
+  if (authored) {
+    return {
+      ready: true,
+      status: "custom-plan",
+      planId: authored.id,
+      revision: authored.revision,
+      previewStarted: false,
+    };
+  }
+  return prepareStarterPlan();
+}
+
+export async function createStarterPlanAndPreview(): Promise<string | null> {
+  const prepared = await prepareStarterPlan();
+  if (!prepared.ready) return prepared.message;
 
   await useBehaviorPreviewStore.getState().startPreview({ durationMs: STARTER_DURATION_MS });
   const { status, error } = useBehaviorPreviewStore.getState();

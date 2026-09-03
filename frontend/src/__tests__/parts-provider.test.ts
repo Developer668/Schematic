@@ -87,6 +87,67 @@ describe("server-side parts provider fallback", () => {
     expect(body.attempts[0].message).toContain("524288-byte limit");
   });
 
+  it("activates Bright Data when the server key is bound even if the enable flag was omitted", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      expect(body.zone).toBe("serp_api1");
+      expect(body.url).toContain("brd_json=1");
+      return new Response(JSON.stringify({ bottom_pla: [{
+        title: "ESP32-S3 DevKitC-1",
+        product_id: "esp32-s3-key-only",
+        current_price: "$9.25",
+        shop: "Example Electronics",
+        link: "https://supplier.example/esp32-s3",
+      }] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await partsSearch(await requestFor("ESP32-S3"), {
+      ...authEnv,
+      BRIGHTDATA_API_KEY: "test-only-key",
+      BRIGHTDATA_SERP_ENDPOINT: "https://brightdata.example/request",
+    });
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(200);
+    expect(body.source).toBe("brightdata-serp");
+    expect(body.candidates).toHaveLength(1);
+    expect(body.providerStatus.brightData).toMatchObject({ enabled: true, keyPresent: true, explicitEnableFlag: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors an explicit Bright Data disable flag even when the secret is present", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await partsSearch(await requestFor("ESP32-S3"), {
+      ...authEnv,
+      BRIGHTDATA_API_KEY: "test-only-key",
+      BRIGHTDATA_SERP_ENABLED: "false",
+      PARTS_PUBLIC_SOURCES_ENABLED: "false",
+    });
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(503);
+    expect(body.providerStatus.brightData).toMatchObject({ enabled: false, keyPresent: true, explicitEnableFlag: true });
+    expect(body.message).toMatch(/explicitly disabled/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns an actionable non-secret message when Bright Data rejects the credential or zone", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 })));
+    const response = await partsSearch(await requestFor("BMP280"), {
+      ...authEnv,
+      BRIGHTDATA_API_KEY: "test-only-key",
+      BRIGHTDATA_SERP_ENDPOINT: "https://brightdata.example/request",
+    });
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(503);
+    expect(body.message).toMatch(/credential or SERP zone/i);
+    expect(JSON.stringify(body)).not.toContain("test-only-key");
+    expect(body.providerStatus.brightData.keyPresent).toBe(true);
+  });
+
   it("shares an in-flight Bright Data lookup and reuses its fresh result without another paid call", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ shopping_results: [{
       title: "BMP280 pressure sensor", product_id: "bmp280-1", current_price: { value: "$8.95" }, shop: "Example Electronics", link: "https://supplier.example/bmp280",

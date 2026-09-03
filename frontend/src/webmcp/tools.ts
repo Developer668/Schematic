@@ -24,6 +24,7 @@ import { apiUrl, getAuthHeaders, getAuthSession, getCurrentUserId, waitForAuth }
 import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.json";
 import { behaviorToolDefinitions } from "./behaviorTools.ts";
 import { getBehaviorState, readCode, writeCode } from "../application/behaviorCommands.ts";
+import { ensureStarterPlanForAgentBuild } from "../behavior/starterPlan.ts";
 
 type ToolAnnotations = {
   readOnlyHint?: boolean;
@@ -754,7 +755,7 @@ const tools: ToolDef[] = [
   },
   {
     name: "project.apply_blueprint",
-    description: "Create a complete hardware design as a new project by default. Replacing the active project requires replace=true and its exact id in confirmProjectId.",
+    description: "Create a complete hardware design as a new project by default and prepare fallback Outcome behavior for mapped parts. Replacing the active project requires replace=true and its exact id in confirmProjectId.",
     inputSchema: { type: "object", properties: { blueprintId: { type: "string", enum: ["meta-glasses"] }, replace: { type: "boolean", default: false }, confirmProjectId: { type: "string" } }, required: ["blueprintId"] },
     annotations: { destructiveHint: true },
     execute: async ({ blueprintId, replace = false, confirmProjectId }) => {
@@ -777,11 +778,12 @@ const tools: ToolDef[] = [
       const applied = useProjectStore.getState().project;
       useSelectionStore.getState().setActive(applied.components.find((component) => isBoardDefinition(getCatalogComponent(component.definitionId)))?.id ?? null);
       useValidationStore.getState().clear();
+      const behaviorSetup = await ensureStarterPlanForAgentBuild();
       const persisted = await persistProjectMutation("Blueprint application", applied.id);
       if ("failure" in persisted) return persisted.failure;
       return {
-        content: [{ type: "text", text: `${replace ? "Replaced the active project with" : "Created a new project from"} ${blueprintId}: ${applied.components.length} components, ${applied.connections.length} connections` }],
-        data: { blueprintId, projectId: applied.id, replaced: replace, name: applied.name, components: applied.components.length, connections: applied.connections.length, firmwareTargets: applied.firmwareTargets.length, ...persisted },
+        content: [{ type: "text", text: `${replace ? "Replaced the active project with" : "Created a new project from"} ${blueprintId}: ${applied.components.length} components, ${applied.connections.length} connections. Outcome setup: ${behaviorSetup.status}.` }],
+        data: { blueprintId, projectId: applied.id, replaced: replace, name: applied.name, components: applied.components.length, connections: applied.connections.length, firmwareTargets: applied.firmwareTargets.length, behaviorSetup, ...persisted },
       };
     },
   },
@@ -882,7 +884,7 @@ const tools: ToolDef[] = [
   },
   {
     name: "component.add",
-    description: "Add a hardware component to the current project; omit x and y for collision-aware automatic placement, or provide both finite numeric coordinates",
+    description: "Add a hardware component to the current project; omit x and y for collision-aware automatic placement, or provide both finite numeric coordinates. Behavior-mapped parts also keep the fallback Outcome plan synchronized without starting playback.",
     inputSchema: {
       type: "object",
       properties: {
@@ -905,12 +907,18 @@ const tools: ToolDef[] = [
       const { id } = useProjectStore.getState().addComponent(componentId, position);
       useSelectionStore.getState().setActive(id);
       const resolvedPosition = useProjectStore.getState().project.components.find((component) => component.id === id)?.position ?? position;
-      return { content: [{ type: "text", text: `Added ${componentId} as ${id} at (${resolvedPosition?.x}, ${resolvedPosition?.y})` }], data: { instanceId: id, position: resolvedPosition } };
+      const behaviorSetup = def.behavior
+        ? await ensureStarterPlanForAgentBuild()
+        : { ready: false as const, status: "not-applicable" as const, previewStarted: false as const };
+      return {
+        content: [{ type: "text", text: `Added ${componentId} as ${id} at (${resolvedPosition?.x}, ${resolvedPosition?.y}). Outcome setup: ${behaviorSetup.status}.` }],
+        data: { instanceId: id, position: resolvedPosition, behaviorSetup },
+      };
     },
   },
   {
     name: "component.remove",
-    description: "Remove a component instance and its connections after confirming the exact instance id",
+    description: "Remove a component instance and its connections after confirming the exact instance id, then refresh generated fallback Outcome behavior so it does not target the removed instance",
     inputSchema: { type: "object", properties: { instanceId: { type: "string" }, confirmInstanceId: { type: "string" } }, required: ["instanceId", "confirmInstanceId"] },
     annotations: { destructiveHint: true },
     execute: async ({ instanceId, confirmInstanceId }) => {
@@ -919,7 +927,11 @@ const tools: ToolDef[] = [
       if (!exists) return { content: [{ type: "text", text: `Unknown component instance ${instanceId}` }], isError: true };
       useProjectStore.getState().removeComponent(instanceId);
       if (useSelectionStore.getState().activeComponentId === instanceId) useSelectionStore.getState().clear();
-      return { content: [{ type: "text", text: `Removed ${instanceId}` }] };
+      const behaviorSetup = await ensureStarterPlanForAgentBuild();
+      return {
+        content: [{ type: "text", text: `Removed ${instanceId}. Outcome setup: ${behaviorSetup.status}.` }],
+        data: { instanceId, behaviorSetup },
+      };
     },
   },
   {

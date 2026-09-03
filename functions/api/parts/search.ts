@@ -1,7 +1,7 @@
 import { jsonResponse, optionsResponse, requireApiIdentity } from "../_catalog-runtime";
 import { publicSourcesEnabled, searchPublicParts, type PublicPartCandidate, type PublicSourceAttempt } from "./public";
 import { readBoundedResponseText } from "./bounded-response";
-import { brightDataEnabled, searchBrightData } from "./brightdata";
+import { brightDataConfigStatus, brightDataEnabled, searchBrightData } from "./brightdata";
 
 type ProviderConfig = {
   id: string;
@@ -71,6 +71,9 @@ type PartsSearchBody = {
     required: true;
     returnTool: "shopping.search";
     reason: string;
+  };
+  providerStatus?: {
+    brightData: ReturnType<typeof brightDataConfigStatus>;
   };
   message: string;
 };
@@ -325,17 +328,20 @@ export async function partsSearch(request: Request, envInput: PartsEnv) {
   const quantity = Math.max(1, Math.min(999, Number.isFinite(quantityValue) ? Math.round(quantityValue) : 1));
   if (!query) return jsonResponse(request, { code: "INVALID_QUERY", message: "query is required", query, quantity }, 400);
 
-  // Bright Data is explicitly opt-in and stays fully server-side. It wins over
-  // the no-key adapters so a configured paid lookup cannot silently fall back
-  // to a different data source or bypass its quota controls.
+  const providerStatus = { brightData: brightDataConfigStatus(env) };
+
+  // A bound Bright Data key activates the server-only provider unless the
+  // deployment explicitly sets BRIGHTDATA_SERP_ENABLED=false. This avoids a
+  // common hosted-Site failure where the secret is present but the separate
+  // enable flag was omitted, causing an unexpected silent public fallback.
   if (brightDataEnabled(env)) {
     const result = await searchBrightData(query, quantity, identity.subject, env);
-    return jsonResponse(request, result.body, result.status, { "Cache-Control": "no-store", ...(result.headers ?? {}) });
+    return jsonResponse(request, { ...result.body, providerStatus }, result.status, { "Cache-Control": "no-store", ...(result.headers ?? {}) });
   }
 
-  // Public no-key discovery is the default. Paid/keyed adapters remain an
-  // explicit server-only escape hatch for a later release and are never
-  // reached just because an old environment variable is present.
+  // When no live Bright Data key is active, fall back to bounded public
+  // no-key discovery. Public candidates remain untrusted until an authenticated
+  // WebMCP agent verifies and publishes them.
   if (publicSourcesEnabled(env)) {
     const publicResult = await searchPublicParts(query, identity.subject);
     const publicOrder = publicResult.sourceOrder.length ? publicResult.sourceOrder : DEFAULT_PUBLIC_SOURCE_ORDER;
@@ -365,7 +371,12 @@ export async function partsSearch(request: Request, envInput: PartsEnv) {
         publicSourceAttempts: publicResult.attempts,
       },
       publication: { required: true, returnTool: "shopping.search", reason: "Public results are discovery candidates only; an authenticated WebMCP agent must verify exact catalog identity, current retailer URL, timestamp, currency, and offer before publication." },
-      message: publicResult.message,
+      providerStatus,
+      message: publicResult.candidates.length > 0
+        ? publicResult.message
+        : providerStatus.brightData.keyPresent
+          ? `${publicResult.message} Bright Data is bound but explicitly disabled for this Site.`
+          : `${publicResult.message} Bright Data is not bound to this Site, so only the public fallback was available.`,
     };
     const headers: Record<string, string> = publicResult.retryAfterSeconds
       ? { "Retry-After": String(publicResult.retryAfterSeconds) }
@@ -390,7 +401,10 @@ export async function partsSearch(request: Request, envInput: PartsEnv) {
       providerFallback: { attempted: false, providersTried: [] },
       handoff: baseHandoff,
       publication: { required: true, returnTool: "shopping.search", reason: "Configure at least one server-side provider adapter or let a browsing agent complete this handoff." },
-      message: "No server-side parts provider is configured. Return the handoff JSON to a browsing agent, then publish verified listings through shopping.search.",
+      providerStatus,
+      message: providerStatus.brightData.keyPresent
+        ? "Bright Data is bound but explicitly disabled, and no alternate parts provider is configured. Enable BRIGHTDATA_SERP_ENABLED or use public discovery."
+        : "No Bright Data secret or alternate parts provider is configured for this Site. Add BRIGHTDATA_API_KEY to the Site environment or enable public discovery.",
     };
     return jsonResponse(request, body, 503);
   }
@@ -426,6 +440,7 @@ export async function partsSearch(request: Request, envInput: PartsEnv) {
     providerFallback: { attempted: true, providersTried: attempts.map((attempt) => attempt.provider) },
     handoff: { ...baseHandoff, providerResults: results.length ? "Verify these candidates and publish with shopping.search." : "Use another browsing agent to complete the request." },
     publication: { required: true, returnTool: "shopping.search", reason: "Provider candidates are not trusted listings until an authenticated WebMCP agent verifies and publishes them." },
+    providerStatus,
     message: results.length ? "Provider candidates returned; verify exact identity and publish through shopping.search." : "All configured provider attempts were empty or unavailable; continue with the agent handoff JSON.",
   };
   const status = results.length ? 200 : 503;

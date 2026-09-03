@@ -27,6 +27,16 @@ function partsProviderEnv(source: Record<string, unknown>) {
   return Object.fromEntries(selected);
 }
 
+function brightDataEnv(source: Record<string, unknown>) {
+  // Bright Data stays server-only. Forward the bounded SERP/quota settings so
+  // a hosted Site with BRIGHTDATA_API_KEY bound in its environment reaches the
+  // live shopping provider. BRIGHTDATA_SERP_ENABLED=false remains an explicit
+  // kill switch. Without these bindings, partsSearch uses public discovery.
+  const selected = Object.entries(source).filter(([key, value]) =>
+    key.startsWith("BRIGHTDATA_") && (typeof value === "string" || typeof value === "number" || typeof value === "boolean"));
+  return Object.fromEntries(selected);
+}
+
 /**
  * Resolve the one ChatGPT Site auth boundary for server routes.
  *
@@ -49,8 +59,13 @@ export async function siteAuthEnv(): Promise<AuthEnv> {
       SCHEMATIC_PLATFORM_INGRESS_SECRET: workerEnv.SCHEMATIC_PLATFORM_INGRESS_SECRET ?? localEnv("SCHEMATIC_PLATFORM_INGRESS_SECRET"),
       SCHEMATIC_SESSION_SECRET: workerEnv.SCHEMATIC_SESSION_SECRET ?? localEnv("SCHEMATIC_SESSION_SECRET"),
       SCHEMATIC_SESSION_TTL_SECONDS: workerEnv.SCHEMATIC_SESSION_TTL_SECONDS ?? localEnv("SCHEMATIC_SESSION_TTL_SECONDS"),
-      ...partsProviderEnv(workerEnv as unknown as Record<string, unknown>),
+      // Local process values are a development fallback only. Deployed Worker
+      // bindings must win when both exist, otherwise a stale/blank build-time
+      // value can shadow the secret configured in the ChatGPT Site environment.
       ...partsProviderEnv(typeof process !== "undefined" ? process.env as Record<string, unknown> : {}),
+      ...partsProviderEnv(workerEnv as unknown as Record<string, unknown>),
+      ...brightDataEnv(typeof process !== "undefined" ? process.env as Record<string, unknown> : {}),
+      ...brightDataEnv(workerEnv as unknown as Record<string, unknown>),
     } as Awaited<ReturnType<typeof siteAuthEnv>>;
   } catch {
     return {
@@ -59,6 +74,7 @@ export async function siteAuthEnv(): Promise<AuthEnv> {
       SCHEMATIC_SESSION_SECRET: localEnv("SCHEMATIC_SESSION_SECRET"),
       SCHEMATIC_SESSION_TTL_SECONDS: localEnv("SCHEMATIC_SESSION_TTL_SECONDS"),
       ...partsProviderEnv(typeof process !== "undefined" ? process.env as Record<string, unknown> : {}),
+      ...brightDataEnv(typeof process !== "undefined" ? process.env as Record<string, unknown> : {}),
     } as Awaited<ReturnType<typeof siteAuthEnv>>;
   }
 }

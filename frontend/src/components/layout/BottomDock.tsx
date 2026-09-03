@@ -29,7 +29,7 @@ import type {
   PreviewDiagnostic,
   PreviewSnapshot,
 } from "../../behavior/previewTypes.ts";
-import { getRegisteredToolNames } from "../../webmcp/tools.ts";
+import { getRegisteredToolNames, invokeWebMCPTool } from "../../webmcp/tools.ts";
 import { createStarterPlanAndPreview } from "../../behavior/starterPlan.ts";
 import ValidationPanel from "../validation/ValidationPanel.tsx";
 
@@ -252,16 +252,7 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
       }
     }
 
-    const registry = (window as typeof window & {
-      __schematicTools?: Record<string, (args: Record<string, unknown>) => Promise<{
-        content?: Array<{ type?: string; text?: string }>;
-        data?: unknown;
-        isError?: boolean;
-      }>>;
-    }).__schematicTools;
-    const tool = registry?.[name];
-
-    if (!tool) {
+    if (!toolNames.includes(name)) {
       const suggestion = toolNames.find(
         (toolName) => toolName.includes(name) || name.includes(toolName.split(".").pop() ?? ""),
       );
@@ -278,7 +269,7 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
     }
 
     try {
-      const result = await tool(args);
+      const result = await invokeWebMCPTool(name, args);
       const text = result.content
         ?.filter((item) => item.type === "text" && typeof item.text === "string")
         .map((item) => item.text)
@@ -432,42 +423,224 @@ function TerminalTab({
   status: string;
   snapshot: PreviewSnapshot | null;
 }) {
+  const [history, setHistory] = useState<CommandEntry[]>([]);
+  const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
   const entries = snapshot?.sessionLog ?? [];
+  const toolNames = getRegisteredToolNames();
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [entries.length, history]);
+
+  const append = (cmd: string, out: string, isError = false) => {
+    setHistory((current) => [...current, { cmd, out, isError }]);
+  };
+
+  const formatToolResult = (result: any) => {
+    const text = result?.content
+      ?.filter((item: { type?: string; text?: string }) => item.type === "text" && typeof item.text === "string")
+      .map((item: { text?: string }) => item.text)
+      .join("\n");
+    return text || (result?.data ? JSON.stringify(result.data, null, 2) : "Command completed.");
+  };
+
+  const invokeToolCommand = async (raw: string, name: string, args: Record<string, unknown>) => {
+    if (!toolNames.includes(name)) {
+      const suggestion = toolNames.find(
+        (toolName) => toolName.includes(name) || name.includes(toolName.split(".").pop() ?? ""),
+      );
+      append(raw, `Unknown command “${name}”.${suggestion ? ` Try “${suggestion}”.` : " Type “help” for terminal commands or “tools” for WebMCP tools."}`, true);
+      return;
+    }
+    try {
+      const result = await invokeWebMCPTool(name, args);
+      append(raw, formatToolResult(result), Boolean(result?.isError));
+    } catch (error) {
+      append(raw, `Command failed: ${error instanceof Error ? error.message : String(error)}`, true);
+    }
+  };
+
+  const run = async () => {
+    const raw = input.trim();
+    if (!raw) return;
+    setInput("");
+
+    if (raw === "clear") {
+      setHistory([]);
+      return;
+    }
+
+    if (raw === "help") {
+      append(raw, [
+        "Schematic browser terminal commands:",
+        "  status      Read workspace and Outcome state",
+        "  graph       Read the current hardware graph",
+        "  validate    Run static graph validation",
+        "  outcome     Prepare the generated Behavior Plan and play Outcome",
+        "  pause       Pause Outcome playback",
+        "  reset       Reset Outcome playback",
+        "  tools       List all WebMCP commands",
+        "  clear       Clear terminal history",
+        "",
+        "You can also run any WebMCP tool directly:",
+        '  component.search {"query":"esp32"}',
+        '  behavior.get_state {}',
+      ].join("\n"));
+      return;
+    }
+
+    if (raw === "tools") {
+      append(raw, toolNames.join("\n"));
+      return;
+    }
+
+    const aliases: Record<string, string> = {
+      status: "workspace.get_state",
+      graph: "project.get_graph",
+      validate: "validation.check",
+    };
+    if (aliases[raw]) {
+      await invokeToolCommand(raw, aliases[raw], {});
+      return;
+    }
+
+    if (raw === "outcome" || raw === "play") {
+      try {
+        const preferredPlan = useProjectStore.getState().getBehaviorPlan();
+        let error: string | null = null;
+        if (preferredPlan) {
+          await useBehaviorPreviewStore.getState().startPreview({ durationMs: 2_400 });
+          error = useBehaviorPreviewStore.getState().error;
+        } else {
+          error = await createStarterPlanAndPreview();
+        }
+        const preview = useBehaviorPreviewStore.getState();
+        append(
+          raw,
+          error
+            ? error
+            : `Outcome ${preview.status}${preferredPlan ? ` using ${preferredPlan.id}` : ""}. ${preview.snapshot?.sessionLog.length ?? 0} typed actions recorded.`,
+          Boolean(error),
+        );
+      } catch (error) {
+        append(raw, `Outcome failed: ${error instanceof Error ? error.message : String(error)}`, true);
+      }
+      return;
+    }
+
+    if (raw === "pause") {
+      await useBehaviorPreviewStore.getState().pausePreview();
+      const preview = useBehaviorPreviewStore.getState();
+      append(raw, `Outcome ${preview.status}.`);
+      return;
+    }
+
+    if (raw === "reset") {
+      await useBehaviorPreviewStore.getState().resetPreview();
+      const preview = useBehaviorPreviewStore.getState();
+      append(raw, `Outcome ${preview.status}.`);
+      return;
+    }
+
+    const firstSpace = raw.indexOf(" ");
+    const name = firstSpace === -1 ? raw : raw.slice(0, firstSpace).trim();
+    let args: Record<string, unknown> = {};
+    if (firstSpace !== -1) {
+      const rest = raw.slice(firstSpace + 1).trim();
+      if (rest) {
+        try {
+          const parsed: unknown = JSON.parse(rest);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("Arguments must be a JSON object.");
+          }
+          args = parsed as Record<string, unknown>;
+        } catch (error) {
+          append(raw, `Invalid arguments: ${error instanceof Error ? error.message : "Invalid JSON arguments."}`, true);
+          return;
+        }
+      }
+    }
+    await invokeToolCommand(raw, name, args);
+  };
 
   return (
     <div className="dock-console">
       <div className="dock-terminal-heading">
-        <span><Terminal size={13} /> Preview activity</span>
-        <span>{status} · {entries.length} entries</span>
+        <span><Terminal size={13} /> Schematic terminal</span>
+        <span>{status} · {entries.length} outcome entries</span>
       </div>
-      <div className="dock-console-log" role="log" aria-label="Preview session log">
-        {entries.length === 0 ? (
+      <div className="dock-console-log" role="log" aria-live="polite" aria-label="Schematic terminal output">
+        {history.length === 0 && entries.length === 0 && (
           <div className="dock-console-empty is-compact">
             <Terminal size={17} />
             <div>
-              <b>No preview activity yet</b>
-              <p>Start the project preview or use a typed control in the Inspector.</p>
+              <b>Browser workspace terminal ready</b>
+              <p>Type “help” for commands, or run a WebMCP tool directly. This controls Schematic state, validation, code handoff, and Outcome.</p>
             </div>
           </div>
-        ) : (
-          entries.map((entry) => (
-            <div key={entry.sequence} className="dock-command-entry">
-              <div className="dock-command-line">
-                {entry.outcome === "accepted" ? <Check size={11} /> : <TriangleAlert size={11} />}
-                <span>{entry.kind}</span>
-                <small>{entry.logicalTimeMs} ms · {entry.sequence}</small>
-              </div>
-              <pre className={entry.outcome === "accepted" ? "" : "is-error"}>
-                {JSON.stringify(entry.request, null, 2)}
-                {entry.diagnosticCodes.length ? `\n${entry.diagnosticCodes.join(", ")}` : ""}
-              </pre>
-            </div>
-          ))
         )}
+
+        {history.map((entry, index) => (
+          <div key={`${entry.cmd}-${index}`} className="dock-command-entry">
+            <div className="dock-command-line">
+              <CornerDownLeft size={11} />
+              <span>{entry.cmd}</span>
+            </div>
+            <pre className={entry.isError ? "is-error" : ""}>{entry.out}</pre>
+          </div>
+        ))}
+
+        {entries.slice(-40).map((entry) => (
+          <div key={`preview-${entry.sequence}`} className="dock-command-entry is-activity">
+            <div className="dock-command-line">
+              {entry.outcome === "accepted" ? <Check size={11} /> : <TriangleAlert size={11} />}
+              <span>outcome:{entry.kind}</span>
+              <small>{entry.logicalTimeMs} ms · {entry.sequence}</small>
+            </div>
+            <pre className={entry.outcome === "accepted" ? "" : "is-error"}>
+              {JSON.stringify(entry.request, null, 2)}
+              {entry.diagnosticCodes.length ? `\n${entry.diagnosticCodes.join(", ")}` : ""}
+            </pre>
+          </div>
+        ))}
+        <div ref={endRef} />
       </div>
+
+      <div className="dock-console-input">
+        <Terminal size={13} />
+        <input
+          ref={inputRef}
+          value={input}
+          aria-label="Schematic terminal command"
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void run();
+            if (event.key === "Escape") setInput("");
+          }}
+          placeholder='help · validate · outcome · component.search {"query":"led"}'
+        />
+        <button type="button" onClick={() => void run()} aria-label="Run terminal command" title="Run command">
+          <CornerDownLeft size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setHistory([]);
+            inputRef.current?.focus();
+          }}
+          aria-label="Clear terminal output"
+          title="Clear output"
+        >
+          <Eraser size={13} />
+        </button>
+      </div>
+
       <div className="dock-console-footer">
-        <span>Typed preview activity only</span>
-        <span>Source is not executed here</span>
+        <span>Enter to run</span>
+        <span>Browser workspace commands</span>
+        <span>No OS shell or source execution</span>
       </div>
     </div>
   );

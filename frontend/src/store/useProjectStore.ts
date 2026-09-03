@@ -27,6 +27,8 @@ import {
   type CodePreviewLink,
 } from "./behaviorPersistence.ts";
 
+export const GENERATED_STARTER_BEHAVIOR_PLAN_ID = "starter-behavior-plan";
+
 export interface HardwareGraph {
   id: string;
   name: string;
@@ -939,7 +941,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   getBehaviorPlan(planId) {
     const plans = get().project.behaviorPlans ?? [];
     if (planId) return plans.find((plan) => plan.id === planId);
-    return plans[0];
+    // The generated starter is only a fallback. Once a human or model writes
+    // an explicit plan, default Outcome playback must honor that authored
+    // behavior rather than silently continuing to run the demo plan created
+    // while the graph was being assembled.
+    return plans.find((plan) => plan.id !== GENERATED_STARTER_BEHAVIOR_PLAN_ID) ?? plans[0];
   },
 
   writeCodeDocument(request) {

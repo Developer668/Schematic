@@ -151,7 +151,7 @@ function shoppingItems(value: unknown): Record<string, unknown>[] {
   const item = record(current);
   if (!item) return [];
   const found: Record<string, unknown>[] = [];
-  for (const key of ["shopping", "shopping_results", "shoppingResults", "top_pla", "pla", "products", "product_results", "productResults", "items", "results"]) {
+  for (const key of ["shopping", "shopping_results", "shoppingResults", "top_pla", "bottom_pla", "jackpot_pla", "pla", "products", "product_results", "productResults", "items", "results"]) {
     if (Array.isArray(item[key])) found.push(...item[key].filter((entry): entry is Record<string, unknown> => Boolean(record(entry))));
   }
   if (found.length) return found;
@@ -239,8 +239,20 @@ function forQuantity(result: BrightDataSearch, quantity: number): BrightDataSear
   return { ...result, body: { ...result.body, quantity } };
 }
 
+export function brightDataConfigStatus(env: Env) {
+  const keyPresent = Boolean(envString(env, "BRIGHTDATA_API_KEY"));
+  const enableFlag = envString(env, "BRIGHTDATA_SERP_ENABLED");
+  const explicitlyDisabled = enableFlag.length > 0 && !truthy(enableFlag);
+  return {
+    enabled: keyPresent && !explicitlyDisabled,
+    keyPresent,
+    explicitEnableFlag: enableFlag.length > 0,
+    zoneConfigured: Boolean(envString(env, "BRIGHTDATA_SERP_ZONE")),
+  };
+}
+
 export function brightDataEnabled(env: Env) {
-  return truthy(envString(env, "BRIGHTDATA_SERP_ENABLED")) && Boolean(envString(env, "BRIGHTDATA_API_KEY"));
+  return brightDataConfigStatus(env).enabled;
 }
 
 /** Test-only state reset. Production code never calls this. */
@@ -289,7 +301,7 @@ export async function searchBrightData(queryInput: string, quantity: number, sub
     const timeoutMs = boundedInt(envString(env, "BRIGHTDATA_SERP_TIMEOUT_SECONDS"), 20, 5, 30) * 1_000;
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const target = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=shop&gl=${encodeURIComponent(country)}&hl=${encodeURIComponent(language)}&brd_json=json`;
+      const target = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=shop&gl=${encodeURIComponent(country)}&hl=${encodeURIComponent(language)}&brd_json=1`;
       const send = (format: "json" | "raw") => fetch(endpoint, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${envString(env, "BRIGHTDATA_API_KEY")}` }, body: JSON.stringify({ zone, url: target, format, method: "GET", country }), signal: controller.signal });
       let upstream = await send("json");
       if (upstream.status === 400 || upstream.status === 422) { await upstream.arrayBuffer(); upstream = await send("raw"); }
@@ -299,8 +311,14 @@ export async function searchBrightData(queryInput: string, quantity: number, sub
         blockedUntil = Date.now() + retry * 1_000;
         return response(query, quantity, "rate_limited", duration, [], "Bright Data is rate limiting shopping searches. Try again later.", 429, retry);
       }
-      if (upstream.status === 401 || upstream.status === 403) { blockedUntil = Date.now() + 5 * 60_000; return response(query, quantity, "error", duration, [], "Shopping search is temporarily unavailable.", 503); }
-      if (!upstream.ok) return response(query, quantity, "error", duration, [], "Shopping search provider is temporarily unavailable.", upstream.status >= 500 ? 503 : 502);
+      if (upstream.status === 401 || upstream.status === 403) {
+        blockedUntil = Date.now() + 5 * 60_000;
+        return response(query, quantity, "error", duration, [], "Bright Data rejected the configured server credential or SERP zone. Check the Site BRIGHTDATA_API_KEY and BRIGHTDATA_SERP_ZONE bindings, then publish a new Site version.", 503);
+      }
+      if (upstream.status === 400 || upstream.status === 422) {
+        return response(query, quantity, "error", duration, [], "Bright Data rejected the shopping request configuration. Check BRIGHTDATA_SERP_ZONE and the SERP API access attached to the configured key.", 502);
+      }
+      if (!upstream.ok) return response(query, quantity, "error", duration, [], `Bright Data shopping search returned HTTP ${upstream.status}.`, upstream.status >= 500 ? 503 : 502);
       const raw = await readBoundedResponseText(upstream, MAX_RESPONSE_BYTES);
       let payload: unknown;
       try { payload = JSON.parse(raw); } catch { return response(query, quantity, "error", duration, [], "Shopping provider returned an invalid response.", 502); }

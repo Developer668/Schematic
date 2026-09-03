@@ -521,6 +521,8 @@ function CartSummary({
   items: BuildCartItem[];
   loading: boolean;
 }) {
+  const budget = useShoppingStore((state) => state.budget);
+  const setBudget = useShoppingStore((state) => state.setBudget);
   const totals = new Map<string, number>();
   for (const item of items) {
     if (item.subtotal !== null) {
@@ -539,6 +541,13 @@ function CartSummary({
             .map(([currency, total]) => money(total, currency))
             .join(" + ");
   const missingCount = items.filter((item) => item.unitPrice === null).length;
+  // Single-currency over-target check. Multi-currency builds show per-currency
+  // totals above; the target comparison uses the dominant currency total so a
+  // mixed-cart estimate never silently hides an overage.
+  const primaryTotal = totals.size === 1 ? [...totals.values()][0] as number : null;
+  const primaryCurrency = totals.size === 1 ? [...totals.keys()][0] as string : "USD";
+  const overTarget = budget !== null && primaryTotal !== null && primaryTotal > budget;
+  const overBy = overTarget && budget !== null && primaryTotal !== null ? primaryTotal - budget : null;
 
   return (
     <section
@@ -623,6 +632,36 @@ function CartSummary({
             ? "Based on the lowest current listing for each line item"
             : "Updates from the active design"}
       </div>
+      <div className="shopping-target-row">
+        <label htmlFor="shopping-spending-target">Spending target (USD)</label>
+        <input
+          id="shopping-spending-target"
+          aria-label="Spending target in USD"
+          type="number"
+          min={0}
+          step="any"
+          inputMode="decimal"
+          placeholder="No limit"
+          value={budget ?? ""}
+          onChange={(event) => {
+            const raw = event.target.value.trim();
+            if (!raw) {
+              setBudget(null);
+              return;
+            }
+            const parsed = Number(raw);
+            setBudget(Number.isFinite(parsed) && parsed >= 0 ? parsed : null);
+          }}
+        />
+      </div>
+      {overTarget && overBy !== null ? (
+        <div className="shopping-target-over" role="status">
+          Over target by {money(overBy, primaryCurrency)}
+        </div>
+      ) : null}
+      {items.length > 0 ? (
+        <div className="shopping-cart-hint">Quantities follow the active design.</div>
+      ) : null}
     </section>
   );
 }
@@ -653,6 +692,7 @@ function AutoLookupState({
   const noDesign = requirements.length === 0;
   const title = noDesign ? phaseMeta.idle.title : meta.title;
   const copy = noDesign ? phaseMeta.idle.copy : message || meta.copy;
+  const needsProviderSetup = !noDesign && phase === "failed" && /not configured|missing.*key|credential|not bound|explicitly disabled|SERP zone/i.test(copy);
   return (
     <div
       className={`shopping-auto-lookup-state is-${phase}`}
@@ -674,6 +714,11 @@ function AutoLookupState({
         </div>
         <h2>{title}</h2>
         <p>{copy}</p>
+        {needsProviderSetup ? (
+          <p className="shopping-setup-hint">
+            For local Vite development, add the server-only BRIGHTDATA_API_KEY to backend/.env and restart the dev server. For the hosted ChatGPT Site, bind BRIGHTDATA_API_KEY in the Site environment and publish a new version. BRIGHTDATA_SERP_ENABLED is optional when a key is present; setting it to false explicitly disables Bright Data.
+          </p>
+        ) : null}
       </div>
       {(phase === "failed" || phase === "rate-limited") && !noDesign && (
         <button
@@ -793,6 +838,8 @@ export default function ShoppingWorkspace({
     let retryAfterSeconds: number | undefined;
     let completed = 0;
     let failed = 0;
+    const lookupErrors: string[] = [];
+    const lookupMessages: string[] = [];
     let cursor = 0;
 
     const worker = async () => {
@@ -831,13 +878,17 @@ export default function ShoppingWorkspace({
 
         completed += 1;
         setMessage(`Loading design parts · ${completed}/${targets.length}`);
+        if (outcome.status === "failed") {
+          failed += 1;
+          if (outcome.error && !lookupErrors.includes(outcome.error)) lookupErrors.push(outcome.error);
+        }
         const discovery = outcome.discovery;
         if (!discovery) {
           if (outcome.status === "rate-limited") rateLimited = true;
-          if (outcome.status === "failed") failed += 1;
           continue;
         }
 
+        if (discovery.message && !lookupMessages.includes(discovery.message)) lookupMessages.push(discovery.message);
         cacheHit = cacheHit && discovery.cacheHit;
         staleCache = staleCache || discovery.staleCache;
         rateLimited =
@@ -887,9 +938,13 @@ export default function ShoppingWorkspace({
         ? `Found ${candidates.length} listing${candidates.length === 1 ? "" : "s"} for ${completed} design part${completed === 1 ? "" : "s"}.${omitted > 0 ? ` ${omitted} additional part${omitted === 1 ? " was" : "s were"} kept in the cart but not searched in this pass.` : ""}`
         : rateLimited
           ? "The listing provider is temporarily rate limited. Retry the active design in a moment."
-          : failed > 0
-            ? "Some design lookups could not be completed. Retry to update the listings."
-            : `No current listings matched the ${completed} design part${completed === 1 ? "" : "s"} yet.`;
+          : lookupErrors.length > 0
+            ? `Couldn’t load the listings: ${lookupErrors[0]}`
+            : lookupMessages.length > 0
+              ? lookupMessages[0]
+              : failed > 0
+                ? "Some design lookups could not be completed. Retry to update the listings."
+                : `No current listings matched the ${completed} design part${completed === 1 ? "" : "s"} yet.`;
       const discovery: ShoppingDiscovery = {
         candidates: [...discoveryCandidateMap.values()].slice(0, 24),
         sourceOrder: [...sourceOrder],
@@ -957,6 +1012,16 @@ export default function ShoppingWorkspace({
       // A storage-restricted browser can still keep the current selection in memory.
     }
   }, [project.id, selectedChoiceIds]);
+
+  useEffect(() => {
+    // Drop selections for design lines that no longer exist so a removed
+    // component cannot pin a stale listing choice after the next lookup.
+    setSelectedChoiceIds((current) => {
+      const validKeys = new Set(designRequirements.map((requirement) => requirement.key));
+      const pruned = Object.fromEntries(Object.entries(current).filter(([key]) => validKeys.has(key)));
+      return Object.keys(pruned).length === Object.keys(current).length ? current : pruned;
+    });
+  }, [designFingerprint]);
 
   useEffect(() => {
     if (!designRequirements.length) {

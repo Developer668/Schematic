@@ -22,7 +22,7 @@
     "test": "pnpm run test:workspace && npm --prefix chatgpt-site run test",
     "typecheck": "pnpm run typecheck:workspace && npm --prefix chatgpt-site run typecheck",
     "verify": "pnpm run typecheck:workspace && pnpm run lint:workspace && pnpm run test:workspace && pnpm run build:workspace && npm --prefix chatgpt-site run verify && pnpm run verify:behavior-preview",
-    "dev:backend": "SCHEMATIC_DEPLOYMENT_ENV=local SCHEMATIC_AUTH_MODE=development python -m uvicorn app.main:app --reload --port 8001 --app-dir backend",
+    "dev:backend": "SCHEMATIC_DEPLOYMENT_ENV=local SCHEMATIC_AUTH_MODE=development .venv/bin/python -m uvicorn app.main:app --reload --port 8001 --app-dir backend",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
   },
   "devDependencies": {

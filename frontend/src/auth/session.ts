@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export type AuthEnvironment = "local" | "cloudflare-access" | "chatgpt-sites" | "unknown";
+export type AuthEnvironment = "local" | "cloudflare-access" | "chatgpt-sites" | "firebase" | "chatgpt-oauth" | "unknown";
 
 export interface AuthSession {
   authenticated: true;
@@ -89,7 +89,7 @@ function normalizeSession(value: unknown): AuthSession | null {
     userId: subject,
     ...(data.email ? { email: String(data.email) } : {}),
     ...(data.fullName ? { fullName: String(data.fullName) } : {}),
-    environment: ["local", "cloudflare-access", "chatgpt-sites", "unknown"].includes(environment) ? environment : "unknown",
+    environment: ["local", "cloudflare-access", "chatgpt-sites", "firebase", "chatgpt-oauth", "unknown"].includes(environment) ? environment : "unknown",
     ...(data.token ? { token: String(data.token) } : {}),
     ...(typeof data.expiresIn === "number" ? { expiresIn: data.expiresIn } : {}),
   };
@@ -204,6 +204,22 @@ export function initAuth() {
   return authReadyPromise;
 }
 
+/**
+ * Adopt a session payload issued by the same-origin API (Firebase or ChatGPT
+ * OAuth code exchange). The payload is normalized through the same decoder as
+ * every other session source, in-flight shared refreshes are invalidated so a
+ * stale response cannot overwrite the fresh sign-in, and listeners rehydrate.
+ */
+export function adoptSession(value: unknown): AuthSession | null {
+  const session = normalizeSession(value);
+  if (!session) return null;
+  latestRequestId = ++requestSequence;
+  cachedSession = session;
+  cachedSessionExpiresAt = session.token && session.expiresIn ? Date.now() + session.expiresIn * 1000 : 0;
+  announceSession();
+  return session;
+}
+
 /** Shared startup gate for auth-aware hydration and native tool registration. */
 export function waitForAuth(): Promise<AuthSession | null> {
   return initAuth();
@@ -246,6 +262,8 @@ export function getAuthMode(): AuthEnvironment {
   const configured = String(import.meta.env.VITE_AUTH_MODE ?? "").trim().toLowerCase();
   if (configured === "chatgpt-sites") return "chatgpt-sites";
   if (configured === "cloudflare-access") return "cloudflare-access";
+  if (configured === "firebase") return "firebase";
+  if (configured === "chatgpt-oauth") return "chatgpt-oauth";
   if (cachedSession?.environment) return cachedSession.environment;
   if (typeof window !== "undefined" && (/\.chatgpt\.site$/i.test(window.location.hostname) || /\.chatgpt\.com$/i.test(window.location.hostname) || /\.openai\.com$/i.test(window.location.hostname))) return "chatgpt-sites";
   if (!isLocalHost()) return "cloudflare-access";

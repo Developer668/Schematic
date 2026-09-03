@@ -42,6 +42,14 @@ function firstText(item: Record<string, unknown>, keys: string[], limit = 240) {
   return "";
 }
 
+function firstValue(item: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = item[key];
+    if (value !== null && value !== undefined && value !== "") return value;
+  }
+  return undefined;
+}
+
 function numberValue(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : null;
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -72,6 +80,25 @@ function safeHttpsUrl(value: unknown) {
   } catch {
     return "";
   }
+}
+
+function nestedHttpsUrl(value: unknown, depth = 0): string {
+  const direct = safeHttpsUrl(value);
+  if (direct || depth >= 2) return direct;
+  if (Array.isArray(value)) {
+    for (const entry of value.slice(0, 4)) {
+      const found = nestedHttpsUrl(entry, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (!value || typeof value !== "object") return "";
+  const item = value as Record<string, unknown>;
+  for (const key of ["url", "link", "src", "href", "thumbnail", "image", "original"]) {
+    const found = nestedHttpsUrl(item[key], depth + 1);
+    if (found) return found;
+  }
+  return "";
 }
 
 function unwrapPayload(input: unknown): unknown {
@@ -105,7 +132,7 @@ function shoppingItems(input: unknown): Record<string, unknown>[] {
   if (!value || typeof value !== "object") return [];
   const record = value as Record<string, unknown>;
   const collected: Record<string, unknown>[] = [];
-  for (const key of ["shopping", "shopping_results", "shoppingResults", "top_pla", "pla", "products", "product_results", "productResults", "items", "results"]) {
+  for (const key of ["shopping", "shopping_results", "shoppingResults", "top_pla", "bottom_pla", "jackpot_pla", "pla", "products", "product_results", "productResults", "items", "results"]) {
     const items = record[key];
     if (Array.isArray(items)) collected.push(...items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)));
   }
@@ -135,19 +162,22 @@ function normalizeShoppingItem(item: Record<string, unknown>, query: string, ran
   const retailer = firstText(item, ["shop", "retailer", "seller", "store", "source"], 160) || "Retailer listing";
   let verificationUrl = "";
   for (const key of ["link", "url", "product_link", "productLink", "product_url", "productUrl", "merchant_link", "href"]) {
-    verificationUrl = safeHttpsUrl(item[key]);
+    verificationUrl = nestedHttpsUrl(item[key]);
     if (verificationUrl) break;
   }
   if (!verificationUrl) verificationUrl = `https://www.google.com/search?q=${encodeURIComponent(`${title} ${retailer}`)}&tbm=shop`;
-  const rawPrice = item.extracted_price ?? item.price;
+  const rawPrice = firstValue(item, [
+    "extracted_price", "extractedPrice", "price", "current_price", "currentPrice",
+    "sale_price", "salePrice", "price_from", "priceFrom", "low_price", "lowPrice",
+  ]);
   const price = numberValue(rawPrice);
   const sourcePartId = firstText(item, ["product_id", "productId", "id", "sku"], 120)
     || createHash("sha256").update(`${title}|${retailer}|${verificationUrl}|${rank}`).digest("hex").slice(0, 20);
   const explicitPart = firstText(item, ["part_number", "partNumber", "mpn", "manufacturer_part_number", "manufacturerPartNumber", "model", "sku"], 120);
   const partNumber = explicitPart || (/[0-9]/.test(query) && query.length <= 120 ? query : "");
   let imageUrl = "";
-  for (const key of ["image_url", "imageUrl", "thumbnail", "thumbnail_url", "shop_logo", "image"]) {
-    imageUrl = safeHttpsUrl(item[key]);
+  for (const key of ["image_url", "imageUrl", "thumbnail", "thumbnail_url", "thumbnailUrl", "shop_logo", "image", "images", "product_image", "productImage"]) {
+    imageUrl = nestedHttpsUrl(item[key]);
     if (imageUrl) break;
   }
   const rating = numberValue(item.rating);
@@ -227,7 +257,7 @@ async function liveSearch(query: string, quantity: number, config: Record<string
   const country = (config.BRIGHTDATA_SERP_COUNTRY || "us").toLowerCase();
   const language = (config.BRIGHTDATA_SERP_LANGUAGE || "en").toLowerCase();
   const currency = (config.BRIGHTDATA_SERP_CURRENCY || "USD").toUpperCase();
-  const target = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=shop&gl=${encodeURIComponent(country)}&hl=${encodeURIComponent(language)}&brd_json=json`;
+  const target = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=shop&gl=${encodeURIComponent(country)}&hl=${encodeURIComponent(language)}&brd_json=1`;
   const started = performance.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25_000);
@@ -296,6 +326,14 @@ export function brightDataPartsDevPlugin(frontendRoot: string): Plugin {
   return {
     name: "schematic-brightdata-parts-dev",
     configureServer(server) {
+      // Surface the parts-provider startup state immediately so a missing or
+      // stale backend/.env is diagnosed at boot instead of as a runtime 503.
+      const zone = config.BRIGHTDATA_SERP_ZONE || "serp_api1";
+      if (config.BRIGHTDATA_API_KEY) {
+        server.config.logger.info(`[parts-search] Bright Data live shopping configured (zone=${zone}, endpoint=${config.BRIGHTDATA_SERP_ENDPOINT || "https://api.brightdata.com/request"}). If keys changed, restart the dev server to reload backend/.env.`);
+      } else {
+        server.config.logger.warn(`[parts-search] BRIGHTDATA_API_KEY not found in ${path.resolve(frontendRoot, "../backend/.env")} — parts searches will return PARTS_PROVIDER_NOT_CONFIGURED. Add the key, then restart the dev server.`);
+      }
       // Pre-transform the complete Parts and landing paths after each
       // dev-server restart so syntax/import regressions are reported even
       // when no browser tab is currently connected.

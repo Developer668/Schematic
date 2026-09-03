@@ -24,6 +24,7 @@ const StudioPage = lazy(() => import("./pages/StudioPage.tsx"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage.tsx"));
 const PartsPage = lazy(() => import("./pages/PartsPage.tsx"));
 const AuthPage = lazy(() => import("./pages/AuthPage.tsx"));
+const AuthCallbackPage = lazy(() => import("./pages/AuthCallbackPage.tsx"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage.tsx"));
 
 function WorkspaceLoading({ message = "Loading your workspace…" }: { message?: string }) {
@@ -156,6 +157,7 @@ export default function WorkspaceApp() {
       <Suspense fallback={<WorkspaceLoading message="Opening Schematic…" />}>
         <Routes>
           <Route path="/auth" element={<AuthGate />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route
             path="/studio"
             element={

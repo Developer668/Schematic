@@ -16,9 +16,10 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
-    "@xyflow/react": "^12.3.6",
     "@schematic/behavior": "workspace:*",
+    "@xyflow/react": "^12.3.6",
     "axios": "^1.13.6",
+    "firebase": "^12.18.0",
     "idb-keyval": "^6.2.2",
     "jszip": "^3.10.1",
     "lucide-react": "^0.460.0",
