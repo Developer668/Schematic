@@ -135,10 +135,13 @@ describe("workspace UI", () => {
   it("supports keyboard clearing and keeps the full manufacturer filter available", () => {
     const container = studio();
     const input = container.querySelector<HTMLInputElement>("input[aria-label='Search component library']");
-    const selects = container.querySelectorAll<HTMLSelectElement>("aside[aria-label='Component library'] select");
     expect(input).toBeTruthy();
-    expect(selects).toHaveLength(2);
-    expect(Array.from(selects[1]?.options ?? []).some((option) => option.textContent?.includes("Texas Instruments"))).toBe(true);
+    const filters = container.querySelector<HTMLButtonElement>("button[aria-controls='component-library-filters']");
+    expect(filters).toBeTruthy();
+    act(() => filters?.click());
+    const selects = container.querySelectorAll<HTMLSelectElement>("aside[aria-label='Component library'] select");
+    expect(selects.length).toBeGreaterThanOrEqual(2);
+    expect(Array.from(selects).some((select) => Array.from(select.options).some((option) => option.textContent?.includes("Texas Instruments")))).toBe(true);
 
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;

@@ -158,14 +158,16 @@ reference workspaces; that is separate from the Site runtime dependency graph.
 ## Evidence to record after publication
 
 Published evidence: GitHub commit
-`134c28dbd9fc58376b68f87b87ff3c4eb3c85318`; Sites version 6; deployment
-`appgdep_6a96798637ac819183c18605d5c4fa6d`; deployment status `succeeded` at
-2026-09-01T07:06:57Z; live URL
+`e1eb2a775e6318ecc2e69fca17d5e8c3a87f1b4e`; Sites version 14; deployment
+`appgdep_6a98e9b392d881918019962a9187b6d5`; deployment status `succeeded` at
+2026-09-03T03:30:13Z; live URL
 `https://schematic-hardware-workspace.decipherer71.chatgpt.site`.
-Unauthenticated HTTP smoke checks returned 200 for `/`, `/api/health`,
-`/api/docs`, and `/capabilities`, and 404 for `/api/compile` and
-`/api/simulation/state`. These checks do not establish native WebMCP discovery,
-source execution, compilation, or physical hardware behavior.
+Live HTTP smoke checks returned 200 for `/`, `/api/health`, `/api/docs`, and
+`/capabilities`, and 404 for `/api/compile` and `/api/simulation/state`.
+Authenticated in-app browser acceptance opened `/studio`, kept the code panel
+docked beside the canvas, and ran `behavior.get_capabilities` successfully
+with 45 WebMCP tools registered. These checks do not establish physical
+hardware behavior.
 
 Record the commit, deployed Site version, publication timestamp, project ID,
 native tool count/host, live-route results, and the behavior/code fixture

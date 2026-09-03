@@ -380,7 +380,7 @@ export const useShoppingStore = create<ShoppingState>((set, get) => ({
     // A discovery/publication attempt is not a destructive replacement. Keep
     // the last accepted listings and cart usable while the next handoff is
     // pending or rejected; only a successful publication replaces results.
-    set({ requestStatus: "failed", discovery: null, publicationError: "Live shopping discovery is available through Bright Data. Canonical cart publication still requires a reviewed catalog identity." });
+    set({ requestStatus: "failed", discovery: null, publicationError: "Live shopping discovery is available through Bright Data, but showing listings still requires a connected, authenticated WebMCP agent. Canonical cart publication still requires a reviewed catalog identity." });
     persist(get());
   },
   publishAgentResults(rawResults, publication) {

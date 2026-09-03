@@ -164,7 +164,9 @@ workspace typecheck/lint passed; frontend reported 173 tests across 31 files;
 the Behavior package reported 28 tests; all workspace builds passed; Site
 lint/typecheck/tests/build and the static compiler-free asset scan passed; and
 `git diff --check` passed. The source was pushed at commit
-`134c28dbd9fc58376b68f87b87ff3c4eb3c85318`; Site version 6 was saved from that
-commit and deployment `appgdep_6a96798637ac819183c18605d5c4fa6d` reached
-`succeeded` at 2026-09-01T07:06:57Z. These are repository/deployment
-observations, not proof that source compiles or that physical hardware works.
+`e1eb2a775e6318ecc2e69fca17d5e8c3a87f1b4e`; Site version 14 was saved from
+that commit and deployment `appgdep_6a98e9b392d881918019962a9187b6d5` reached
+`succeeded` at 2026-09-03T03:30:13Z. Authenticated in-app browser acceptance
+opened `/studio`, kept the code panel docked beside the canvas, and ran
+`behavior.get_capabilities` with 45 WebMCP tools registered. These are
+repository/deployment observations, not proof that physical hardware works.

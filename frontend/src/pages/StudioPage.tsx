@@ -406,7 +406,7 @@ export default function StudioPage() {
               {persistenceStatus.state === "loading" ? "Loading" : persistenceStatus.state === "saving" ? "Saving" : persistenceStatus.state === "error" ? "Save issue" : "Saved"}
             </button>
             {showProjectMenu && (
-              <div role="menu" aria-label="Projects" className="studio-project-menu absolute left-0 top-full z-[70] mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden border bg-card">
+              <div role="menu" aria-label="Projects" className="studio-project-menu absolute left-0 top-full z-[70] mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden border border-border bg-card">
                 <div className="flex items-center justify-between border-b border-border px-3 py-2">
                   <div><div className="kicker">Projects</div><div className="text-[11px] text-muted-foreground">Create, switch, rename, or remove a project</div></div>
                   <span className="count-badge">{projects.length}</span>
@@ -441,7 +441,7 @@ export default function StudioPage() {
                         className="project-menu-select"
                       >
                         <Box size={11} />
-                        <span className="min-w-0 flex-1" title="Double click to rename">
+                        <span className="min-w-0 flex-1" title="Double-click to rename">
                           <span className="block truncate text-xs font-medium">{item.name}</span>
                           <span className="block text-[10px] text-muted-foreground">{item.components.length} components · {item.connections.length} wires</span>
                         </span>
@@ -569,7 +569,7 @@ export default function StudioPage() {
         {!leftCollapsed && (
           <aside aria-label="Component library" className="studio-library panel-enter z-30 flex shrink-0 flex-col border-r border-border bg-card max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:shadow-2xl">
             <div className="flex h-11 items-center justify-between border-b border-border px-3">
-              <div className="flex items-center gap-2"><Box size={14} /><div><div className="text-xs font-semibold">Components</div><div className="text-[10px] text-muted-foreground">Click to add · drag to place</div></div></div>
+              <div className="flex items-center gap-2"><Box size={14} /><div><div className="text-xs font-semibold">Components</div><div className="text-[10px] text-muted-foreground">Click to add · drag to place<span className="sr-only">. Preview controls appear in the Inspector.</span></div></div></div>
               <div className="flex items-center gap-1.5">
                 <span className="count-badge" data-testid="component-search-count" role="status" aria-live="polite" aria-label={isLibrarySearchPending ? "Updating component results" : `${filteredResults.length} matching components`}>
                   {isLibrarySearchPending ? <LoaderCircle size={11} className="animate-spin" aria-hidden="true" /> : filteredResults.length}
@@ -711,6 +711,7 @@ export default function StudioPage() {
                           <div className="component-meta-row">
                             <span className="component-meta-badge">{c.category}</span>
                             <span className="font-mono tabular-nums">{c.ports.length} ports</span>
+                            <span className={`component-preview-status ${c.behavior ? "is-mapped" : ""}`} title={c.behavior ? "Preview controls available in Inspector" : "No typed preview controls yet"} aria-hidden="true" />
                           </div>
                         </div>
                         <span className="component-add">+</span>
