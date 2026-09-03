@@ -440,7 +440,12 @@ export async function requestPartsSearch(request: PartsSearchRequest, options: P
         "X-Schematic-Request-Id": request.requestId,
       });
       for (const [key, value] of Object.entries(await auth(force, signal))) headers.set(key, value);
-      return fetchImpl(requestUrl(path, request), { method: "GET", credentials: "include", headers, signal });
+      // Bound the total wait: if the listing provider stalls, the search
+      // fails after the timeout instead of leaving the UI loading forever.
+      const timeoutSignal = signal && "any" in AbortSignal && "timeout" in AbortSignal
+        ? AbortSignal.any([signal, AbortSignal.timeout(60_000)])
+        : signal;
+      return fetchImpl(requestUrl(path, request), { method: "GET", credentials: "include", headers, signal: timeoutSignal });
     };
     let response = await send(false);
     if (response.status === 401 && !signal?.aborted) response = await send(true);

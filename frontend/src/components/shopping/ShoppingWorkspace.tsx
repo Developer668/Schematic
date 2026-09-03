@@ -979,6 +979,11 @@ export default function ShoppingWorkspace({
       requestSequence.current += 1;
       activeRequest.current?.controller.abort();
       activeRequest.current = null;
+      // React StrictMode mounts, unmounts, and remounts once in development.
+      // Clearing the fingerprint here lets the remounted effect re-run the
+      // lookup that the simulated unmount just aborted, instead of leaving
+      // the store stuck in "searching" forever.
+      autoLookupFingerprint.current = null;
     },
     [],
   );

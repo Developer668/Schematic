@@ -30,6 +30,7 @@ import type {
   PreviewSnapshot,
 } from "../../behavior/previewTypes.ts";
 import { getRegisteredToolNames } from "../../webmcp/tools.ts";
+import { createStarterPlanAndPreview } from "../../behavior/starterPlan.ts";
 import ValidationPanel from "../validation/ValidationPanel.tsx";
 
 type DockTab = "webmcp" | "terminal" | "debug" | "validation";
@@ -61,6 +62,7 @@ export default function BottomDock({
   const startPreview = useBehaviorPreviewStore((state) => state.startPreview);
   const resetPreview = useBehaviorPreviewStore((state) => state.resetPreview);
   const seekPreview = useBehaviorPreviewStore((state) => state.seekPreview);
+  const previewError = useBehaviorPreviewStore((state) => state.error);
   const project = useProjectStore((state) => state.project);
   const toolNames = getRegisteredToolNames();
 
@@ -141,6 +143,8 @@ export default function BottomDock({
             onPlay={() => void startPreview({ durationMs: previewDurationMs })}
             onReset={() => void resetPreview()}
             onSeek={(timeMs) => void seekPreview(timeMs)}
+            blockedMessage={previewStatus === "blocked" ? previewError : null}
+            onCreatePlan={() => createStarterPlanAndPreview()}
           />
         )}
         {tab === "validation" && (
@@ -479,6 +483,8 @@ function PreviewTimeline({
   onPlay,
   onReset,
   onSeek,
+  blockedMessage,
+  onCreatePlan,
 }: {
   status: string;
   preparationStatus: "ready" | "partial" | null;
@@ -489,6 +495,8 @@ function PreviewTimeline({
   onPlay: () => void;
   onReset: () => void;
   onSeek: (timeMs: number) => void;
+  blockedMessage: string | null;
+  onCreatePlan: () => Promise<string | null>;
 }) {
   const maxTime = Math.max(
     durationMs,
@@ -516,6 +524,13 @@ function PreviewTimeline({
           <AlertTriangle size={14} />
           <span>Some unsupported rules or actions were skipped. Review the diagnostics before using this as the complete intended outcome.</span>
         </div>
+      )}
+
+      {status === "blocked" && (
+        <BlockedPlanNotice
+          message={blockedMessage ?? "No Behavior Plan is saved for this project."}
+          onCreatePlan={onCreatePlan}
+        />
       )}
 
       <div className="outcome-transport">
@@ -625,6 +640,54 @@ function PreviewTimeline({
           )}
         </main>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Rendered inside the Outcome tab whenever preview status is "blocked":
+ * explains the failure and offers a one-click starter Behavior Plan generated
+ * from the canvas components' own checked-in behavior profiles.
+ * `onCreatePlan` resolves to null on success or an honest error message.
+ */
+function BlockedPlanNotice({
+  message,
+  onCreatePlan,
+}: {
+  message: string;
+  onCreatePlan: () => Promise<string | null>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  return (
+    <div className="outcome-blocked-plan" role="status">
+      <div className="outcome-blocked-head">
+        <TriangleAlert size={15} />
+        <div>
+          <b>Preview is blocked — no Behavior Plan is saved</b>
+          <p>{message}</p>
+        </div>
+        <button
+          type="button"
+          className="outcome-blocked-generate"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            setFeedback(null);
+            void onCreatePlan().then((error) => {
+              setBusy(false);
+              if (error) setFeedback(error);
+            });
+          }}
+        >
+          {busy ? "Generating…" : "Generate starter plan & play"}
+        </button>
+      </div>
+      <p className="outcome-blocked-hint">
+        A starter plan drives every behavior-capable part on the canvas with its own checked-in profile — one typed action per part, plus an indicator blink timeline. No source code is read or executed.
+      </p>
+      {feedback && <p className="outcome-blocked-feedback">{feedback}</p>}
     </div>
   );
 }
