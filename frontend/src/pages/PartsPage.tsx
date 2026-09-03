@@ -4,20 +4,16 @@ import {
   Download,
   Moon,
   PackageSearch,
-  ReceiptText,
   Settings,
   Sun,
 } from "lucide-react";
 import ShoppingWorkspace from "../components/shopping/ShoppingWorkspace.tsx";
 import LogoMark from "../components/LogoMark.tsx";
 import { useProjectStore } from "../store/useProjectStore.ts";
-import { useShoppingStore } from "../store/useShoppingStore.ts";
 import { useThemeStore } from "../store/useThemeStore.ts";
 
 export default function PartsPage() {
   const project = useProjectStore((state) => state.project);
-  const cartCount = useShoppingStore((state) => state.cart.length);
-  const publishedCount = useShoppingStore((state) => state.results.length);
   const { theme, toggle } = useThemeStore();
 
   return (
@@ -61,16 +57,9 @@ export default function PartsPage() {
             <span className="parts-page-title-icon"><PackageSearch size={18} /></span>
             <div>
               <p>Parts market</p>
-              <h1>Find hardware for {project.name}.</h1>
-              <span>Search live shopping listings, compare sellers and prices, then keep reviewed parts in one bill of materials.</span>
+              <h1>Build the parts list for {project.name}.</h1>
+              <span>Listings refresh from the active design and collect into one estimated bill of materials.</span>
             </div>
-          </div>
-
-          <div className="parts-page-metrics" aria-label="Parts workspace summary">
-            <div><span>Design</span><b>{project.components.length}</b></div>
-            <div><span>Listings</span><b>{publishedCount}</b></div>
-            <div><span>Cart</span><b>{cartCount}</b></div>
-            <ReceiptText size={16} aria-hidden="true" />
           </div>
         </header>
 

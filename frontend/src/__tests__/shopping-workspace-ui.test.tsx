@@ -19,10 +19,10 @@ function renderWorkspace() {
   return host;
 }
 
-describe("parts workspace agent scaffold", () => {
+describe("parts workspace automatic sourcing", () => {
   beforeEach(() => {
     useProjectStore.getState().clear();
-    useShoppingStore.setState({ query: "", results: [], cart: [], budget: null, lastSearchAt: null, publicationError: null, undoStack: [] });
+    useShoppingStore.setState({ query: "", results: [], cart: [], budget: null, lastSearchAt: null, publicationError: null, requestStatus: "idle", handoff: null, discovery: null, undoStack: [] });
   });
 
   afterEach(() => {
@@ -32,20 +32,16 @@ describe("parts workspace agent scaffold", () => {
     host = undefined;
   });
 
-  it("shows the live parts search scaffold and keeps canonical cart publication gated", () => {
+  it("shows the design-driven build cart without the retired search controls", () => {
     const container = renderWorkspace();
-    expect(container.textContent).toContain("Search parts for sale");
-    expect(container.textContent).toContain("Start with a part or the current design");
-    expect(container.textContent).toContain("Bright Data SERP");
-    expect(Array.from(container.querySelectorAll("button")).some((button) => /search/i.test(button.textContent ?? ""))).toBe(true);
-
-    const input = container.querySelector<HTMLInputElement>("input[aria-label='Search exact parts']");
-    expect(input).toBeTruthy();
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, "ESP32-S3");
-      input?.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    expect(useShoppingStore.getState().query).toBe("ESP32-S3");
+    expect(container.textContent).toContain("Build cart");
+    expect(container.textContent).toContain("Est. build cost");
+    expect(container.textContent).toContain("Add components to your design");
+    expect(container.textContent).not.toContain("PUBLIC DISCOVERY");
+    expect(container.textContent).not.toContain("Budget ceiling");
+    expect(container.textContent).not.toContain("Undo");
+    expect(container.textContent).not.toContain("Reset required");
+    expect(container.querySelector("input[aria-label='Search exact parts']")).toBeNull();
+    expect(container.querySelector("[data-testid='build-cart']")).toBeTruthy();
   });
 });

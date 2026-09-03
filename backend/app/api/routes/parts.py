@@ -1,4 +1,4 @@
-"""Live parts discovery through Bright Data's Google Shopping SERP API.
+"""Live parts discovery through the server-side supplier listings provider.
 
 The Bright Data credential is read only by the FastAPI process. Search results
 remain discovery records: they can be inspected and opened at the retailer,
@@ -221,7 +221,7 @@ def _candidate(item: dict[str, Any], query: str, rank: int) -> dict[str, Any] | 
     title = _first_text(item, "title", "name", "product_title", "productTitle")
     if not title:
         return None
-    retailer = _first_text(item, "shop", "retailer", "seller", "store", "source", limit=160) or "Google Shopping"
+    retailer = _first_text(item, "shop", "retailer", "seller", "store", "source", limit=160) or "Retailer listing"
     direct_url = None
     for key in ("link", "url", "product_link", "productLink", "product_url", "productUrl", "merchant_link", "href"):
         direct_url = _safe_https_url(item.get(key))
@@ -404,10 +404,10 @@ async def _provider_search(query: str, quantity: int) -> _ProviderResponse:
 
     candidates = _dedupe_candidates(_shopping_items(payload), query)
     if not candidates:
-        message = "No Google Shopping listings matched this search. Try an exact manufacturer part number or board name."
+        message = "No supplier listings matched this search. Try an exact manufacturer part number or board name."
         return _ProviderResponse(200, {"code": "BRIGHTDATA_NO_RESULTS", **_base_envelope(query, quantity, duration_ms=duration_ms, status="empty", result_count=0, message=message), "candidates": []}, {"Cache-Control": "private, max-age=30"})
 
-    message = f"Found {len(candidates)} live Google Shopping result{'s' if len(candidates) != 1 else ''}. Confirm the exact model, seller, stock, shipping, and checkout price before purchasing."
+    message = f"Found {len(candidates)} current supplier listing{'s' if len(candidates) != 1 else ''}. Confirm the exact model, seller, stock, shipping, and checkout price before purchasing."
     return _ProviderResponse(200, {"code": "LIVE_SHOPPING_RESULTS", **_base_envelope(query, quantity, duration_ms=duration_ms, status="success", result_count=len(candidates), message=message), "candidates": candidates}, {"Cache-Control": "private, max-age=30"})
 
 

@@ -132,7 +132,7 @@ function currencyFor(item: Record<string, unknown>, rawPrice: unknown, fallback:
 function normalizeShoppingItem(item: Record<string, unknown>, query: string, rank: number, currency: string) {
   const title = firstText(item, ["title", "name", "product_title", "productTitle"]);
   if (!title) return null;
-  const retailer = firstText(item, ["shop", "retailer", "seller", "store", "source"], 160) || "Google Shopping";
+  const retailer = firstText(item, ["shop", "retailer", "seller", "store", "source"], 160) || "Retailer listing";
   let verificationUrl = "";
   for (const key of ["link", "url", "product_link", "productLink", "product_url", "productUrl", "merchant_link", "href"]) {
     verificationUrl = safeHttpsUrl(item[key]);
@@ -282,8 +282,8 @@ async function liveSearch(query: string, quantity: number, config: Record<string
         rateLimited: false,
         publication: { required: true, returnTool: "shopping.search", reason: "Live web results must be checked against the exact component and checkout page before becoming a canonical cart record." },
         message: candidates.length
-          ? `Found ${candidates.length} live Google Shopping result${candidates.length === 1 ? "" : "s"}. Confirm the exact model, seller, stock, shipping, and checkout total.`
-          : "No Google Shopping listings matched. Try an exact manufacturer part number or board name.",
+          ? `Found ${candidates.length} current supplier listing${candidates.length === 1 ? "" : "s"}. Confirm the exact model, seller, stock, shipping, and checkout total.`
+          : "No supplier listings matched. Try an exact manufacturer part number or board name.",
       },
     };
   } finally {

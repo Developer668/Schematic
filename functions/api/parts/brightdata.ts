@@ -141,7 +141,7 @@ function currency(item: Record<string, unknown>, price: unknown, fallback: strin
 function candidate(item: Record<string, unknown>, query: string, rank: number, fallbackCurrency: string): Candidate | null {
   const title = first(item, ["title", "name", "product_title", "productTitle"]);
   if (!title) return null;
-  const retailer = first(item, ["shop", "retailer", "seller", "store", "source"], 160) || "Google Shopping";
+  const retailer = first(item, ["shop", "retailer", "seller", "store", "source"], 160) || "Retailer listing";
   let verificationUrl = "";
   for (const key of ["link", "url", "product_link", "productLink", "product_url", "productUrl", "merchant_link", "href"]) {
     verificationUrl = safeHttps(item[key]);
