@@ -1513,41 +1513,12 @@ function installModelContextTestingPolyfill() {
   });
 }
 
-function installModelContextProducerPolyfill() {
-  const doc = document as any;
-  const nav = navigator as any;
-  if (typeof doc.modelContext?.registerTool === "function" || typeof nav.modelContext?.registerTool === "function") return;
-  const registry = new Map<string, ToolDef>();
-  const mc = {
-    __schematicPolyfill: true as const,
-    async registerTool(tool: ToolDef, options?: { signal?: AbortSignal }) {
-      registry.set(tool.name, tool);
-      options?.signal?.addEventListener("abort", () => registry.delete(tool.name));
-    },
-    async getTools() {
-      return [...registry.values()];
-    },
-    async executeTool(tool: string | { name: string }, args: Record<string, unknown> = {}) {
-      const name = typeof tool === "string" ? tool : tool.name;
-      const found = registry.get(name);
-      if (!found) throw new Error(`Unknown WebMCP tool: ${name}`);
-      return executeToolWithActivity(found, args);
-    },
-  };
-  Object.defineProperty(doc, "modelContext", { configurable: true, value: mc });
-  Object.defineProperty(nav, "modelContext", { configurable: true, value: mc });
-}
-
-function isNativeModelContext(value: any) {
-  return Boolean(value)
-    && typeof value.registerTool === "function"
-    && (value as Record<string, unknown>).__schematicPolyfill !== true;
-}
-
 /**
  * ChatGPT's in-app browser may inject document.modelContext just after page
- * scripts run. If we initially fell back to the polyfill, re-register once a
- * native surface appears so the host actually discovers the 45 tools.
+ * scripts run. If no native surface existed at bootstrap, re-register once one
+ * appears so the host actually discovers the 45 tools. We never polyfill
+ * document/navigator.modelContext: a fake registry would report success while
+ * the host still sees zero tools.
  */
 let lateNativeRetryScheduled = false;
 function scheduleLateNativeRetry(generation: number) {
@@ -1558,7 +1529,7 @@ function scheduleLateNativeRetry(generation: number) {
     window.setTimeout(() => {
       if (generation !== registrationGeneration) return;
       const current: any = (document as any).modelContext ?? (navigator as any).modelContext;
-      if (isNativeModelContext(current) && useWebMCPStore.getState().registration.state === "fallback") {
+      if (typeof current?.registerTool === "function" && useWebMCPStore.getState().registration.state === "unavailable") {
         lateNativeRetryScheduled = false;
         void registerWebMCPTools();
       }
@@ -1581,9 +1552,6 @@ export async function registerWebMCPTools() {
   controllers = [];
   const generation = ++registrationGeneration;
   useWebMCPStore.getState().setRegistration({ state: "checking", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: undefined });
-  const existingModelContext: any = (document as any).modelContext ?? (navigator as any).modelContext;
-  const hasNativeModelContext = isNativeModelContext(existingModelContext);
-  installModelContextProducerPolyfill();
   installModelContextTestingPolyfill();
   const mc: any = (document as any).modelContext ?? (navigator as any).modelContext;
   // Test/degraded-runtime fallback only. Native agents must use the
@@ -1608,7 +1576,8 @@ export async function registerWebMCPTools() {
   if (generation !== registrationGeneration) return;
   if (!mc || typeof mc.registerTool !== "function") {
     useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: "The browser did not expose document.modelContext." });
-    console.warn("[WebMCP] modelContext not available — run in the supported in-app browser, or use the test/degraded-runtime fallback");
+    console.warn("[WebMCP] native document.modelContext is unavailable; no browser-visible tools were registered");
+    scheduleLateNativeRetry(generation);
     return;
   }
   let registeredCount = 0;
@@ -1640,20 +1609,18 @@ export async function registerWebMCPTools() {
     mc.ontoolchange = () => console.log("[WebMCP] toolset changed");
   }
   let discoveredCount = 0;
-  let discovery: "verified" | "unverified" | "polyfill" = hasNativeModelContext ? "unverified" : "polyfill";
+  let discovery: "verified" | "unverified" = "unverified";
   if (typeof mc.getTools === "function") {
     try {
       const discovered = await mc.getTools();
       discoveredCount = Array.isArray(discovered) ? discovered.filter((tool: any) => typeof tool?.name === "string").length : 0;
-      if (hasNativeModelContext && discoveredCount === registeredCount && registeredCount === WEBMCP_TOOL_COUNT) discovery = "verified";
+      if (discoveredCount === registeredCount && registeredCount === WEBMCP_TOOL_COUNT) discovery = "verified";
     } catch (error) {
       console.warn("[WebMCP] native tool discovery check failed:", error);
     }
-  } else if (!hasNativeModelContext) {
-    discoveredCount = registeredCount;
   }
   useWebMCPStore.getState().setRegistration({
-    state: registrationErrors > 0 ? "error" : hasNativeModelContext ? "native" : "fallback",
+    state: registrationErrors > 0 ? "error" : "native",
     registeredCount,
     declaredCount: WEBMCP_TOOL_COUNT,
     discoveredCount,
@@ -1662,7 +1629,6 @@ export async function registerWebMCPTools() {
   });
   (window as any).__schematicWebMCP.getRegistration = () => useWebMCPStore.getState().registration;
   console.log(`[WebMCP] ready — ${WEBMCP_TOOL_COUNT} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
-  if (!hasNativeModelContext) scheduleLateNativeRetry(generation);
 }
 
 export function unregisterWebMCPTools() {
