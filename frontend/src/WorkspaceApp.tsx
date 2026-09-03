@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { registerWebMCPTools, unregisterWebMCPTools } from "./webmcp/tools.ts";
 import "./store/useThemeStore.ts";
 import { getCurrentUserId, initAuth, useAuth } from "./auth/session.ts";
 import {
@@ -133,14 +132,9 @@ export default function WorkspaceApp() {
       if (!disposed) syncWorkspaceReadiness();
     });
 
-    void Promise.resolve()
-      .then(() => {
-        if (disposed) return;
-        return registerWebMCPTools();
-      })
-      .catch((error) => {
-        if (!disposed) console.error("[WebMCP] startup registration failed", error);
-      });
+    // WebMCP registration is owned by App-level WebMCPBootstrap so tools stay
+    // visible on landing, studio, parts, settings, and 404. Do not register or
+    // unregister here — doing so would abort the shared lease on route change.
 
     if (!localStorage.getItem("schematic-theme")) {
       document.documentElement.classList.add("dark");
@@ -150,7 +144,6 @@ export default function WorkspaceApp() {
 
     return () => {
       disposed = true;
-      unregisterWebMCPTools();
       stopBehaviorPreviewAdapter();
       stopPersistenceStatus();
       stopProjectPersistence();

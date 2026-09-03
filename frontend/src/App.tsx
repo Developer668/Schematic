@@ -42,10 +42,39 @@ function RouteLoading() {
   );
 }
 
+/**
+ * WebMCP must be visible on EVERY route — including "/" (landing), "/studio",
+ * "/parts", "/settings", and 404 — because ChatGPT discovers tools on the
+ * currently loaded top-level document. Registering only inside WorkspaceApp
+ * left the landing page with 0 tools, so the model reported WebMCP as missing.
+ * This bootstrap owns the single registration lease for the whole SPA.
+ */
+function WebMCPBootstrap() {
+  useEffect(() => {
+    let disposed = false;
+    void import("./webmcp/tools.ts")
+      .then(({ registerWebMCPTools }) => {
+        if (disposed) return;
+        return registerWebMCPTools();
+      })
+      .catch((error) => {
+        if (!disposed) console.error("[WebMCP] bootstrap registration failed", error);
+      });
+    return () => {
+      disposed = true;
+      void import("./webmcp/tools.ts").then(({ unregisterWebMCPTools }) => {
+        unregisterWebMCPTools();
+      }).catch(() => undefined);
+    };
+  }, []);
+  return null;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <RouteEffects />
+      <WebMCPBootstrap />
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route

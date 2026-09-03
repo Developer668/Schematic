@@ -20,7 +20,7 @@ import { PersistenceNotReadyError, type PersistenceContextToken } from "../store
 import { getCatalogComponent, searchCatalog } from "../data/catalog.ts";
 import { isBoardDefinition } from "../data/hardware.ts";
 import { explainIssue } from "@schematic/validation";
-import { apiUrl, getAuthHeaders, getAuthSession, waitForAuth } from "../auth/session.ts";
+import { apiUrl, getAuthHeaders, getAuthSession, getCurrentUserId, waitForAuth } from "../auth/session.ts";
 import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.json";
 import { behaviorToolDefinitions } from "./behaviorTools.ts";
 import { getBehaviorState, readCode, writeCode } from "../application/behaviorCommands.ts";
@@ -1431,16 +1431,18 @@ async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> 
   try {
     // Keep the public landing page from becoming an unauthenticated mutation
     // surface. Local development has the explicit development session; hosted
-    // builds must have a platform-verified identity before any agent action.
+    // builds must have a platform-verified identity before any mutation.
+    // Read-only inspection stays available so ChatGPT discovery + exploration
+    // works even before sign-in; mutations still require a verified session.
     const hosted = typeof window !== "undefined" && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
     const session = await getAuthSession(false, signal);
     // shopping.search owns a phase-aware gate: query-only calls can return a
     // bounded machine-readable handoff while unauthenticated, while its
     // publication branch returns AUTH_REQUIRED without a trusted session.
-    // No other hosted tool bypasses the gate.
     const shoppingSearch = tool.name === "shopping.search";
-    if (hosted && !session && !shoppingSearch) {
-      const denied = toolFailure("AUTH_REQUIRED", "Sign in to use Schematic WebMCP tools; project state is scoped to your verified account.");
+    const isReadOnly = tool.annotations?.readOnlyHint === true;
+    if (hosted && !session && !isReadOnly && !shoppingSearch) {
+      const denied = toolFailure("AUTH_REQUIRED", "Sign in to use Schematic WebMCP mutation tools; read-only tools (search, inspect, graph, validation, behavior capabilities) remain available. Project mutations are scoped to your verified account.");
       useWebMCPStore.getState().finishTool(activityId, denied, true);
       return denied;
     }
@@ -1517,6 +1519,7 @@ function installModelContextProducerPolyfill() {
   if (typeof doc.modelContext?.registerTool === "function" || typeof nav.modelContext?.registerTool === "function") return;
   const registry = new Map<string, ToolDef>();
   const mc = {
+    __schematicPolyfill: true as const,
     async registerTool(tool: ToolDef, options?: { signal?: AbortSignal }) {
       registry.set(tool.name, tool);
       options?.signal?.addEventListener("abort", () => registry.delete(tool.name));
@@ -1535,27 +1538,59 @@ function installModelContextProducerPolyfill() {
   Object.defineProperty(nav, "modelContext", { configurable: true, value: mc });
 }
 
+function isNativeModelContext(value: any) {
+  return Boolean(value)
+    && typeof value.registerTool === "function"
+    && (value as Record<string, unknown>).__schematicPolyfill !== true;
+}
+
+/**
+ * ChatGPT's in-app browser may inject document.modelContext just after page
+ * scripts run. If we initially fell back to the polyfill, re-register once a
+ * native surface appears so the host actually discovers the 45 tools.
+ */
+let lateNativeRetryScheduled = false;
+function scheduleLateNativeRetry(generation: number) {
+  if (lateNativeRetryScheduled || typeof window === "undefined") return;
+  lateNativeRetryScheduled = true;
+  const attempts = [800, 2000, 4000];
+  for (const delayMs of attempts) {
+    window.setTimeout(() => {
+      if (generation !== registrationGeneration) return;
+      const current: any = (document as any).modelContext ?? (navigator as any).modelContext;
+      if (isNativeModelContext(current) && useWebMCPStore.getState().registration.state === "fallback") {
+        lateNativeRetryScheduled = false;
+        void registerWebMCPTools();
+      }
+      if (delayMs === attempts[attempts.length - 1]) lateNativeRetryScheduled = false;
+    }, delayMs);
+  }
+}
+
 export async function registerWebMCPTools() {
   // React StrictMode and hot reload can invoke startup twice. Abort the old
   // lease before creating a new one so a native registry never accumulates
   // duplicate callbacks for the same tool name.
+  // IMPORTANT (ChatGPT fix): register synchronously on every route — including
+  // the landing page — without waiting for auth or IndexedDB hydration first.
+  // ChatGPT discovers tools the moment the top-level document loads; gating
+  // registration on session/persistence left "/" with 0 tools and made the
+  // model report WebMCP as unavailable. Per-call auth/persistence gates in
+  // executeToolWithActivity still protect mutations.
   for (const controller of controllers) controller.abort();
   controllers = [];
   const generation = ++registrationGeneration;
-  // Auth and persistence share startup gates with App. Waiting here keeps a
-  // direct Site import safe as well as the Vite entrypoint.
-  await waitForAuth();
-  await waitForProjectPersistence();
-  if (generation !== registrationGeneration) return;
   useWebMCPStore.getState().setRegistration({ state: "checking", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: undefined });
   const existingModelContext: any = (document as any).modelContext ?? (navigator as any).modelContext;
-  const hasNativeModelContext = typeof existingModelContext?.registerTool === "function";
+  const hasNativeModelContext = isNativeModelContext(existingModelContext);
   installModelContextProducerPolyfill();
   installModelContextTestingPolyfill();
   const mc: any = (document as any).modelContext ?? (navigator as any).modelContext;
   // Test/degraded-runtime fallback only. Native agents must use the
   // document.modelContext registration below; this same-origin object is not a
-  // cross-origin mutation bridge.
+  // cross-origin mutation bridge. Install it immediately so local probes and
+  // the ChatGPT host see a stable surface even while native registration is
+  // still awaiting per-tool promises.
   (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(t, args, executionSignal(context))]));
   (window as any).__schematicWebMCP = {
     version: "schematic-webmcp.v1",
@@ -1563,6 +1598,14 @@ export async function registerWebMCPTools() {
     getRegistration: () => useWebMCPStore.getState().registration,
     listTools: () => getRegisteredToolNames(),
   };
+  // Warm auth/persistence in the background without blocking discovery.
+  // Failures here must never un-register tools; they only affect per-call
+  // mutation gates.
+  void Promise.allSettled([waitForAuth(), waitForProjectPersistence()]).then(() => {
+    if (generation !== registrationGeneration) return;
+    (window as any).__schematicRoom ??= () => getCurrentUserId() || "global";
+  });
+  if (generation !== registrationGeneration) return;
   if (!mc || typeof mc.registerTool !== "function") {
     useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: "The browser did not expose document.modelContext." });
     console.warn("[WebMCP] modelContext not available — run in the supported in-app browser, or use the test/degraded-runtime fallback");
@@ -1619,6 +1662,7 @@ export async function registerWebMCPTools() {
   });
   (window as any).__schematicWebMCP.getRegistration = () => useWebMCPStore.getState().registration;
   console.log(`[WebMCP] ready — ${WEBMCP_TOOL_COUNT} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
+  if (!hasNativeModelContext) scheduleLateNativeRetry(generation);
 }
 
 export function unregisterWebMCPTools() {
