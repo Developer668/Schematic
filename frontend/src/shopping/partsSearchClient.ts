@@ -1,4 +1,4 @@
-import { apiUrl, getAuthHeaders } from "../auth/session.ts";
+import { apiUrl, getAuthHeaders, getCurrentUserId } from "../auth/session.ts";
 import type { ShoppingDiscovery, ShoppingDiscoveryAttempt, ShoppingDiscoveryCandidate } from "../store/useShoppingStore.ts";
 
 export const PARTS_SEARCH_PATH = "/api/parts/search";
@@ -7,6 +7,10 @@ export const PARTS_SEARCH_MAX_QUANTITY = 999;
 
 const DEFAULT_CACHE_TTL_MS = 30_000;
 const MAX_CACHE_ENTRIES = 32;
+const PERSISTED_LOOKUP_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const PERSISTED_LOOKUP_CACHE_MAX_ENTRIES = 128;
+const PERSISTED_LOOKUP_CACHE_MAX_BYTES = 512 * 1024;
+const PERSISTED_LOOKUP_CACHE_PREFIX = "schematic-parts-lookup-cache";
 
 export type PartsSearchStatus = "agent-required" | "rate-limited" | "failed" | "cancelled";
 
@@ -60,6 +64,8 @@ export interface PartsSearchClientOptions {
   requestIdFactory?: () => string;
   cacheTtlMs?: number;
   path?: string;
+  /** Used by force-refresh callers; normal callers should leave this unset. */
+  bypassPersistentCache?: boolean;
 }
 
 export interface PartsSearchSubmitOptions {
@@ -229,6 +235,103 @@ export function normalizeShoppingDiscovery(value: unknown): ShoppingDiscovery | 
   };
 }
 
+type PersistedLookup = {
+  key: string;
+  cachedAt: number;
+  discovery: ShoppingDiscovery;
+};
+
+function persistentStorageKey() {
+  // Never allow an anonymous or local-development cache to cross into a
+  // hosted user session. The API itself requires identity, so a missing id is
+  // simply treated as a non-persistent request.
+  const userId = getCurrentUserId();
+  return userId && userId !== "local-development" ? `${PERSISTED_LOOKUP_CACHE_PREFIX}:${userId}` : "";
+}
+
+function persistentLookupKey(request: PartsSearchRequest) {
+  return request.query.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function readPersistentLookups(now = Date.now()) {
+  const key = persistentStorageKey();
+  if (!key || typeof localStorage === "undefined") return new Map<string, PersistedLookup>();
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) ?? "null");
+    if (!Array.isArray(raw)) return new Map<string, PersistedLookup>();
+    const entries = raw.flatMap((value): PersistedLookup[] => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const item = value as Record<string, unknown>;
+      const cacheKey = typeof item.key === "string" ? item.key.slice(0, 500) : "";
+      const cachedAt = typeof item.cachedAt === "number" ? item.cachedAt : Number(item.cachedAt);
+      const discovery = normalizeShoppingDiscovery(item.discovery);
+      if (!cacheKey || !Number.isFinite(cachedAt) || cachedAt < 0 || now - cachedAt > PERSISTED_LOOKUP_CACHE_MAX_AGE_MS || !discovery) return [];
+      return [{ key: cacheKey, cachedAt, discovery }];
+    });
+    const result = new Map<string, PersistedLookup>();
+    for (const entry of entries.slice(-PERSISTED_LOOKUP_CACHE_MAX_ENTRIES)) result.set(entry.key, entry);
+    return result;
+  } catch {
+    return new Map<string, PersistedLookup>();
+  }
+}
+
+function writePersistentLookups(entries: Map<string, PersistedLookup>) {
+  const key = persistentStorageKey();
+  if (!key || typeof localStorage === "undefined") return;
+  const values = [...entries.values()].slice(-PERSISTED_LOOKUP_CACHE_MAX_ENTRIES);
+  try {
+    const serialized = JSON.stringify(values);
+    if (new TextEncoder().encode(serialized).byteLength > PERSISTED_LOOKUP_CACHE_MAX_BYTES) {
+      // Evict oldest entries until storage is within the hard bound.
+      while (values.length > 1 && new TextEncoder().encode(JSON.stringify(values)).byteLength > PERSISTED_LOOKUP_CACHE_MAX_BYTES) values.shift();
+    }
+    localStorage.setItem(key, JSON.stringify(values));
+  } catch {
+    // Storage can be disabled or full. The request remains usable in memory.
+  }
+}
+
+function persistentCachedOutcome(request: PartsSearchRequest, now = Date.now()): PartsSearchOutcome | null {
+  const entry = readPersistentLookups(now).get(persistentLookupKey(request));
+  if (!entry) return null;
+  const discovery = { ...entry.discovery, cacheHit: true };
+  return {
+    request,
+    requestId: request.requestId,
+    status: discovery.rateLimited ? "rate-limited" : "agent-required",
+    discovery,
+    payload: {
+      query: request.query,
+      quantity: request.quantity,
+      source: discovery.sourceOrder[0] ?? "brightdata-serp",
+      candidates: discovery.candidates,
+      attempts: discovery.attempts,
+      sourceOrder: discovery.sourceOrder,
+      cacheHit: true,
+      staleCache: false,
+      rateLimited: discovery.rateLimited,
+      message: discovery.message,
+    },
+    httpStatus: 200,
+    ...(discovery.rateLimited ? { error: discovery.message } : {}),
+  };
+}
+
+function rememberPersistentLookup(request: PartsSearchRequest, outcome: PartsSearchOutcome, now = Date.now()) {
+  if (!outcome.discovery || outcome.status === "cancelled" || outcome.status === "failed" || (outcome.status === "rate-limited" && outcome.discovery.candidates.length === 0)) return;
+  const entries = readPersistentLookups(now);
+  const key = persistentLookupKey(request);
+  entries.delete(key);
+  entries.set(key, { key, cachedAt: now, discovery: { ...outcome.discovery, cacheHit: false } });
+  writePersistentLookups(entries);
+}
+
+/** Return only a fresh user-scoped lookup; no network request is made. */
+export function getCachedPartsSearch(request: PartsSearchRequest, now = Date.now()) {
+  return persistentCachedOutcome(request, now);
+}
+
 function cancelled(request: PartsSearchRequest): PartsSearchOutcome {
   return { request, requestId: request.requestId, status: "cancelled", discovery: null, error: "Parts search was cancelled." };
 }
@@ -314,6 +417,10 @@ export async function requestPartsSearch(request: PartsSearchRequest, options: P
   const auth = options.getAuthHeaders ?? ((force?: boolean, authSignal?: AbortSignal) => getAuthHeaders(force, authSignal));
   const path = options.path ?? PARTS_SEARCH_PATH;
   if (signal?.aborted) return cancelled(request);
+  if (!options.bypassPersistentCache) {
+    const cached = persistentCachedOutcome(request, now());
+    if (cached) return cached;
+  }
   try {
     const send = async (force: boolean) => {
       const headers = new Headers({
@@ -335,7 +442,11 @@ export async function requestPartsSearch(request: PartsSearchRequest, options: P
     if (response.status === 429) return { request, requestId: request.requestId, status: "rate-limited", discovery, payload: payload ?? undefined, httpStatus: response.status, error: message || "Parts search is temporarily rate limited.", retryAfterMs: retryAfterMs(response, payload, now) };
     if (response.status === 401 || response.status === 403) return { request, requestId: request.requestId, status: "agent-required", discovery, payload: payload ?? undefined, httpStatus: response.status, error: message || "Sign in to use the parts search." };
     if (!responseOk(response)) return { request, requestId: request.requestId, status: "failed", discovery, payload: payload ?? undefined, httpStatus: response.status, error: message || `Parts search returned HTTP ${response.status}.` };
-    if (discovery) return { request, requestId: request.requestId, status: discovery.rateLimited ? "rate-limited" : "agent-required", discovery, payload: payload ?? undefined, httpStatus: response.status, ...(message ? { error: message } : {}), ...(discovery.rateLimited ? { retryAfterMs: retryAfterMs(response, payload, now) } : {}) };
+    if (discovery) {
+      const outcome: PartsSearchOutcome = { request, requestId: request.requestId, status: discovery.rateLimited ? "rate-limited" : "agent-required", discovery, payload: payload ?? undefined, httpStatus: response.status, ...(message ? { error: message } : {}), ...(discovery.rateLimited ? { retryAfterMs: retryAfterMs(response, payload, now) } : {}) };
+      if (responseOk(response) && !discovery.rateLimited) rememberPersistentLookup(request, outcome, now());
+      return outcome;
+    }
     return { request, requestId: request.requestId, status: "failed", discovery: null, payload: payload ?? undefined, httpStatus: response.status, error: "Parts search returned no discovery envelope." };
   } catch (error) {
     if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) return cancelled(request);
@@ -344,7 +455,10 @@ export async function requestPartsSearch(request: PartsSearchRequest, options: P
 }
 
 function searchKey(request: PartsSearchRequest) {
-  return `${request.query.toLowerCase()}\u0000${request.quantity}\u0000${[...request.requiredCatalogIds].sort().join(",")}`;
+  // Discovery is keyed by the normalized lookup itself. Project membership is
+  // intentionally excluded so deleting a component does not erase its known
+  // result, and adding a component only misses its new lookup.
+  return request.query.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 export function createPartsSearchCoordinator(options: PartsSearchClientOptions = {}): PartsSearchCoordinator {
@@ -403,7 +517,7 @@ export function createPartsSearchCoordinator(options: PartsSearchClientOptions =
       if (submitOptions.signal.aborted) controller.abort();
       else submitOptions.signal.addEventListener("abort", () => controller.abort(), { once: true });
     }
-    running.promise = requestPartsSearch(request, options, controller.signal)
+    running.promise = requestPartsSearch(request, { ...options, bypassPersistentCache: submitOptions.force || options.bypassPersistentCache }, controller.signal)
       .then((outcome) => {
         if (active !== running || controller.signal.aborted) return cancelled(request);
         if (cacheTtlMs > 0 && (outcome.status === "agent-required" || outcome.status === "rate-limited")) {

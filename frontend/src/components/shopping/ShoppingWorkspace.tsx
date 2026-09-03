@@ -31,7 +31,7 @@ import {
   type ShoppingResult,
   type ShoppingState,
 } from "../../store/useShoppingStore.ts";
-import { createPartsSearchCoordinator, requestPartsSearch } from "../../shopping/partsSearchClient.ts";
+import { createPartsSearchCoordinator, getCachedPartsSearch, requestPartsSearch } from "../../shopping/partsSearchClient.ts";
 import GooeyInput from "../ui/gooey-input.tsx";
 
 type ShoppingSnapshot = ShoppingState;
@@ -1363,17 +1363,16 @@ export default function ShoppingWorkspace({
         cursor += 1;
         const target = targets[index];
         const lookupQuery = `${target.title} ${target.catalogId}`.slice(0, 240);
-        const outcome = await requestPartsSearch(
-          {
-            requestId: `${requestHandoff.requestId}-${String(index + 1).padStart(2, "0")}`,
-            query: lookupQuery,
-            quantity,
-            requiredCatalogIds: [target.catalogId],
-            requestedAt: requestHandoff.requestedAt,
-          },
-          {},
-          controller.signal,
-        );
+        const lookupRequest = {
+          requestId: `${requestHandoff.requestId}-${String(index + 1).padStart(2, "0")}`,
+          query: lookupQuery,
+          quantity,
+          requiredCatalogIds: [target.catalogId],
+          requestedAt: requestHandoff.requestedAt,
+        };
+        // A fresh lookup survives graph edits and route changes. Only a new
+        // component or an entry older than 24 hours reaches the provider.
+        const outcome = getCachedPartsSearch(lookupRequest) ?? await requestPartsSearch(lookupRequest, {}, controller.signal);
         if (controller.signal.aborted || activeRequest.current?.sequence !== sequence) return;
 
         completed += 1;
