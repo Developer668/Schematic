@@ -396,28 +396,6 @@ function OfferRow({
   );
 }
 
-function DiscoveryOfferRow({ offer }: { offer: DiscoveryOffer }) {
-  const retailer = visibleRetailer(offer.retailer);
-  return (
-    <div className="shopping-discovery-offer">
-      <div className="min-w-0 flex-1">
-        <span className="block truncate text-[11px] font-medium">
-          {retailer ?? "Retailer listing"}
-        </span>
-        {offer.availability && (
-          <span className="block truncate text-[10px] text-muted-foreground">
-            {offer.availability}
-          </span>
-        )}
-      </div>
-      <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-        {money(offer.price, offer.currency)}
-      </span>
-      <RetailerLink retailer={retailer ?? "retailer"} url={offer.url} />
-    </div>
-  );
-}
-
 function ResultCard({ result }: { result: ShoppingResult }) {
   const lowestOfferId = cheapestOfferId(result);
   const catalogEntry = getCatalogComponent(result.catalogId);
@@ -466,6 +444,7 @@ function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
     : null;
   const artworkHref = libraryArtworkHref ?? candidate.imageUrl;
   const retailer = visibleRetailer(candidate.retailer);
+  const offer = candidate.offers[0];
   return (
     <article
       className="shopping-discovery-card"
@@ -490,12 +469,12 @@ function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-xs font-semibold">{candidate.title}</h3>
-          {(retailer || candidate.rating !== undefined) && (
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
+          {(retailer || offer?.availability || candidate.rating !== undefined) && (
+            <div className="shopping-listing-meta">
+              {offer?.availability && <span>{offer.availability}</span>}
+              {offer?.availability && retailer && <span aria-hidden="true">·</span>}
               {retailer && <span>{retailer}</span>}
-              {retailer && candidate.rating !== undefined && (
-                <span aria-hidden="true">·</span>
-              )}
+              {(offer?.availability || retailer) && candidate.rating !== undefined && <span aria-hidden="true">·</span>}
               {candidate.rating !== undefined && (
                 <span
                   className="shopping-result-rating"
@@ -511,43 +490,84 @@ function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
           )}
         </div>
       </div>
-      {candidate.shipping && (
-        <p className="shopping-discovery-shipping">{candidate.shipping}</p>
-      )}
-      {candidate.offers.length > 0 ? (
-        <div className="shopping-discovery-offers">
-          {candidate.offers.slice(0, 3).map((offer) => (
-            <DiscoveryOfferRow key={offer.id} offer={offer} />
-          ))}
-        </div>
+      {offer ? (
+        <>
+          <strong className="shopping-listing-price">
+            {money(offer.price, offer.currency)}
+          </strong>
+          <RetailerLink retailer={retailer ?? "retailer"} url={offer.url} />
+        </>
       ) : (
         <p className="shopping-discovery-empty">
-          No supplier price or link was returned for this part.
+          Price pending
         </p>
+      )}
+      {candidate.shipping && (
+        <p className="shopping-discovery-shipping">{candidate.shipping}</p>
       )}
     </article>
   );
 }
 
 function ListingResults({
+  requirements,
   candidates,
   results,
 }: {
+  requirements: DesignPartRequirement[];
   candidates: DiscoveryCandidate[];
   results: ShoppingResult[];
 }) {
+  const groups = requirements.flatMap((requirement) => {
+    const matchingCandidates = candidates.filter(
+      (candidate) => candidate.catalogId === requirement.catalogId,
+    );
+    const matchingResults = results.filter(
+      (result) => result.catalogId === requirement.catalogId,
+    );
+    const matchCount = matchingCandidates.length + matchingResults.length;
+    return matchCount > 0
+      ? [{ requirement, matchingCandidates, matchingResults, matchCount }]
+      : [];
+  });
+  const listingCount = groups.reduce((total, group) => total + group.matchCount, 0);
+
   return (
     <section
       className="shopping-listing-results"
       aria-label="Matching part listings"
       data-testid="part-listings"
     >
-      <div className="shopping-discovery-grid">
-        {candidates.map((candidate) => (
-          <DiscoveryCard key={candidate.id} candidate={candidate} />
-        ))}
-        {results.map((result) => (
-          <ResultCard key={result.id} result={result} />
+      <header className="shopping-listing-heading">
+        <div>
+          <div className="kicker">Available listings</div>
+          <h2>Matched to the build cart</h2>
+        </div>
+        <span>{listingCount} match{listingCount === 1 ? "" : "es"}</span>
+      </header>
+      <div className="shopping-listing-groups">
+        {groups.map(({ requirement, matchingCandidates, matchingResults, matchCount }) => (
+          <section
+            className="shopping-listing-group"
+            key={requirement.key}
+            aria-labelledby={`listing-group-${requirement.key}`}
+          >
+            <header className="shopping-listing-group-heading">
+              <div>
+                <h3 id={`listing-group-${requirement.key}`}>{requirement.title}</h3>
+                <span>Qty {requirement.quantity}</span>
+              </div>
+              <small>{matchCount} option{matchCount === 1 ? "" : "s"}</small>
+            </header>
+            <div className="shopping-discovery-grid">
+              {matchingCandidates.map((candidate) => (
+                <DiscoveryCard key={candidate.id} candidate={candidate} />
+              ))}
+              {matchingResults.map((result) => (
+                <ResultCard key={result.id} result={result} />
+              ))}
+            </div>
+          </section>
         ))}
       </div>
     </section>
@@ -594,7 +614,7 @@ function CartSummary({
           </div>
         </div>
         <span className="shopping-build-cart-count">
-          {items.length} component{items.length === 1 ? "" : "s"}
+          {items.length} line item{items.length === 1 ? "" : "s"}
         </span>
       </div>
 
@@ -611,38 +631,47 @@ function CartSummary({
             </span>
           </div>
         ) : (
-          items.map((item) => (
-            <div className="shopping-build-item" key={item.key}>
-              <span className="shopping-build-item-image">
-                {item.artworkHref ? (
-                  <img
-                    src={item.artworkHref}
-                    alt={`${item.title} component image`}
-                    loading="lazy"
-                  />
-                ) : (
-                  <Cable size={15} />
-                )}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[11px] font-medium">
-                  {item.title}
-                </div>
-                <div className="shopping-build-item-detail">
-                  qty {item.quantity}
-                  {item.unitPrice === null
-                    ? " · Price pending"
-                    : ` · ${money(item.unitPrice, item.currency)} each`}
-                  {item.retailer ? ` · ${item.retailer}` : ""}
-                </div>
-              </div>
-              <strong className="shopping-build-item-cost">
-                {item.subtotal === null
-                  ? "—"
-                  : money(item.subtotal, item.currency)}
-              </strong>
+          <>
+            <div className="shopping-build-table-head" aria-hidden="true">
+              <span>Part</span>
+              <span>Qty</span>
+              <span>Unit</span>
+              <span>Subtotal</span>
             </div>
-          ))
+            {items.map((item) => (
+              <div className="shopping-build-item" key={item.key}>
+                <span className="shopping-build-item-image">
+                  {item.artworkHref ? (
+                    <img
+                      src={item.artworkHref}
+                      alt={`${item.title} component image`}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <Cable size={15} />
+                  )}
+                </span>
+                <div className="shopping-build-item-copy">
+                  <div className="shopping-build-item-title">{item.title}</div>
+                  <div className="shopping-build-item-detail">
+                    {item.retailer ?? (item.unitPrice === null ? "Price pending" : "Current listing")}
+                  </div>
+                  <div className="shopping-build-item-compact-meta">
+                    Qty {item.quantity} · {money(item.unitPrice, item.currency)} each
+                  </div>
+                </div>
+                <span className="shopping-build-item-qty">{item.quantity}</span>
+                <span className="shopping-build-item-unit">
+                  {money(item.unitPrice, item.currency)}
+                </span>
+                <strong className="shopping-build-item-cost">
+                  {item.subtotal === null
+                    ? "—"
+                    : money(item.subtotal, item.currency)}
+                </strong>
+              </div>
+            ))}
+          </>
         )}
       </div>
 
@@ -652,9 +681,9 @@ function CartSummary({
       </div>
       <div className="shopping-estimate-note">
         {missingCount > 0
-          ? `${missingCount} component${missingCount === 1 ? "" : "s"} awaiting a listing price`
+          ? `${missingCount} item${missingCount === 1 ? "" : "s"} awaiting a listing price`
           : items.length > 0
-            ? "Based on the lowest current listing for each component"
+            ? "Based on the lowest current listing for each line item"
             : "Updates from the active design"}
       </div>
     </section>
@@ -1036,6 +1065,7 @@ export default function ShoppingWorkspace({
         />
         {hasListings && (
           <ListingResults
+            requirements={designRequirements}
             candidates={discoveryCandidates}
             results={visibleResults}
           />
