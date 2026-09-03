@@ -97,6 +97,8 @@ describe("server-side parts provider fallback", () => {
       ...authEnv,
       BRIGHTDATA_SERP_ENABLED: "true",
       BRIGHTDATA_API_KEY: "test-only-key",
+      BRIGHTDATA_SERP_ENDPOINT: "https://brightdata.example/request",
+      BRIGHTDATA_SERP_MAX_RESULTS: "1",
       BRIGHTDATA_MAX_REQUESTS_PER_HOUR: "2",
       BRIGHTDATA_MAX_REQUESTS_PER_DAY: "2",
       BRIGHTDATA_MAX_GLOBAL_REQUESTS_PER_DAY: "2",
@@ -106,6 +108,8 @@ describe("server-side parts provider fallback", () => {
       partsSearch(await requestFor("BMP280"), env),
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstFetchCall = (fetchMock.mock.calls as unknown[][])[0];
+    expect(firstFetchCall?.[0]).toBe("https://brightdata.example/request");
     expect((await first.json() as any).candidates[0]).toMatchObject({ source: "brightdata-serp", verificationRequired: true, price: 8.95, imageUrl: "https://images.example/bmp280.jpg" });
     expect((await second.json() as any).candidates[0]).toMatchObject({ source: "brightdata-serp" });
     const cached = await partsSearch(await requestFor("BMP280"), env);

@@ -14,6 +14,7 @@ type Bucket = { startedAt: number; count: number };
 
 const MAX_QUERY_LENGTH = 240;
 const MAX_RESULTS = 16;
+const DEFAULT_ENDPOINT = "https://api.brightdata.com/request";
 const MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
 const MAX_CACHE_ENTRIES = 96;
 const cache = new Map<string, CacheEntry>();
@@ -259,6 +260,8 @@ export async function searchBrightData(queryInput: string, quantity: number, sub
   const country = (envString(env, "BRIGHTDATA_SERP_COUNTRY") || "us").toLowerCase();
   const language = (envString(env, "BRIGHTDATA_SERP_LANGUAGE") || "en").toLowerCase();
   const fallbackCurrency = (envString(env, "BRIGHTDATA_SERP_CURRENCY") || "USD").toUpperCase();
+  const endpoint = envString(env, "BRIGHTDATA_SERP_ENDPOINT") || DEFAULT_ENDPOINT;
+  const maxResults = boundedInt(envString(env, "BRIGHTDATA_SERP_MAX_RESULTS"), MAX_RESULTS, 1, MAX_RESULTS);
   const key = `${query.toLowerCase()}\0${zone}\0${country}\0${language}\0${fallbackCurrency}`;
   const cached = cache.get(key);
   if (cached && cached.expiresAt > Date.now()) return { ...forQuantity(cached.result, quantity), body: { ...cached.result.body, quantity, cacheHit: true } };
@@ -287,7 +290,6 @@ export async function searchBrightData(queryInput: string, quantity: number, sub
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const target = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=shop&gl=${encodeURIComponent(country)}&hl=${encodeURIComponent(language)}&brd_json=json`;
-      const endpoint = "https://api.brightdata.com/request";
       const send = (format: "json" | "raw") => fetch(endpoint, { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${envString(env, "BRIGHTDATA_API_KEY")}` }, body: JSON.stringify({ zone, url: target, format, method: "GET", country }), signal: controller.signal });
       let upstream = await send("json");
       if (upstream.status === 400 || upstream.status === 422) { await upstream.arrayBuffer(); upstream = await send("raw"); }
@@ -310,7 +312,7 @@ export async function searchBrightData(queryInput: string, quantity: number, sub
         if (seen.has(identity)) return [];
         seen.add(identity);
         return [value];
-      }).slice(0, MAX_RESULTS);
+      }).slice(0, maxResults);
       const result = response(query, quantity, candidates.length ? "success" : "empty", duration, candidates, candidates.length ? `Found ${candidates.length} current shopping result${candidates.length === 1 ? "" : "s"}. Confirm seller, model, stock, shipping, and checkout total.` : "No matching shopping listings were found. Try an exact manufacturer part number or board name.");
       const hasPricedCandidate = candidates.some((item) => typeof item.price === "number");
       const ttlSeconds = boundedInt(
