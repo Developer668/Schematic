@@ -7,7 +7,6 @@ import {
   PackageSearch,
   RefreshCw,
   ShoppingCart,
-  Star,
   Wifi,
 } from "lucide-react";
 import { getCatalogComponent } from "../../data/catalog.ts";
@@ -16,7 +15,6 @@ import { useProjectStore } from "../../store/useProjectStore.ts";
 import {
   createShoppingHandoff,
   useShoppingStore,
-  type PartOffer,
   type ShoppingDiscovery,
   type ShoppingDiscoveryCandidate,
   type ShoppingRequestStatus,
@@ -70,21 +68,54 @@ type DesignPartRequirement = {
 
 type BuildCartItem = DesignPartRequirement & {
   artworkHref?: string;
+  fallbackArtworkHref?: string;
   unitPrice: number | null;
   currency: string;
   retailer?: string;
+  listingTitle?: string;
   subtotal: number | null;
 };
 
-type PricePoint = {
+type ListingChoice = {
+  id: string;
+  catalogId: string;
+  title: string;
   price: number | null;
   currency: string;
   retailer?: string;
+  url?: string;
+  availability?: string;
+  shipping?: string;
+  imageUrl?: string;
+};
+
+type ListingGroup = {
+  requirement: DesignPartRequirement;
+  choices: ListingChoice[];
 };
 
 const WIRE_PART_ID = "wire";
 const MAX_DESIGN_SEARCHES = 12;
-const RESULTS_PER_DESIGN_PART = 3;
+// The discovery envelope accepts at most 24 candidates. Two options for each
+// of the 12 supported BOM lines keeps every required part represented instead
+// of truncating the last lines in larger designs.
+const RESULTS_PER_DESIGN_PART = 2;
+const LISTING_SELECTION_STORAGE_PREFIX = "schematic-parts-listing-selections";
+
+function readListingSelections(projectId: string) {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const value = JSON.parse(localStorage.getItem(`${LISTING_SELECTION_STORAGE_PREFIX}:${projectId}`) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+        .slice(0, MAX_DESIGN_SEARCHES),
+    );
+  } catch {
+    return {};
+  }
+}
 
 const phaseMeta: Record<
   PartsUiPhase,
@@ -185,7 +216,7 @@ function buildDesignRequirements(
           key: `component:${catalogId}`,
           catalogId,
           title: definition.title,
-          query: `${definition.title} ${definition.partNumber ?? catalogId}`.slice(
+          query: `${definition.title} ${definition.partNumber ?? catalogId} electronics component price`.slice(
             0,
             240,
           ),
@@ -201,7 +232,7 @@ function buildDesignRequirements(
       key: WIRE_PART_ID,
       catalogId: WIRE_PART_ID,
       title: "Hookup wire",
-      query: "electronics hookup wire",
+      query: "22 AWG stranded electronics hookup wire spool price",
       quantity: connectionCount,
       kind: "wire",
     });
@@ -210,78 +241,87 @@ function buildDesignRequirements(
   return requirements;
 }
 
-function lowestPrice(points: PricePoint[]): PricePoint {
-  const priced = points.filter(
-    (point) => point.price !== null && Number.isFinite(point.price),
-  );
-  if (!priced.length) {
-    return {
-      price: null,
-      currency: points[0]?.currency ?? "USD",
-      retailer: visibleRetailer(points[0]?.retailer),
-    };
-  }
-
-  // Do not compare numeric values from different currencies. Prefer USD when
-  // it is present, otherwise keep the first currency returned for this part.
-  const currency =
-    priced.find((point) => point.currency === "USD")?.currency ??
-    priced[0].currency;
-  return priced
-    .filter((point) => point.currency === currency)
-    .reduce((lowest, point) => {
-      if (
-        lowest.price === null ||
-        (point.price !== null && point.price < lowest.price)
-      ) {
-        return point;
-      }
-      return lowest;
-    });
-}
-
-function buildCartItems(
-  requirements: DesignPartRequirement[],
+function choicesForRequirement(
+  requirement: DesignPartRequirement,
   candidates: DiscoveryCandidate[],
   results: ShoppingResult[],
-): BuildCartItem[] {
-  return requirements.map((requirement) => {
-    const discoveryPrices = candidates
-      .filter((candidate) => candidate.catalogId === requirement.catalogId)
-      .flatMap((candidate) =>
-        candidate.offers.map((offer) => ({
+): ListingChoice[] {
+  const discovered = candidates
+    .filter((candidate) => candidate.catalogId === requirement.catalogId)
+    .flatMap((candidate): ListingChoice[] => {
+      const offer = candidate.offers[0];
+      if (!offer) return [];
+      return [{
+        id: `candidate:${candidate.id}`,
+        catalogId: requirement.catalogId,
+        title: candidate.title,
+        price: offer.price,
+        currency: offer.currency,
+        retailer: visibleRetailer(candidate.retailer ?? offer.retailer),
+        ...(offer.url ? { url: offer.url } : {}),
+        ...(offer.availability ? { availability: offer.availability } : {}),
+        ...(candidate.shipping ? { shipping: candidate.shipping } : {}),
+        ...(candidate.imageUrl ? { imageUrl: candidate.imageUrl } : {}),
+      }];
+    });
+  const published = requirement.kind === "component"
+    ? results
+        .filter((result) => result.catalogId === requirement.catalogId)
+        .flatMap((result) => result.offers.map((offer): ListingChoice => ({
+          id: `result:${result.id}:${offer.id}`,
+          catalogId: requirement.catalogId,
+          title: offer.title || result.title,
           price: offer.price,
           currency: offer.currency,
           retailer: visibleRetailer(offer.retailer),
-        })),
-      );
-    const publishedPrices =
-      requirement.kind === "component"
-        ? results
-            .filter((result) => result.catalogId === requirement.catalogId)
-            .flatMap((result) =>
-              result.offers.map((offer) => ({
-                price: offer.price,
-                currency: offer.currency,
-                retailer: visibleRetailer(offer.retailer),
-              })),
-            )
-        : [];
-    const price = lowestPrice([...publishedPrices, ...discoveryPrices]);
+          url: offer.url,
+          ...(offer.availability ? { availability: offer.availability } : {}),
+        })))
+    : [];
+  const unique = new Map<string, ListingChoice>();
+  for (const choice of [...discovered, ...published]) {
+    const identity = `${choice.url ?? ""}|${choice.title.toLowerCase()}|${choice.price ?? "pending"}`;
+    if (!unique.has(identity)) unique.set(identity, choice);
+  }
+  return [...unique.values()].sort((left, right) => {
+    if (left.price === null && right.price !== null) return 1;
+    if (left.price !== null && right.price === null) return -1;
+    if (left.currency === right.currency && left.price !== null && right.price !== null) {
+      return left.price - right.price;
+    }
+    return left.title.localeCompare(right.title);
+  });
+}
+
+function preferredChoice(choices: ListingChoice[], selectedId?: string) {
+  return choices.find((choice) => choice.id === selectedId) ?? choices[0];
+}
+
+function buildCartItems(
+  groups: ListingGroup[],
+  selectedChoiceIds: Record<string, string>,
+): BuildCartItem[] {
+  return groups.map(({ requirement, choices }) => {
+    const choice = preferredChoice(choices, selectedChoiceIds[requirement.key]);
     const definition =
       requirement.kind === "component"
         ? getCatalogComponent(requirement.catalogId)
         : null;
+    const fallbackArtworkHref = definition
+      ? componentArtworkHref(definition) ?? undefined
+      : undefined;
     return {
       ...requirement,
-      ...(definition
-        ? { artworkHref: componentArtworkHref(definition) ?? undefined }
-        : {}),
-      unitPrice: price.price,
-      currency: price.currency,
-      retailer: price.retailer,
+      ...(choice?.imageUrl ? { artworkHref: choice.imageUrl } : fallbackArtworkHref ? { artworkHref: fallbackArtworkHref } : {}),
+      ...(choice?.imageUrl && fallbackArtworkHref ? { fallbackArtworkHref } : {}),
+      unitPrice: choice?.price ?? null,
+      currency: choice?.currency ?? "USD",
+      retailer: choice?.retailer,
+      listingTitle: choice?.title,
       subtotal:
-        price.price === null ? null : price.price * requirement.quantity,
+        choice?.price === null || choice?.price === undefined
+          ? null
+          : choice.price * requirement.quantity,
     };
   });
 }
@@ -325,17 +365,6 @@ function toDiscoveryCandidate(
   };
 }
 
-function cheapestOfferId(result: ShoppingResult) {
-  return result.offers.reduce<string | undefined>((best, offer) => {
-    if (offer.price === null || !Number.isFinite(offer.price)) return best;
-    if (!best) return offer.id;
-    const current = result.offers.find((candidate) => candidate.id === best);
-    return !current || current.price === null || offer.price < current.price
-      ? offer.id
-      : best;
-  }, undefined);
-}
-
 function RetailerLink({ retailer, url }: { retailer: string; url?: string }) {
   if (!url) {
     return (
@@ -357,180 +386,49 @@ function RetailerLink({ retailer, url }: { retailer: string; url?: string }) {
   );
 }
 
-function OfferRow({
-  offer,
-  cheapest,
+function ProductArtwork({
+  src,
+  fallback,
+  alt,
+  wire = false,
 }: {
-  offer: PartOffer;
-  cheapest: boolean;
+  src?: string;
+  fallback?: string;
+  alt: string;
+  wire?: boolean;
 }) {
-  const retailer = visibleRetailer(offer.retailer);
+  const [activeSrc, setActiveSrc] = useState(src ?? fallback);
+  useEffect(() => setActiveSrc(src ?? fallback), [fallback, src]);
+  if (!activeSrc) {
+    return wire ? <Cable size={17} /> : <PackageSearch size={15} />;
+  }
   return (
-    <div className={`shopping-offer-row ${cheapest ? "is-selected" : ""}`}>
-      <span
-        className={`shopping-offer-radio is-readonly ${cheapest ? "is-cheapest" : ""}`}
-        aria-hidden="true"
-      >
-        {cheapest && <span />}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-[11px] font-medium">
-            {retailer ?? "Retailer listing"}
-          </span>
-          {cheapest && <span className="shopping-best-price">Best price</span>}
-        </div>
-        {offer.availability && (
-          <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-            {offer.availability}
-          </div>
-        )}
-      </div>
-      <span
-        className={`shrink-0 font-mono text-[11px] tabular-nums ${offer.price === null ? "text-muted-foreground" : "text-foreground"}`}
-      >
-        {money(offer.price, offer.currency)}
-      </span>
-      <RetailerLink retailer={retailer ?? "retailer"} url={offer.url} />
-    </div>
-  );
-}
-
-function ResultCard({ result }: { result: ShoppingResult }) {
-  const lowestOfferId = cheapestOfferId(result);
-  const catalogEntry = getCatalogComponent(result.catalogId);
-  const artworkHref = catalogEntry ? componentArtworkHref(catalogEntry) : null;
-  return (
-    <article
-      className="shopping-verified-card"
-      aria-label={`Listing for ${result.title}`}
-      data-testid={`verified-result-${result.id}`}
-    >
-      <div className="shopping-result-head">
-        <div
-          className={`shopping-result-mark ${catalogEntry ? "has-artwork" : ""}`}
-        >
-          {artworkHref ? (
-            <img
-              src={artworkHref}
-              alt={`${result.title} component image`}
-              loading="lazy"
-            />
-          ) : (
-            <PackageSearch size={15} strokeWidth={1.7} />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-xs font-semibold">{result.title}</h3>
-        </div>
-      </div>
-      <div className="shopping-offers-block">
-        {result.offers.slice(0, 3).map((offer) => (
-          <OfferRow
-            key={offer.id}
-            offer={offer}
-            cheapest={offer.id === lowestOfferId}
-          />
-        ))}
-      </div>
-    </article>
-  );
-}
-
-function DiscoveryCard({ candidate }: { candidate: DiscoveryCandidate }) {
-  const catalogEntry = getCatalogComponent(candidate.catalogId);
-  const libraryArtworkHref = catalogEntry
-    ? componentArtworkHref(catalogEntry)
-    : null;
-  const artworkHref = libraryArtworkHref ?? candidate.imageUrl;
-  const retailer = visibleRetailer(candidate.retailer);
-  const offer = candidate.offers[0];
-  return (
-    <article
-      className="shopping-discovery-card"
-      aria-label={`Listing for ${candidate.title}`}
-      data-testid={`discovery-candidate-${candidate.id}`}
-    >
-      <div className="shopping-discovery-head">
-        <div
-          className={`shopping-discovery-mark ${artworkHref ? "has-image" : ""}`}
-        >
-          {artworkHref ? (
-            <img
-              src={artworkHref}
-              alt={`${candidate.title} component image`}
-              loading="lazy"
-            />
-          ) : candidate.catalogId === WIRE_PART_ID ? (
-            <Cable size={17} />
-          ) : (
-            <PackageSearch size={15} />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-xs font-semibold">{candidate.title}</h3>
-          {(retailer || offer?.availability || candidate.rating !== undefined) && (
-            <div className="shopping-listing-meta">
-              {offer?.availability && <span>{offer.availability}</span>}
-              {offer?.availability && retailer && <span aria-hidden="true">·</span>}
-              {retailer && <span>{retailer}</span>}
-              {(offer?.availability || retailer) && candidate.rating !== undefined && <span aria-hidden="true">·</span>}
-              {candidate.rating !== undefined && (
-                <span
-                  className="shopping-result-rating"
-                  title={`${candidate.rating.toFixed(1)} out of 5${candidate.reviewCount ? ` from ${candidate.reviewCount.toLocaleString()} reviews` : ""}`}
-                >
-                  <Star size={10} /> {candidate.rating.toFixed(1)}
-                  {candidate.reviewCount ? (
-                    <small>({candidate.reviewCount.toLocaleString()})</small>
-                  ) : null}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-      {offer ? (
-        <>
-          <strong className="shopping-listing-price">
-            {money(offer.price, offer.currency)}
-          </strong>
-          <RetailerLink retailer={retailer ?? "retailer"} url={offer.url} />
-        </>
-      ) : (
-        <p className="shopping-discovery-empty">
-          Price pending
-        </p>
-      )}
-      {candidate.shipping && (
-        <p className="shopping-discovery-shipping">{candidate.shipping}</p>
-      )}
-    </article>
+    <img
+      src={activeSrc}
+      alt={alt}
+      loading="lazy"
+      onError={() => {
+        if (fallback && activeSrc !== fallback) setActiveSrc(fallback);
+        else setActiveSrc(undefined);
+      }}
+    />
   );
 }
 
 function ListingResults({
-  requirements,
-  candidates,
-  results,
+  groups,
+  selectedChoiceIds,
+  loading,
+  onSelect,
+  onRetry,
 }: {
-  requirements: DesignPartRequirement[];
-  candidates: DiscoveryCandidate[];
-  results: ShoppingResult[];
+  groups: ListingGroup[];
+  selectedChoiceIds: Record<string, string>;
+  loading: boolean;
+  onSelect: (requirementKey: string, choiceId: string) => void;
+  onRetry: () => void;
 }) {
-  const groups = requirements.flatMap((requirement) => {
-    const matchingCandidates = candidates.filter(
-      (candidate) => candidate.catalogId === requirement.catalogId,
-    );
-    const matchingResults = results.filter(
-      (result) => result.catalogId === requirement.catalogId,
-    );
-    const matchCount = matchingCandidates.length + matchingResults.length;
-    return matchCount > 0
-      ? [{ requirement, matchingCandidates, matchingResults, matchCount }]
-      : [];
-  });
-  const listingCount = groups.reduce((total, group) => total + group.matchCount, 0);
+  const selectedCount = groups.filter((group) => group.choices.length > 0).length;
 
   return (
     <section
@@ -540,35 +438,77 @@ function ListingResults({
     >
       <header className="shopping-listing-heading">
         <div>
-          <div className="kicker">Available listings</div>
-          <h2>Matched to the build cart</h2>
+          <div className="kicker">Product selections</div>
+          <h2>Choose one listing for each cart line</h2>
         </div>
-        <span>{listingCount} match{listingCount === 1 ? "" : "es"}</span>
+        <span>{selectedCount}/{groups.length} selected</span>
       </header>
       <div className="shopping-listing-groups">
-        {groups.map(({ requirement, matchingCandidates, matchingResults, matchCount }) => (
-          <section
-            className="shopping-listing-group"
-            key={requirement.key}
-            aria-labelledby={`listing-group-${requirement.key}`}
-          >
-            <header className="shopping-listing-group-heading">
-              <div>
-                <h3 id={`listing-group-${requirement.key}`}>{requirement.title}</h3>
-                <span>Qty {requirement.quantity}</span>
+        {groups.map(({ requirement, choices }) => {
+          const choice = preferredChoice(choices, selectedChoiceIds[requirement.key]);
+          const definition = requirement.kind === "component"
+            ? getCatalogComponent(requirement.catalogId)
+            : null;
+          const fallbackArtworkHref = definition
+            ? componentArtworkHref(definition) ?? undefined
+            : undefined;
+          return (
+            <section
+              className="shopping-listing-picker"
+              key={requirement.key}
+              aria-labelledby={`listing-group-${requirement.key}`}
+              data-testid={`listing-picker-${requirement.catalogId}`}
+            >
+              <div className="shopping-picker-part">
+                <span className="shopping-picker-image">
+                  <ProductArtwork
+                    src={choice?.imageUrl}
+                    fallback={fallbackArtworkHref}
+                    alt={`${choice?.title ?? requirement.title} product image`}
+                    wire={requirement.kind === "wire"}
+                  />
+                </span>
+                <div>
+                  <h3 id={`listing-group-${requirement.key}`}>{requirement.title}</h3>
+                  <span>Qty {requirement.quantity}</span>
+                </div>
               </div>
-              <small>{matchCount} option{matchCount === 1 ? "" : "s"}</small>
-            </header>
-            <div className="shopping-discovery-grid">
-              {matchingCandidates.map((candidate) => (
-                <DiscoveryCard key={candidate.id} candidate={candidate} />
-              ))}
-              {matchingResults.map((result) => (
-                <ResultCard key={result.id} result={result} />
-              ))}
-            </div>
-          </section>
-        ))}
+              <div className="shopping-picker-control">
+                <label htmlFor={`listing-choice-${requirement.key}`}>Product listing</label>
+                <select
+                  id={`listing-choice-${requirement.key}`}
+                  aria-label={`Choose listing for ${requirement.title}`}
+                  value={choice?.id ?? ""}
+                  disabled={choices.length === 0}
+                  onChange={(event) => onSelect(requirement.key, event.target.value)}
+                >
+                  {choices.length === 0 ? (
+                    <option value="">{loading ? "Searching current products…" : "No priced listing found"}</option>
+                  ) : choices.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {[option.retailer, option.title, money(option.price, option.currency)].filter(Boolean).join(" · ")}
+                    </option>
+                  ))}
+                </select>
+                {choice ? (
+                  <p>
+                    {[choice.availability, choice.shipping].filter(Boolean).join(" · ") || "Current product result"}
+                  </p>
+                ) : (
+                  <button type="button" onClick={onRetry} disabled={loading}>
+                    {loading ? "Searching…" : "Search again"}
+                  </button>
+                )}
+              </div>
+              <div className="shopping-picker-action">
+                <strong>{money(choice?.price ?? null, choice?.currency)}</strong>
+                {choice ? (
+                  <RetailerLink retailer={choice.retailer ?? "retailer"} url={choice.url} />
+                ) : <span>Awaiting result</span>}
+              </div>
+            </section>
+          );
+        })}
       </div>
     </section>
   );
@@ -641,20 +581,17 @@ function CartSummary({
             {items.map((item) => (
               <div className="shopping-build-item" key={item.key}>
                 <span className="shopping-build-item-image">
-                  {item.artworkHref ? (
-                    <img
-                      src={item.artworkHref}
-                      alt={`${item.title} component image`}
-                      loading="lazy"
-                    />
-                  ) : (
-                    <Cable size={15} />
-                  )}
+                  <ProductArtwork
+                    src={item.artworkHref}
+                    fallback={item.fallbackArtworkHref}
+                    alt={`${item.listingTitle ?? item.title} product image`}
+                    wire={item.kind === "wire"}
+                  />
                 </span>
                 <div className="shopping-build-item-copy">
                   <div className="shopping-build-item-title">{item.title}</div>
                   <div className="shopping-build-item-detail">
-                    {item.retailer ?? (item.unitPrice === null ? "Price pending" : "Current listing")}
+                    {item.listingTitle ?? item.retailer ?? (item.unitPrice === null ? "Price pending" : "Current listing")}
                   </div>
                   <div className="shopping-build-item-compact-meta">
                     Qty {item.quantity} · {money(item.unitPrice, item.currency)} each
@@ -762,6 +699,9 @@ export default function ShoppingWorkspace({
   const [discoveryCandidates, setDiscoveryCandidates] = useState<
     DiscoveryCandidate[]
   >([]);
+  const [selectedChoiceIds, setSelectedChoiceIds] = useState<Record<string, string>>(
+    () => readListingSelections(project.id),
+  );
   const [message, setMessage] = useState("");
   const requestSequence = useRef(0);
   const activeRequest = useRef<{
@@ -769,7 +709,7 @@ export default function ShoppingWorkspace({
     controller: AbortController;
   } | null>(null);
   const autoLookupFingerprint = useRef<string | null>(null);
-  const stageDesignRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const stageDesignRef = useRef<(force?: boolean) => Promise<void>>(() => Promise.resolve());
 
   const designRequirements = useMemo(
     () =>
@@ -796,17 +736,23 @@ export default function ShoppingWorkspace({
       componentIds.has(result.catalogId),
     );
   }, [requiredCatalogIds, shopping.results]);
-  const buildItems = useMemo(
-    () =>
-      buildCartItems(designRequirements, discoveryCandidates, visibleResults),
+  const listingGroups = useMemo<ListingGroup[]>(
+    () => designRequirements.map((requirement) => ({
+      requirement,
+      choices: choicesForRequirement(requirement, discoveryCandidates, visibleResults),
+    })),
     [designRequirements, discoveryCandidates, visibleResults],
+  );
+  const buildItems = useMemo(
+    () => buildCartItems(listingGroups, selectedChoiceIds),
+    [listingGroups, selectedChoiceIds],
   );
   const requestStatus: ShoppingRequestStatus =
     shopping.requestStatus ?? "idle";
   const hasListings =
     discoveryCandidates.length > 0 || visibleResults.length > 0;
 
-  const stageDesign = async () => {
+  const stageDesign = async (force = false) => {
     const targets = designRequirements.slice(0, MAX_DESIGN_SEARCHES);
     if (!targets.length) {
       setDiscoveryCandidates([]);
@@ -865,9 +811,17 @@ export default function ShoppingWorkspace({
         // The lookup client owns the short-lived and user-scoped persistent
         // caches. A fresh match is reused; a new or expired part reaches the
         // provider, so graph edits only add the searches they need.
-        const outcome =
-          getCachedPartsSearch(lookupRequest) ??
-          (await requestPartsSearch(lookupRequest, {}, controller.signal));
+        const cachedOutcome = force ? null : getCachedPartsSearch(lookupRequest);
+        const cachedHasPrice = cachedOutcome?.discovery?.candidates.some(
+          (candidate) => candidate.price !== null,
+        ) === true;
+        const outcome = cachedOutcome && cachedHasPrice
+          ? cachedOutcome
+          : await requestPartsSearch(
+              lookupRequest,
+              { bypassPersistentCache: force || Boolean(cachedOutcome) },
+              controller.signal,
+            );
         if (
           controller.signal.aborted ||
           activeRequest.current?.sequence !== sequence
@@ -989,6 +943,22 @@ export default function ShoppingWorkspace({
   });
 
   useEffect(() => {
+    setSelectedChoiceIds(readListingSelections(project.id));
+  }, [project.id]);
+
+  useEffect(() => {
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(
+        `${LISTING_SELECTION_STORAGE_PREFIX}:${project.id}`,
+        JSON.stringify(selectedChoiceIds),
+      );
+    } catch {
+      // A storage-restricted browser can still keep the current selection in memory.
+    }
+  }, [project.id, selectedChoiceIds]);
+
+  useEffect(() => {
     if (!designRequirements.length) {
       autoLookupFingerprint.current = null;
       requestSequence.current += 1;
@@ -1040,7 +1010,10 @@ export default function ShoppingWorkspace({
               : phase;
   const retryAutoLookup = () => {
     autoLookupFingerprint.current = designFingerprint;
-    void stageDesignRef.current();
+    void stageDesignRef.current(true);
+  };
+  const selectListing = (requirementKey: string, choiceId: string) => {
+    setSelectedChoiceIds((current) => ({ ...current, [requirementKey]: choiceId }));
   };
 
   return (
@@ -1063,11 +1036,13 @@ export default function ShoppingWorkspace({
           hasListings={hasListings}
           onRetry={retryAutoLookup}
         />
-        {hasListings && (
+        {designRequirements.length > 0 && (
           <ListingResults
-            requirements={designRequirements}
-            candidates={discoveryCandidates}
-            results={visibleResults}
+            groups={listingGroups}
+            selectedChoiceIds={selectedChoiceIds}
+            loading={effectivePhase === "searching"}
+            onSelect={selectListing}
+            onRetry={retryAutoLookup}
           />
         )}
       </section>

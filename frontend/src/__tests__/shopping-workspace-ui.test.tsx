@@ -108,7 +108,19 @@ describe("parts workspace automatic sourcing", () => {
     useProjectStore.setState({ project, projects: [project], activeProjectId: project.id });
     useShoppingStore.setState({
       results: [
-        listing("esp32-devkit-v1", "ESP32 Devkit V1", "ESP32-DEVKIT-V1", 8.5),
+        {
+          ...listing("esp32-devkit-v1", "ESP32 Devkit V1", "ESP32-DEVKIT-V1", 8.5),
+          offers: [
+            listing("esp32-devkit-v1", "ESP32 Devkit V1", "ESP32-DEVKIT-V1", 8.5).offers[0],
+            {
+              ...listing("esp32-devkit-v1", "ESP32 Devkit V1", "ESP32-DEVKIT-V1", 12).offers[0],
+              id: "offer-esp32-premium",
+              title: "ESP32 Devkit V1 with headers",
+              price: 12,
+              retailer: "Mouser",
+            },
+          ],
+        },
         listing("led", "LED", "LED-5MM", 1.25),
       ],
       requestStatus: "ready",
@@ -120,8 +132,20 @@ describe("parts workspace automatic sourcing", () => {
     expect(container.textContent).toContain("Qty 2");
     expect(container.textContent).toContain("$17.00");
     expect(container.textContent).toContain("$18.25");
-    expect(container.textContent).toContain("Matched to the build cart");
-    expect(container.querySelectorAll(".shopping-listing-group")).toHaveLength(2);
+    expect(container.textContent).toContain("Choose one listing for each cart line");
+    expect(container.querySelectorAll(".shopping-listing-picker")).toHaveLength(3);
+    expect(container.querySelectorAll("select[aria-label^='Choose listing for']")).toHaveLength(3);
+
+    const boardPicker = container.querySelector<HTMLSelectElement>("select[aria-label='Choose listing for ESP32 Devkit V1']");
+    expect(boardPicker).toBeTruthy();
+    act(() => {
+      if (!boardPicker) return;
+      boardPicker.value = "result:listing-esp32-devkit-v1:offer-esp32-premium";
+      boardPicker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(container.textContent).toContain("$24.00");
+    expect(container.textContent).toContain("$25.25");
+    expect(container.textContent).toContain("ESP32 Devkit V1 with headers");
     expect(container.textContent).not.toContain("Google Shopping");
     expect(container.textContent).not.toContain("REVIEW FIRST");
   });

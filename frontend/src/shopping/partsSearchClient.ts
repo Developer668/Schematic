@@ -7,7 +7,10 @@ export const PARTS_SEARCH_MAX_QUANTITY = 999;
 
 const DEFAULT_CACHE_TTL_MS = 30_000;
 const MAX_CACHE_ENTRIES = 32;
-const PERSISTED_LOOKUP_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Keep browser reuse aligned with the hosted Bright Data cache. Product
+// photos and prices should refresh on a shopping timescale, not remain pinned
+// to yesterday's scrape.
+const PERSISTED_LOOKUP_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
 const PERSISTED_LOOKUP_CACHE_MAX_ENTRIES = 128;
 const PERSISTED_LOOKUP_CACHE_MAX_BYTES = 512 * 1024;
 const PERSISTED_LOOKUP_CACHE_PREFIX = "schematic-parts-lookup-cache";
@@ -320,6 +323,10 @@ function persistentCachedOutcome(request: PartsSearchRequest, now = Date.now()):
 
 function rememberPersistentLookup(request: PartsSearchRequest, outcome: PartsSearchOutcome, now = Date.now()) {
   if (!outcome.discovery || outcome.status === "cancelled" || outcome.status === "failed" || (outcome.status === "rate-limited" && outcome.discovery.candidates.length === 0)) return;
+  // Do not let an image-only result keep a cart line at "Price pending" for
+  // the full cache window. It can still render now, but the next visit gets a
+  // fresh chance to obtain a usable price.
+  if (!outcome.discovery.candidates.some((candidate) => candidate.price !== null)) return;
   const entries = readPersistentLookups(now);
   const key = persistentLookupKey(request);
   entries.delete(key);

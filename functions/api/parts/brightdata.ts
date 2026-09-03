@@ -68,6 +68,41 @@ function first(item: Record<string, unknown>, keys: string[], max = 240) {
   return "";
 }
 
+function firstValue(item: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = item[key];
+    if (value !== null && value !== undefined && value !== "") return value;
+  }
+  return undefined;
+}
+
+function nestedHttps(value: unknown, depth = 0): string {
+  const direct = safeHttps(value);
+  if (direct || depth >= 2) return direct;
+  if (Array.isArray(value)) {
+    for (const entry of value.slice(0, 4)) {
+      const url = nestedHttps(entry, depth + 1);
+      if (url) return url;
+    }
+    return "";
+  }
+  const item = record(value);
+  if (!item) return "";
+  for (const key of ["url", "link", "src", "href", "thumbnail", "image", "original"]) {
+    const url = nestedHttps(item[key], depth + 1);
+    if (url) return url;
+  }
+  return "";
+}
+
+function firstHttps(item: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const url = nestedHttps(item[key]);
+    if (url) return url;
+  }
+  return "";
+}
+
 function numberValue(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : null;
   const nested = record(value);
@@ -142,16 +177,18 @@ function candidate(item: Record<string, unknown>, query: string, rank: number, f
   const title = first(item, ["title", "name", "product_title", "productTitle"]);
   if (!title) return null;
   const retailer = first(item, ["shop", "retailer", "seller", "store", "source"], 160) || "Retailer listing";
-  let verificationUrl = "";
-  for (const key of ["link", "url", "product_link", "productLink", "product_url", "productUrl", "merchant_link", "href"]) {
-    verificationUrl = safeHttps(item[key]);
-    if (verificationUrl) break;
-  }
+  let verificationUrl = firstHttps(item, ["link", "url", "product_link", "productLink", "product_url", "productUrl", "merchant_link", "href"]);
   if (!verificationUrl) verificationUrl = `https://www.google.com/search?q=${encodeURIComponent(`${title} ${retailer}`)}&tbm=shop`;
-  const rawPrice = item.extracted_price ?? item.price;
+  const rawPrice = firstValue(item, [
+    "extracted_price", "extractedPrice", "price", "current_price", "currentPrice",
+    "sale_price", "salePrice", "price_from", "priceFrom", "low_price", "lowPrice",
+  ]);
   const sourcePartId = first(item, ["product_id", "productId", "id", "sku"], 120) || fnv(`${title}|${retailer}|${verificationUrl}|${rank}`);
   const partNumber = first(item, ["part_number", "partNumber", "mpn", "manufacturer_part_number", "manufacturerPartNumber", "model", "sku"], 120) || (/[0-9]/.test(query) ? query : "");
-  const imageUrl = ["image_url", "imageUrl", "thumbnail", "thumbnail_url", "image"].map((key) => safeHttps(item[key])).find(Boolean) ?? "";
+  const imageUrl = firstHttps(item, [
+    "image_url", "imageUrl", "thumbnail", "thumbnail_url", "thumbnailUrl",
+    "image", "images", "product_image", "productImage",
+  ]);
   const availability = first(item, ["availability", "stock_status", "stockStatus"], 120);
   const shipping = first(item, ["shipping", "delivery", "delivery_info", "deliveryInfo"], 180);
   const description = first(item, ["description", "snippet", "subtitle"], 420);
@@ -275,7 +312,13 @@ export async function searchBrightData(queryInput: string, quantity: number, sub
         return [value];
       }).slice(0, MAX_RESULTS);
       const result = response(query, quantity, candidates.length ? "success" : "empty", duration, candidates, candidates.length ? `Found ${candidates.length} current shopping result${candidates.length === 1 ? "" : "s"}. Confirm seller, model, stock, shipping, and checkout total.` : "No matching shopping listings were found. Try an exact manufacturer part number or board name.");
-      const ttlSeconds = boundedInt(envString(env, candidates.length ? "BRIGHTDATA_SERP_CACHE_TTL_SECONDS" : "BRIGHTDATA_SERP_EMPTY_CACHE_TTL_SECONDS"), candidates.length ? 900 : 300, 60, 3_600);
+      const hasPricedCandidate = candidates.some((item) => typeof item.price === "number");
+      const ttlSeconds = boundedInt(
+        envString(env, hasPricedCandidate ? "BRIGHTDATA_SERP_CACHE_TTL_SECONDS" : "BRIGHTDATA_SERP_EMPTY_CACHE_TTL_SECONDS"),
+        hasPricedCandidate ? 900 : 60,
+        60,
+        3_600,
+      );
       cache.set(key, { expiresAt: Date.now() + ttlSeconds * 1_000, result });
       prune();
       return result;

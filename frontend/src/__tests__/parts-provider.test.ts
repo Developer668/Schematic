@@ -89,7 +89,8 @@ describe("server-side parts provider fallback", () => {
 
   it("shares an in-flight Bright Data lookup and reuses its fresh result without another paid call", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ shopping_results: [{
-      title: "BMP280 pressure sensor", product_id: "bmp280-1", price: "$8.95", shop: "Example Electronics", link: "https://supplier.example/bmp280",
+      title: "BMP280 pressure sensor", product_id: "bmp280-1", current_price: { value: "$8.95" }, shop: "Example Electronics", link: "https://supplier.example/bmp280",
+      thumbnail: { url: "https://images.example/bmp280.jpg" },
     }] }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const env = {
@@ -105,7 +106,7 @@ describe("server-side parts provider fallback", () => {
       partsSearch(await requestFor("BMP280"), env),
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect((await first.json() as any).candidates[0]).toMatchObject({ source: "brightdata-serp", verificationRequired: true });
+    expect((await first.json() as any).candidates[0]).toMatchObject({ source: "brightdata-serp", verificationRequired: true, price: 8.95, imageUrl: "https://images.example/bmp280.jpg" });
     expect((await second.json() as any).candidates[0]).toMatchObject({ source: "brightdata-serp" });
     const cached = await partsSearch(await requestFor("BMP280"), env);
     expect((await cached.json() as any).cacheHit).toBe(true);
