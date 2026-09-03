@@ -1,8 +1,12 @@
 import path from "node:path";
+import fs from "node:fs";
 import { sites } from "@openai/sites-vite-plugin";
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
+
+const componentMetadataId = "virtual:schematic-component-metadata";
+const resolvedComponentMetadataId = `\0${componentMetadataId}`;
 
 const { d1, r2 } = hostingConfig;
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID = "00000000-0000-4000-8000-000000000000";
@@ -47,6 +51,19 @@ export default defineConfig(async () => {
     build: { assetsInlineLimit: 0 },
     server: { fs: { allow: [path.resolve(__dirname, ".."), path.resolve(__dirname)] } },
     plugins: [
+      {
+        name: "schematic-component-metadata",
+        enforce: "pre",
+        resolveId(source: string) {
+          return source === componentMetadataId ? resolvedComponentMetadataId : null;
+        },
+        load(id: string) {
+          if (id !== resolvedComponentMetadataId) return null;
+          const metadataPath = path.resolve(__dirname, "../frontend/public/components-metadata.json");
+          const metadata = fs.readFileSync(metadataPath, "utf8");
+          return `export default ${metadata};`;
+        },
+      },
       vinext(),
       sites(),
       cloudflare({ viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] }, config: localBindingConfig }),
