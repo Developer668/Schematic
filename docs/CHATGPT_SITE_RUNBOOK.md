@@ -3,9 +3,9 @@
 Status: release procedure; publication must be verified by the release agent.
 
 Canonical Site URL:
-[schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site)
+[schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
 
-Sites project ID: `appgprj_6a9216cfb16881919e467839d41b29b8`
+Sites project ID: `appgprj_6a913ce4a58881918a47ea49fa0ca505`
 
 Hosting configuration:
 [`chatgpt-site/.openai/hosting.json`](../chatgpt-site/.openai/hosting.json)
@@ -77,7 +77,7 @@ metadata that the release agent actually submits.
 2. Push the reviewed commit to the repository according to the repository
    owner's normal GitHub process.
 3. In the Sites publishing flow, select project
-   `appgprj_6a9216cfb16881919e467839d41b29b8` and publish the intended Site
+   `appgprj_6a913ce4a58881918a47ea49fa0ca505` and publish the intended Site
    build. Keep the canonical URL unchanged.
 4. Record the deployed revision/version without recording secrets or bearer
    tokens.

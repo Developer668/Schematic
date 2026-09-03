@@ -16,9 +16,9 @@ ChatGPT in-app browser
 ```
 
 Canonical Site URL:
-[schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site)
+[schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
 
-Sites project ID: `appgprj_6a9216cfb16881919e467839d41b29b8`
+Sites project ID: `appgprj_6a913ce4a58881918a47ea49fa0ca505`
 
 The repository records that binding. Publication is tied to the pushed release
 commit and Site version in `docs/CHATGPT_SITE_PROGRESS.md`; a local build alone

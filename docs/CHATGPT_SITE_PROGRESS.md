@@ -7,8 +7,8 @@ the remaining live acceptance items are explicitly listed below.
 
 ## Canonical release target
 
-- Live URL: [schematic-hardware-workbench.decipherer71951502.chatgpt.site](https://schematic-hardware-workbench.decipherer71951502.chatgpt.site)
-- Sites project: `appgprj_6a9216cfb16881919e467839d41b29b8`
+- Live URL: [schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
+- Sites project: `appgprj_6a913ce4a58881918a47ea49fa0ca505`
 - Binding file: [`chatgpt-site/.openai/hosting.json`](../chatgpt-site/.openai/hosting.json)
 - Wrapper entry: [`chatgpt-site/app/[[...path]]/SchematicClient.tsx`](../chatgpt-site/app/%5B%5B...path%5D%5D/SchematicClient.tsx)
 - Shared app entry: [`frontend/src/App.tsx`](../frontend/src/App.tsx)
@@ -112,7 +112,7 @@ reference workspaces; that is separate from the Site runtime dependency graph.
       runtime modules.
 - [x] Build the Site with `npm --prefix chatgpt-site run build`.
 - [x] Publish only to Sites project
-      `appgprj_6a9216cfb16881919e467839d41b29b8`; do not create a duplicate
+      `appgprj_6a913ce4a58881918a47ea49fa0ca505`; do not create a duplicate
       binding or change the canonical URL.
 
 ## Live acceptance checklist
@@ -161,7 +161,7 @@ Published evidence: GitHub commit
 `134c28dbd9fc58376b68f87b87ff3c4eb3c85318`; Sites version 6; deployment
 `appgdep_6a96798637ac819183c18605d5c4fa6d`; deployment status `succeeded` at
 2026-09-01T07:06:57Z; live URL
-`https://schematic-hardware-workbench.decipherer71951502.chatgpt.site`.
+`https://schematic-hardware-workspace.decipherer71.chatgpt.site`.
 Unauthenticated HTTP smoke checks returned 200 for `/`, `/api/health`,
 `/api/docs`, and `/capabilities`, and 404 for `/api/compile` and
 `/api/simulation/state`. These checks do not establish native WebMCP discovery,
