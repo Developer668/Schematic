@@ -1104,7 +1104,7 @@ const tools: ToolDef[] = [
   },
   {
     name: "shopping.search",
-    description: "Discover electronics parts through bounded no-key public sources when listings are omitted, then publish agent-attributed listings into the Parts desk after checking them. Public candidates never become offers automatically; return the schematic.parts.lookup.v1 handoff to a browsing agent when publication is unavailable.",
+    description: "Discover electronics parts through the configured bounded shopping source when listings are omitted, then publish agent-attributed listings into the Parts desk after checking them. Discovery is cached and rate-limited; candidates never become offers automatically. Return the schematic.parts.lookup.v1 handoff to a browsing agent when publication is unavailable.",
     inputSchema: {
       type: "object",
       properties: {
