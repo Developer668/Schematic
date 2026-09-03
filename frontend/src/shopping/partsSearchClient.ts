@@ -337,7 +337,12 @@ function cancelled(request: PartsSearchRequest): PartsSearchOutcome {
 }
 
 function withRequestIdentity(outcome: PartsSearchOutcome, request: PartsSearchRequest): PartsSearchOutcome {
-  return { ...outcome, request, requestId: request.requestId };
+  return {
+    ...outcome,
+    request,
+    requestId: request.requestId,
+    ...(outcome.payload ? { payload: { ...outcome.payload, query: request.query, quantity: request.quantity } } : {}),
+  };
 }
 
 function shareSearchOutcome(
