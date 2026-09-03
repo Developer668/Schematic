@@ -4,6 +4,11 @@ import { test } from "node:test";
 
 const root = new URL("../", import.meta.url);
 
+test("the ChatGPT Sites binding targets the canonical Schematic project", async () => {
+  const hosting = JSON.parse(await readFile(new URL(".openai/hosting.json", root), "utf8"));
+  assert.equal(hosting.project_id, "appgprj_6a913ce4a58881918a47ea49fa0ca505");
+});
+
 test("the worker fixture is a safe same-origin echo fixture", async () => {
   const worker = await readFile(new URL("../frontend/public/capability-fixtures/echo-worker.js", root), "utf8");
   assert.match(worker, /self\.onmessage/);

@@ -1485,32 +1485,47 @@ async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> 
   }
 }
 
+/** Prefer the current document-scoped API, but keep the deprecated navigator surface as a compatibility fallback. */
+function getNativeModelContext() {
+  const documentContext: any = (document as any).modelContext;
+  if (typeof documentContext?.registerTool === "function") return documentContext;
+  const navigatorContext: any = (navigator as any).modelContext;
+  if (typeof navigatorContext?.registerTool === "function") return navigatorContext;
+  return null;
+}
+
 /** Chrome WebMCP Bridge reads navigator.modelContextTesting (consumer API). */
 function installModelContextTestingPolyfill() {
   const nav = navigator as any;
   if (nav.modelContextTesting?.listTools && nav.modelContextTesting?.executeTool) return;
-  Object.defineProperty(nav, "modelContextTesting", {
-    configurable: true,
-    value: {
-      listTools() {
-        return tools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          inputSchema: JSON.stringify(t.inputSchema ?? { type: "object" }),
-        }));
+  try {
+    Object.defineProperty(nav, "modelContextTesting", {
+      configurable: true,
+      value: {
+        listTools() {
+          return tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            inputSchema: JSON.stringify(t.inputSchema ?? { type: "object" }),
+          }));
+        },
+        async executeTool(toolName: string, inputArgsJson: string) {
+          const tool = tools.find((candidate) => candidate.name === toolName);
+          if (!tool) throw new Error(`Unknown WebMCP tool: ${toolName}`);
+          const args = inputArgsJson ? JSON.parse(inputArgsJson) : {};
+          const result = await executeToolWithActivity(tool, args);
+          return typeof result === "string" ? result : JSON.stringify(result ?? null);
+        },
+        registerToolsChangedCallback(callback: () => void) {
+          callback();
+        },
       },
-      async executeTool(toolName: string, inputArgsJson: string) {
-        const tool = tools.find((candidate) => candidate.name === toolName);
-        if (!tool) throw new Error(`Unknown WebMCP tool: ${toolName}`);
-        const args = inputArgsJson ? JSON.parse(inputArgsJson) : {};
-        const result = await executeToolWithActivity(tool, args);
-        return typeof result === "string" ? result : JSON.stringify(result ?? null);
-      },
-      registerToolsChangedCallback(callback: () => void) {
-        callback();
-      },
-    },
-  });
+    });
+  } catch (error) {
+    // This non-standard testing surface must never be able to prevent native
+    // document.modelContext registration in a host that owns Navigator.
+    console.warn("[WebMCP] modelContextTesting fallback could not be installed:", error);
+  }
 }
 
 /**
@@ -1524,12 +1539,12 @@ let lateNativeRetryScheduled = false;
 function scheduleLateNativeRetry(generation: number) {
   if (lateNativeRetryScheduled || typeof window === "undefined") return;
   lateNativeRetryScheduled = true;
-  const attempts = [800, 2000, 4000];
+  const attempts = [250, 750, 1500, 3000, 6000, 12000];
   for (const delayMs of attempts) {
     window.setTimeout(() => {
       if (generation !== registrationGeneration) return;
-      const current: any = (document as any).modelContext ?? (navigator as any).modelContext;
-      if (typeof current?.registerTool === "function" && useWebMCPStore.getState().registration.state === "unavailable") {
+      const current = getNativeModelContext();
+      if (current && useWebMCPStore.getState().registration.state === "unavailable") {
         lateNativeRetryScheduled = false;
         void registerWebMCPTools();
       }
@@ -1552,8 +1567,11 @@ export async function registerWebMCPTools() {
   controllers = [];
   const generation = ++registrationGeneration;
   useWebMCPStore.getState().setRegistration({ state: "checking", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: undefined });
-  installModelContextTestingPolyfill();
-  const mc: any = (document as any).modelContext ?? (navigator as any).modelContext;
+  const mc = getNativeModelContext();
+  // Never install the non-standard testing bridge in front of a real native
+  // WebMCP surface. Some embedded hosts own or lock Navigator properties, and
+  // a testing polyfill must not be allowed to break production registration.
+  if (!mc) installModelContextTestingPolyfill();
   // Test/degraded-runtime fallback only. Native agents must use the
   // document.modelContext registration below; this same-origin object is not a
   // cross-origin mutation bridge. Install it immediately so local probes and
@@ -1580,14 +1598,16 @@ export async function registerWebMCPTools() {
     scheduleLateNativeRetry(generation);
     return;
   }
-  let registeredCount = 0;
-  let registrationErrors = 0;
-  for (const t of tools) {
-    if (generation !== registrationGeneration) return;
+  // Submit the complete registry before awaiting any individual registration.
+  // registerTool() returns a Promise, and awaiting each of 45 tools serially
+  // creates an avoidable window where a browser agent can observe only a
+  // partial tool map during initial page discovery.
+  const registrationResults = await Promise.all(tools.map(async (t) => {
+    if (generation !== registrationGeneration) return false;
     const ctrl = new AbortController();
     controllers.push(ctrl);
     try {
-      await mc.registerTool(
+      const registration = mc.registerTool(
         {
           name: t.name,
           description: t.description + " — Scoped to your verified account and its local project room. Agent may place hardware on your behalf within your room only.",
@@ -1597,13 +1617,17 @@ export async function registerWebMCPTools() {
         },
         { signal: ctrl.signal },
       );
-      registeredCount += 1;
+      await registration;
       console.log(`[WebMCP] registered ${t.name} (room-aware)`);
+      return true;
     } catch (e) {
-      registrationErrors += 1;
       console.error(`[WebMCP] failed to register ${t.name}:`, e);
+      return false;
     }
-  }
+  }));
+  if (generation !== registrationGeneration) return;
+  const registeredCount = registrationResults.filter(Boolean).length;
+  const registrationErrors = WEBMCP_TOOL_COUNT - registeredCount;
   // listen for toolchange
   if ("ontoolchange" in mc) {
     mc.ontoolchange = () => console.log("[WebMCP] toolset changed");

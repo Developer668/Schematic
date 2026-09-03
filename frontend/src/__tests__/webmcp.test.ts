@@ -348,6 +348,50 @@ describe("WebMCP tools", () => {
     expect(definitions.get("behavior.plan.write").inputSchema.required).toEqual(["plan", "expectedRevision"]);
   });
 
+  it("submits the complete native registry before awaiting registration promises", async () => {
+    const resolvers: Array<() => void> = [];
+    const registerTool = vi.fn(() => new Promise<void>((resolve) => resolvers.push(resolve)));
+    (document as any).modelContext = { registerTool };
+
+    const pending = registerWebMCPTools();
+    await vi.waitFor(() => expect(registerTool).toHaveBeenCalledTimes(WEBMCP_TOOL_COUNT));
+    expect(resolvers).toHaveLength(WEBMCP_TOOL_COUNT);
+    for (const resolve of resolvers) resolve();
+    await pending;
+
+    expect(useWebMCPStore.getState().registration).toMatchObject({
+      state: "native",
+      registeredCount: WEBMCP_TOOL_COUNT,
+    });
+  });
+
+  it("uses navigator.modelContext when document.modelContext is present but incomplete", async () => {
+    const registerTool = vi.fn(async () => undefined);
+    (document as any).modelContext = {};
+    (navigator as any).modelContext = { registerTool };
+
+    await registerWebMCPTools();
+
+    expect(registerTool).toHaveBeenCalledTimes(WEBMCP_TOOL_COUNT);
+    expect(useWebMCPStore.getState().registration).toMatchObject({
+      state: "native",
+      registeredCount: WEBMCP_TOOL_COUNT,
+      declaredCount: WEBMCP_TOOL_COUNT,
+    });
+  });
+
+  it("leaves a host-owned modelContextTesting surface untouched when native WebMCP exists", async () => {
+    const registerTool = vi.fn(async () => undefined);
+    const hostTestingSurface = { hostOwned: true };
+    Object.defineProperty(navigator, "modelContextTesting", { configurable: true, value: hostTestingSurface });
+    (document as any).modelContext = { registerTool };
+
+    await registerWebMCPTools();
+
+    expect(registerTool).toHaveBeenCalledTimes(WEBMCP_TOOL_COUNT);
+    expect((navigator as any).modelContextTesting).toBe(hostTestingSurface);
+  });
+
   it("does not fake native WebMCP when the browser does not expose it", async () => {
     delete (document as any).modelContext;
     delete (navigator as any).modelContext;
