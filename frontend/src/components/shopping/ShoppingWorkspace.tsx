@@ -937,7 +937,7 @@ export default function ShoppingWorkspace({
       const resultMessage = candidates.length
         ? `Found ${candidates.length} listing${candidates.length === 1 ? "" : "s"} for ${completed} design part${completed === 1 ? "" : "s"}.${omitted > 0 ? ` ${omitted} additional part${omitted === 1 ? " was" : "s were"} kept in the cart but not searched in this pass.` : ""}`
         : rateLimited
-          ? "The listing provider is temporarily rate limited. Retry the active design in a moment."
+          ? lookupMessages[0] ?? "The listing provider is temporarily rate limited. Retry the active design in a moment."
           : lookupErrors.length > 0
             ? `Couldn’t load the listings: ${lookupErrors[0]}`
             : lookupMessages.length > 0

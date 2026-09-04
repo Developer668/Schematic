@@ -33,8 +33,15 @@ function truthy(value: string) {
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
+function appRateLimitsEnabled(env: Env) {
+  const value = envString(env, "BRIGHTDATA_APP_RATE_LIMITS_ENABLED");
+  return value === "" || truthy(value);
+}
+
 function boundedInt(value: string, fallback: number, minimum: number, maximum: number) {
-  const parsed = Number(value);
+  const normalized = value.trim();
+  if (!normalized) return fallback;
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, Math.floor(parsed))) : fallback;
 }
 
@@ -248,6 +255,7 @@ export function brightDataConfigStatus(env: Env) {
     keyPresent,
     explicitEnableFlag: enableFlag.length > 0,
     zoneConfigured: Boolean(envString(env, "BRIGHTDATA_SERP_ZONE")),
+    appRateLimitsEnabled: appRateLimitsEnabled(env),
   };
 }
 
@@ -281,20 +289,27 @@ export async function searchBrightData(queryInput: string, quantity: number, sub
   const pending = inFlight.get(key);
   if (pending) return pending.then((result) => forQuantity(result, quantity));
   const now = Date.now();
-  if (blockedUntil > now) return response(query, quantity, "circuit_open", 0, [], "Shopping search is temporarily paused to protect the provider quota.", 429, Math.ceil((blockedUntil - now) / 1_000));
-  const hourly = available(userHourly.get(subject), boundedInt(envString(env, "BRIGHTDATA_MAX_REQUESTS_PER_HOUR"), 10, 1, 100), 60 * 60_000);
-  const daily = available(userDaily.get(subject), boundedInt(envString(env, "BRIGHTDATA_MAX_REQUESTS_PER_DAY"), 40, 1, 500), 24 * 60 * 60_000);
-  const global = available(globalDaily, boundedInt(envString(env, "BRIGHTDATA_MAX_GLOBAL_REQUESTS_PER_DAY"), 200, 1, 2_000), 24 * 60 * 60_000);
-  if (!hourly.allowed || !daily.allowed || !global.allowed) {
-    const retry = Math.max(hourly.retryAfterSeconds, daily.retryAfterSeconds, global.retryAfterSeconds);
-    return response(query, quantity, "rate_limited", 0, [], "Shopping search limit reached. Cached searches remain available; try again later.", 429, retry);
+  const guardEnabled = appRateLimitsEnabled(env);
+  if (guardEnabled && blockedUntil > now) return response(query, quantity, "circuit_open", 0, [], "Shopping search is temporarily paused to protect the provider quota.", 429, Math.ceil((blockedUntil - now) / 1_000));
+  if (guardEnabled) {
+    // A single normal Parts-page pass can contain 12 distinct BOM lookups, so
+    // the default quota must comfortably exceed one complete render. Cached
+    // and in-flight requests are already handled above and do not consume a
+    // provider slot. Deployments can lower these values explicitly if needed.
+    const hourly = available(userHourly.get(subject), boundedInt(envString(env, "BRIGHTDATA_MAX_REQUESTS_PER_HOUR"), 60, 1, 500), 60 * 60_000);
+    const daily = available(userDaily.get(subject), boundedInt(envString(env, "BRIGHTDATA_MAX_REQUESTS_PER_DAY"), 300, 1, 2_000), 24 * 60 * 60_000);
+    const global = available(globalDaily, boundedInt(envString(env, "BRIGHTDATA_MAX_GLOBAL_REQUESTS_PER_DAY"), 2_000, 1, 20_000), 24 * 60 * 60_000);
+    if (!hourly.allowed || !daily.allowed || !global.allowed) {
+      const retry = Math.max(hourly.retryAfterSeconds, daily.retryAfterSeconds, global.retryAfterSeconds);
+      return response(query, quantity, "rate_limited", 0, [], "Shopping search limit reached. Cached searches remain available; try again later.", 429, retry);
+    }
+    hourly.bucket.count += 1;
+    daily.bucket.count += 1;
+    global.bucket.count += 1;
+    userHourly.set(subject, hourly.bucket);
+    userDaily.set(subject, daily.bucket);
+    globalDaily = global.bucket;
   }
-  hourly.bucket.count += 1;
-  daily.bucket.count += 1;
-  global.bucket.count += 1;
-  userHourly.set(subject, hourly.bucket);
-  userDaily.set(subject, daily.bucket);
-  globalDaily = global.bucket;
   const work = (async () => {
     const started = Date.now();
     const controller = new AbortController();
@@ -308,11 +323,11 @@ export async function searchBrightData(queryInput: string, quantity: number, sub
       const duration = Date.now() - started;
       if (upstream.status === 429) {
         const retry = boundedInt(upstream.headers.get("retry-after") ?? "", 60, 1, 3_600);
-        blockedUntil = Date.now() + retry * 1_000;
+        if (guardEnabled) blockedUntil = Date.now() + retry * 1_000;
         return response(query, quantity, "rate_limited", duration, [], "Bright Data is rate limiting shopping searches. Try again later.", 429, retry);
       }
       if (upstream.status === 401 || upstream.status === 403) {
-        blockedUntil = Date.now() + 5 * 60_000;
+        if (guardEnabled) blockedUntil = Date.now() + 5 * 60_000;
         return response(query, quantity, "error", duration, [], "Bright Data rejected the configured server credential or SERP zone. Check the Site BRIGHTDATA_API_KEY and BRIGHTDATA_SERP_ZONE bindings, then publish a new Site version.", 503);
       }
       if (upstream.status === 400 || upstream.status === 422) {

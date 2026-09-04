@@ -178,7 +178,36 @@ describe("server-side parts provider fallback", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not call Bright Data after a per-user spending limit is reached", async () => {
+  it("allows one complete 12-line BOM pass with the default Bright Data guard", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ shopping_results: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const env = { ...authEnv, BRIGHTDATA_SERP_ENABLED: "true", BRIGHTDATA_API_KEY: "test-only-key" };
+    const responses: Response[] = [];
+    for (let index = 0; index < 12; index += 1) responses.push(await partsSearch(await requestFor(`bom-part-${index}`, "bom-user"), env));
+    expect(responses.map((response) => response.status)).toEqual(Array(12).fill(200));
+    expect(fetchMock).toHaveBeenCalledTimes(12);
+  });
+
+  it("can bypass only Schematic's app-side Bright Data limiter for provider diagnostics", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ shopping_results: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const env = {
+      ...authEnv,
+      BRIGHTDATA_SERP_ENABLED: "true",
+      BRIGHTDATA_API_KEY: "test-only-key",
+      BRIGHTDATA_APP_RATE_LIMITS_ENABLED: "false",
+      BRIGHTDATA_MAX_REQUESTS_PER_HOUR: "1",
+      BRIGHTDATA_MAX_REQUESTS_PER_DAY: "1",
+      BRIGHTDATA_MAX_GLOBAL_REQUESTS_PER_DAY: "1",
+    };
+    const first = await partsSearch(await requestFor("diagnostic-one", "diagnostic-user"), env);
+    const second = await partsSearch(await requestFor("diagnostic-two", "diagnostic-user"), env);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not call Bright Data after an explicitly configured per-user spending limit is reached", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ shopping_results: [] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const env = { ...authEnv, BRIGHTDATA_SERP_ENABLED: "true", BRIGHTDATA_API_KEY: "test-only-key", BRIGHTDATA_MAX_REQUESTS_PER_HOUR: "1", BRIGHTDATA_MAX_REQUESTS_PER_DAY: "1", BRIGHTDATA_MAX_GLOBAL_REQUESTS_PER_DAY: "200" };

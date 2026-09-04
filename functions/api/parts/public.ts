@@ -70,13 +70,17 @@ const JLC_ENDPOINT = "https://jlcsearch.tscircuit.com/api/search";
 const ADAFRUIT_ENDPOINT = "https://www.adafruit.com/api/product";
 const MAX_CANDIDATES = 24;
 const MAX_RESPONSE_BYTES = 512 * 1024;
-const REQUEST_LIMIT = 12;
+// One Parts-page pass may legitimately search up to 12 distinct BOM lines.
+// The request guard must therefore sit above that normal workload instead of
+// rate-limiting the product during its first render. These bounds still stop
+// runaway refresh loops while upstream providers retain their own quotas.
+const REQUEST_LIMIT = 30;
 const REQUEST_WINDOW_MS = 60_000;
-const REQUEST_BURST_LIMIT = 4;
+const REQUEST_BURST_LIMIT = 16;
 const REQUEST_BURST_MS = 1_000;
 const SOURCE_LIMITS: Record<PublicSourceId, { limit: number; windowMs: number; cooldownMs: number }> = {
-  jlcsearch: { limit: 30, windowMs: 60_000, cooldownMs: 250 },
-  adafruit: { limit: 5, windowMs: 60_000, cooldownMs: 1_000 },
+  jlcsearch: { limit: 60, windowMs: 60_000, cooldownMs: 150 },
+  adafruit: { limit: 12, windowMs: 60_000, cooldownMs: 500 },
 };
 const FRESH_CACHE_MS = 15 * 60_000;
 const STALE_CACHE_MS = 24 * 60 * 60_000;

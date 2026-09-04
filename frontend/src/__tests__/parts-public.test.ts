@@ -69,11 +69,21 @@ describe("keyless public parts discovery", () => {
     expect(body.attempts[0].message).toContain("524288-byte limit");
   });
 
-  it("returns a safe handoff after the per-room burst limit", async () => {
+  it("allows one complete 12-line BOM lookup burst for a room", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ components: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const subject = "public-parts-normal-bom";
+    const requests = await Promise.all(Array.from({ length: 12 }, (_, index) => requestFor(`normal-bom-${index}`, subject)));
+    const responses = await Promise.all(requests.map((request) => partsSearch(request, authEnv)));
+    const bodies = await Promise.all(responses.map(async (response) => await response.json() as any));
+    expect(bodies.some((body) => body.code === "PUBLIC_SOURCE_RATE_LIMITED")).toBe(false);
+  });
+
+  it("returns a safe handoff only after a genuinely excessive per-room burst", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ components: [] }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const subject = "public-parts-burst-limit";
-    const requests = await Promise.all(Array.from({ length: 5 }, () => requestFor("burst-limit-query", subject)));
+    const requests = await Promise.all(Array.from({ length: 17 }, () => requestFor("burst-limit-query", subject)));
     const responses = await Promise.all(requests.map((request) => partsSearch(request, authEnv)));
     const bodies = await Promise.all(responses.map(async (response) => ({ response, body: await response.json() as any })));
     const limited = bodies.find(({ body }) => body.code === "PUBLIC_SOURCE_RATE_LIMITED");

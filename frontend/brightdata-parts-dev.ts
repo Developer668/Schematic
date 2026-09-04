@@ -322,17 +322,29 @@ async function liveSearch(query: string, quantity: number, config: Record<string
 }
 
 export function brightDataPartsDevPlugin(frontendRoot: string): Plugin {
-  const config = parseEnvFile(path.resolve(frontendRoot, "../backend/.env"));
+  const envFilePath = path.resolve(frontendRoot, "../backend/.env");
+  const loadConfig = () => {
+    const fileConfig = parseEnvFile(envFilePath);
+    const processConfig = Object.fromEntries(Object.entries(process.env).flatMap(([key, value]) =>
+      typeof value === "string" && value.trim() ? [[key, value.trim()]] : []));
+    // Explicit runtime environment wins over the optional backend/.env file.
+    // Reload the file per request so adding/changing a local server-only key
+    // does not require restarting Vite just to make Parts search usable.
+    return { ...fileConfig, ...processConfig };
+  };
   return {
     name: "schematic-brightdata-parts-dev",
     configureServer(server) {
-      // Surface the parts-provider startup state immediately so a missing or
-      // stale backend/.env is diagnosed at boot instead of as a runtime 503.
-      const zone = config.BRIGHTDATA_SERP_ZONE || "serp_api1";
-      if (config.BRIGHTDATA_API_KEY) {
-        server.config.logger.info(`[parts-search] Bright Data live shopping configured (zone=${zone}, endpoint=${config.BRIGHTDATA_SERP_ENDPOINT || "https://api.brightdata.com/request"}). If keys changed, restart the dev server to reload backend/.env.`);
+      // Surface the provider state at boot, but also reload server-only config
+      // for every lookup below. Shell environment variables and backend/.env
+      // are both supported, and changing backend/.env no longer requires a
+      // dev-server restart.
+      const startupConfig = loadConfig();
+      const zone = startupConfig.BRIGHTDATA_SERP_ZONE || "serp_api1";
+      if (startupConfig.BRIGHTDATA_API_KEY) {
+        server.config.logger.info(`[parts-search] Bright Data live shopping configured (zone=${zone}, endpoint=${startupConfig.BRIGHTDATA_SERP_ENDPOINT || "https://api.brightdata.com/request"}).`);
       } else {
-        server.config.logger.warn(`[parts-search] BRIGHTDATA_API_KEY not found in ${path.resolve(frontendRoot, "../backend/.env")} — parts searches will return PARTS_PROVIDER_NOT_CONFIGURED. Add the key, then restart the dev server.`);
+        server.config.logger.warn(`[parts-search] BRIGHTDATA_API_KEY not found in the server environment or ${envFilePath} — Parts search will report provider setup until one is supplied.`);
       }
       // Pre-transform the complete Parts and landing paths after each
       // dev-server restart so syntax/import regressions are reported even
@@ -354,6 +366,7 @@ export function brightDataPartsDevPlugin(frontendRoot: string): Plugin {
       server.middlewares.use(async (req, res, next) => {
         const requestUrl = new URL(req.url || "/", "http://localhost");
         if (requestUrl.pathname !== "/api/parts/search") return next();
+        const config = loadConfig();
         if (req.method !== "GET") return sendJson(res, 405, { code: "METHOD_NOT_ALLOWED", message: "Use GET for parts search." }, { Allow: "GET" });
         if (!localRequest(req)) return sendJson(res, 403, { code: "LOCAL_ONLY", message: "The local Bright Data development route is available only from this computer." });
         const requestId = boundedText(req.headers["x-schematic-request-id"], 200);
