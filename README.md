@@ -127,8 +127,23 @@ The complete inventory and schemas are in
    tools.
 
 Human controls and WebMCP share the same project store, behavior command layer,
-validation, reducers, hashes, persistence rules, and structured errors. Models
-never receive an arbitrary JavaScript function bridge.
+validation, reducers, hashes, persistence rules, and structured errors.
+
+Schematic exposes the same definitions through two deliberately separate
+surfaces:
+
+- Native WebMCP registers all tools with `document.modelContext.registerTool`
+  when ChatGPT Site Tools or a WebMCP-enabled browser supplies that API.
+- The deterministic fallback is available as `window.schematicWebMCP`. Browser
+  agents and evaluation harnesses can inspect `.tools`, call
+  `.invoke(name, args)`, and read `.getStatus()`. It never creates
+  `document.modelContext`, and reports `native: false` when the host API is
+  missing.
+
+For example, a non-native browser harness can call
+`await window.schematicWebMCP.invoke("workspace.get_state", {})`. Native proof
+must instead come from `document.modelContext.getTools()` or
+`window.schematicWebMCP.inspectNative()`.
 
 ## Local development
 

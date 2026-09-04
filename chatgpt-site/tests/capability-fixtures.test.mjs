@@ -28,12 +28,13 @@ test("the published Site sends the native WebMCP security headers", async () => 
   assert.match(source, /Origin-Agent-Cluster["'],\s*value:\s*["']\?1["']/);
 });
 
-test("hosted WebMCP has no direct-call fallback masquerading as native discovery", async () => {
+test("hosted WebMCP keeps an honest BrickWrite-style direct-call fallback", async () => {
   const source = await readFile(new URL("../frontend/src/webmcp/tools.ts", root), "utf8");
-  assert.match(source, /function isLocalWebMCPDevelopment\(\)/);
-  assert.match(source, /if \(isLocalWebMCPDevelopment\(\)\) \{[\s\S]*__schematicTools/);
-  assert.match(source, /else \{[\s\S]*delete \(window as any\)\.__schematicTools;[\s\S]*delete \(window as any\)\.__schematicWebMCP;/);
-  assert.match(source, /Production agents[\s\S]*document\.modelContext/);
+  assert.match(source, /function installFallbackBridge\(\)/);
+  assert.match(source, /schematicWebMCP\s*=\s*\{[\s\S]*tools:\s*publishedTools,[\s\S]*invoke,/);
+  assert.match(source, /proof:\s*["']direct-call-bridge-not-native-webmcp["']/);
+  assert.match(source, /does not create or impersonate document\.modelContext/);
+  assert.doesNotMatch(source, /Object\.defineProperty\(document,\s*["']modelContext["']/);
 });
 
 test("the capability page probes browser APIs without executing source or calling retired APIs", async () => {

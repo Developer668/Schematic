@@ -110,7 +110,7 @@ export default function SettingsPage() {
         ? "Connected and discovered"
         : "Connected, discovery needs review"
       : webmcpRegistration.state === "fallback"
-        ? "Local compatibility mode"
+        ? "Fallback ready · native unavailable"
         : webmcpRegistration.state === "checking"
           ? "Checking"
           : webmcpRegistration.state === "unavailable"
@@ -286,7 +286,9 @@ export default function SettingsPage() {
               <article>
                 <div><ShieldCheck size={15} /><b>WebMCP</b></div>
                 <span className={`connection-state is-${webmcpRegistration.state}`}>{webmcpLabel}</span>
-                <p>{webmcpRegistration.registeredCount || toolCount} tools are available to the current workspace surface.</p>
+                <p>{webmcpRegistration.state === "fallback"
+                  ? `${toolCount} direct-call bridge tools are ready; ChatGPT Site Tools still require browser-native document.modelContext.`
+                  : `${webmcpRegistration.registeredCount || toolCount} tools are available to the current workspace surface.`}</p>
                 <a href="/api/docs" target="_blank" rel="noreferrer">Open API docs <ExternalLink size={11} /></a>
               </article>
             </div>

@@ -84,11 +84,17 @@ describe("WebMCP tools", () => {
     expect(names).not.toContain("firmware.compile");
   });
 
-  it("project tools work via fallback window.__schematicTools", async () => {
+  it("publishes the complete explicit fallback bridge", async () => {
     const tools: any = (globalThis as any).window?.__schematicTools ?? (globalThis as any).__schematicTools;
     if (!tools) await registerWebMCPTools();
     const fallback = (globalThis as any).__schematicTools ?? (globalThis as any).window?.__schematicTools;
+    const bridge = (globalThis as any).window?.schematicWebMCP;
     expect(fallback ?? {}).toBeDefined();
+    expect(bridge.tools).toBeInstanceOf(Map);
+    expect(bridge.tools.size).toBe(WEBMCP_TOOL_COUNT);
+    expect(bridge.invoke).toBeTypeOf("function");
+    expect(bridge.getStatus()).toMatchObject({ mode: "bridge", native: false, nativeProof: false });
+    expect((document as any).modelContext).toBeUndefined();
   });
 
   it("add_component via store works", () => {
@@ -383,10 +389,12 @@ describe("WebMCP tools", () => {
     const calls = registerTool.mock.calls as any[];
     expect(calls.map(([definition]) => definition.name)).toEqual(getRegisteredToolNames());
     for (const [definition, options] of calls) {
+      expect(definition).toBe((window as any).schematicWebMCP.tools.get(definition.name));
       expect(definition.execute).toBeTypeOf("function");
       expect(definition.inputSchema.type).toBe("object");
       expect(options.signal).toBeInstanceOf(AbortSignal);
     }
+    expect((window as any).schematicWebMCP.getStatus()).toMatchObject({ mode: "native+bridge", native: true });
     const definitions = new Map(calls.map(([definition]) => [definition.name, definition]));
     const shoppingNames = getRegisteredToolNames().filter((name) => name.startsWith("shopping."));
     expect(shoppingNames).toHaveLength(10);
@@ -502,8 +510,10 @@ describe("WebMCP tools", () => {
     expect((document as any).modelContext).toBeUndefined();
     expect((navigator as any).modelContext).toBeUndefined();
     expect((navigator as any).modelContextTesting?.listTools).toBeTypeOf("function");
+    expect((window as any).schematicWebMCP.tools.size).toBe(WEBMCP_TOOL_COUNT);
+    expect((window as any).__schematicWebMCP.proof).toBe("direct-call-bridge-not-native-webmcp");
     expect(useWebMCPStore.getState().registration).toMatchObject({
-      state: "unavailable",
+      state: "fallback",
       registeredCount: 0,
       declaredCount: WEBMCP_TOOL_COUNT,
       discoveredCount: 0,

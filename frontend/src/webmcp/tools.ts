@@ -1580,6 +1580,26 @@ const tools: ToolDef[] = [
 export const WEBMCP_TOOL_COUNT = tools.length;
 setDesignSurfaceFullCount(WEBMCP_TOOL_COUNT);
 
+type PublishedToolDefinition = {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: ToolAnnotations;
+  execute: (args?: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => Promise<any>;
+};
+
+/** One definition map feeds both native WebMCP and the explicit fallback. */
+const publishedTools = new Map<string, PublishedToolDefinition>(tools.map((tool) => [
+  tool.name,
+  {
+    name: tool.name,
+    description: `${tool.description} — Scoped to your verified account and its local project room. Agent may place hardware on your behalf within your room only.`,
+    inputSchema: tool.inputSchema,
+    annotations: tool.annotations,
+    execute: (args: Record<string, unknown> = {}, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(tool, args, executionSignal(context)),
+  },
+]));
+
 let controllers: AbortController[] = [];
 let registrationGeneration = 0;
 
@@ -1669,6 +1689,61 @@ function getNativeModelContext() {
   return null;
 }
 
+/**
+ * Deterministic fallback for browser agents, extension harnesses, and automated
+ * evaluators. This is deliberately a direct-call bridge, not a modelContext
+ * polyfill: only the browser can provide native WebMCP discovery.
+ */
+function installFallbackBridge() {
+  if (typeof window === "undefined") return;
+  const invoke = async (name: string, args: Record<string, unknown> = {}, context?: ToolExecutionContext | AbortSignal) => {
+    const definition = publishedTools.get(name);
+    if (!definition) {
+      throw new Error(`Unknown Schematic tool "${name}". Registered: ${[...publishedTools.keys()].join(", ") || "none"}.`);
+    }
+    return definition.execute(args, context);
+  };
+  const getStatus = () => {
+    const registration = useWebMCPStore.getState().registration;
+    const native = Boolean(getNativeModelContext());
+    return {
+      version: "schematic-webmcp.bridge.v1",
+      mode: native ? "native+bridge" : "bridge",
+      native,
+      nativeProof: native && registration.state === "native" && registration.discovery === "verified",
+      declaredCount: WEBMCP_TOOL_COUNT,
+      registration,
+      note: native
+        ? "The browser exposes document.modelContext; these definitions are registered with native WebMCP."
+        : "Direct-call fallback only. This bridge does not create or impersonate document.modelContext.",
+    };
+  };
+
+  // Same public shape as BrickWrite: a live definition Map and invoke method.
+  (window as any).schematicWebMCP = {
+    version: "schematic-webmcp.bridge.v1",
+    tools: publishedTools,
+    invoke,
+    listTools: () => [...publishedTools.values()].map(({ execute: _execute, ...definition }) => definition),
+    getStatus,
+    inspectNative: inspectNativeWebMCPRegistration,
+  };
+
+  // Preserve the existing command-panel API on hosted and local builds. The
+  // proof field makes it impossible to confuse this with native Site Tools.
+  (window as any).__schematicTools = Object.fromEntries([...publishedTools].map(([name, definition]) => [name, definition.execute]));
+  (window as any).__schematicWebMCP = {
+    version: "schematic-webmcp.bridge.v1",
+    proof: "direct-call-bridge-not-native-webmcp",
+    native: () => Boolean(getNativeModelContext()),
+    declaredToolNames: getRegisteredToolNames(),
+    getRegistration: () => useWebMCPStore.getState().registration,
+    listTools: () => getRegisteredToolNames(),
+    invoke,
+    getStatus,
+  };
+}
+
 /** Local-only compatibility surface for development probes. Never install on the hosted Site. */
 function installModelContextTestingPolyfill() {
   if (!isLocalWebMCPDevelopment()) return;
@@ -1724,7 +1799,7 @@ function retryNativeRegistrationIfAvailable() {
   if (typeof document === "undefined") return;
   const registration = useWebMCPStore.getState().registration;
   const currentNativeContext = getNativeModelContext();
-  const unavailableOrErrored = registration.state === "unavailable" || registration.state === "error";
+  const unavailableOrErrored = registration.state === "fallback" || registration.state === "unavailable" || registration.state === "error";
   const hostContextReplaced = registration.state === "native" && currentNativeContext && currentNativeContext !== registeredNativeContext;
   if (currentNativeContext && (unavailableOrErrored || hostContextReplaced)) {
     void ensureWebMCPRegistration();
@@ -1752,7 +1827,7 @@ function scheduleLateNativeRetry(generation: number, attempt = 0) {
     if (generation !== registrationGeneration) return;
     const current = getNativeModelContext();
     const registration = useWebMCPStore.getState().registration;
-    if (current && (registration.state === "unavailable" || registration.state === "error")) {
+    if (current && (registration.state === "fallback" || registration.state === "unavailable" || registration.state === "error")) {
       void ensureWebMCPRegistration();
       return;
     }
@@ -1847,26 +1922,11 @@ export async function registerWebMCPTools() {
   const generation = ++registrationGeneration;
   useWebMCPStore.getState().setRegistration({ state: "checking", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: undefined });
   const mc = getNativeModelContext();
+  installFallbackBridge();
   // Never install the non-standard testing bridge in front of a real native
   // WebMCP surface. Some embedded hosts own or lock Navigator properties, and
   // a testing polyfill must not be allowed to break production registration.
   if (!mc) installModelContextTestingPolyfill();
-  // Development-only direct callbacks are useful for unit tests and localhost
-  // inspection, but they are deliberately absent from the hosted Site so an
-  // agent cannot mistake an internal JavaScript registry for native WebMCP.
-  if (isLocalWebMCPDevelopment()) {
-    (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(t, args, executionSignal(context))]));
-    (window as any).__schematicWebMCP = {
-      version: "schematic-webmcp.local-development.v1",
-      proof: "not-native-proof",
-      declaredToolNames: getRegisteredToolNames(),
-      getRegistration: () => useWebMCPStore.getState().registration,
-      listTools: () => getRegisteredToolNames(),
-    };
-  } else {
-    delete (window as any).__schematicTools;
-    delete (window as any).__schematicWebMCP;
-  }
   // Warm auth/persistence in the background without blocking discovery.
   // Failures here must never un-register tools; they only affect per-call
   // mutation gates.
@@ -1876,8 +1936,8 @@ export async function registerWebMCPTools() {
   });
   if (generation !== registrationGeneration) return;
   if (!mc || typeof mc.registerTool !== "function") {
-    const error = "Native WebMCP is not exposed by this browser yet. In ChatGPT, open the published Site in the desktop app's built-in browser with Browser Settings > Permissions > Enable site tools turned on. Ordinary browsers need their own WebMCP support or experimental enablement.";
-    useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error });
+    const error = "The direct-call bridge is ready, but this browser has not exposed native document.modelContext. ChatGPT Site Tools and WebMCP-enabled Chrome discover only the native surface; browser agents and test harnesses can use window.schematicWebMCP.invoke as the explicit fallback.";
+    useWebMCPStore.getState().setRegistration({ state: "fallback", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error });
     console.warn(`[WebMCP] ${error}`);
     scheduleLateNativeRetry(generation);
     return;
@@ -1891,16 +1951,7 @@ export async function registerWebMCPTools() {
     const ctrl = new AbortController();
     controllers.push(ctrl);
     try {
-      const registration = mc.registerTool(
-        {
-          name: t.name,
-          description: t.description + " — Scoped to your verified account and its local project room. Agent may place hardware on your behalf within your room only.",
-          inputSchema: t.inputSchema,
-          annotations: t.annotations,
-          execute: (args: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(t, args, executionSignal(context)),
-        },
-        { signal: ctrl.signal },
-      );
+      const registration = mc.registerTool(publishedTools.get(t.name), { signal: ctrl.signal });
       await registration;
       console.log(`[WebMCP] registered ${t.name} (room-aware)`);
       return { ok: true as const, name: t.name };
@@ -1944,9 +1995,6 @@ export async function registerWebMCPTools() {
     discovery,
     error: registrationErrorMessage,
   });
-  if (isLocalWebMCPDevelopment() && (window as any).__schematicWebMCP) {
-    (window as any).__schematicWebMCP.getRegistration = () => useWebMCPStore.getState().registration;
-  }
   console.log(`[WebMCP] native ready — ${WEBMCP_TOOL_COUNT} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
 }
 
@@ -1957,6 +2005,11 @@ export function unregisterWebMCPTools() {
   registeredNativeContext = null;
   for (const c of controllers) c.abort();
   controllers = [];
+  if (typeof window !== "undefined") {
+    delete (window as any).schematicWebMCP;
+    delete (window as any).__schematicTools;
+    delete (window as any).__schematicWebMCP;
+  }
 }
 
 export function getRegisteredToolNames() {
