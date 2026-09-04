@@ -521,8 +521,6 @@ function CartSummary({
   items: BuildCartItem[];
   loading: boolean;
 }) {
-  const budget = useShoppingStore((state) => state.budget);
-  const setBudget = useShoppingStore((state) => state.setBudget);
   const totals = new Map<string, number>();
   for (const item of items) {
     if (item.subtotal !== null) {
@@ -540,15 +538,6 @@ function CartSummary({
         : [...totals.entries()]
             .map(([currency, total]) => money(total, currency))
             .join(" + ");
-  const missingCount = items.filter((item) => item.unitPrice === null).length;
-  // Single-currency over-target check. Multi-currency builds show per-currency
-  // totals above; the target comparison uses the dominant currency total so a
-  // mixed-cart estimate never silently hides an overage.
-  const primaryTotal = totals.size === 1 ? [...totals.values()][0] as number : null;
-  const primaryCurrency = totals.size === 1 ? [...totals.keys()][0] as string : "USD";
-  const overTarget = budget !== null && primaryTotal !== null && primaryTotal > budget;
-  const overBy = overTarget && budget !== null && primaryTotal !== null ? primaryTotal - budget : null;
-
   return (
     <section
       className="shopping-cart-summary shopping-auto-build-cart"
@@ -625,43 +614,6 @@ function CartSummary({
         <span>Est. build cost</span>
         <strong>{totalText}</strong>
       </div>
-      <div className="shopping-estimate-note">
-        {missingCount > 0
-          ? `${missingCount} item${missingCount === 1 ? "" : "s"} awaiting a listing price`
-          : items.length > 0
-            ? "Based on the lowest current listing for each line item"
-            : "Updates from the active design"}
-      </div>
-      <div className="shopping-target-row">
-        <label htmlFor="shopping-spending-target">Spending target (USD)</label>
-        <input
-          id="shopping-spending-target"
-          aria-label="Spending target in USD"
-          type="number"
-          min={0}
-          step="any"
-          inputMode="decimal"
-          placeholder="No limit"
-          value={budget ?? ""}
-          onChange={(event) => {
-            const raw = event.target.value.trim();
-            if (!raw) {
-              setBudget(null);
-              return;
-            }
-            const parsed = Number(raw);
-            setBudget(Number.isFinite(parsed) && parsed >= 0 ? parsed : null);
-          }}
-        />
-      </div>
-      {overTarget && overBy !== null ? (
-        <div className="shopping-target-over" role="status">
-          Over target by {money(overBy, primaryCurrency)}
-        </div>
-      ) : null}
-      {items.length > 0 ? (
-        <div className="shopping-cart-hint">Quantities follow the active design.</div>
-      ) : null}
     </section>
   );
 }

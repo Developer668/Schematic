@@ -81,9 +81,13 @@ describe("parts workspace automatic sourcing", () => {
     expect(container.textContent).toContain("Add components to your design");
     expect(container.textContent).not.toContain("PUBLIC DISCOVERY");
     expect(container.textContent).not.toContain("Budget ceiling");
+    expect(container.textContent).not.toContain("Spending target");
+    expect(container.textContent).not.toContain("Quantities follow the active design");
+    expect(container.textContent).not.toContain("Based on the lowest current listing");
     expect(container.textContent).not.toContain("Undo");
     expect(container.textContent).not.toContain("Reset required");
     expect(container.querySelector("input[aria-label='Search exact parts']")).toBeNull();
+    expect(container.querySelector("input[aria-label='Spending target in USD']")).toBeNull();
     expect(container.querySelector("[data-testid='build-cart']")).toBeTruthy();
   });
 
