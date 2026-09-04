@@ -109,7 +109,7 @@ point the Site at an unreviewed origin.
 
 ## 5. Production acceptance
 
-Run every check against the published URL in the ChatGPT in-app browser.
+Run every check against the published URL in the ChatGPT desktop app's built-in browser with Browser Settings > Permissions > Enable site tools turned on. The webpage must remain open while its tools are being used. Ordinary browser access is not proof of ChatGPT Site-tool discovery.
 
 | Check | Expected result |
 | --- | --- |

@@ -18,7 +18,7 @@ export interface BehaviorWebMCPTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; untrustedContentHint?: boolean };
+  annotations?: { readOnlyHint?: boolean; consequentialHint?: boolean; untrustedContentHint?: boolean };
   execute: (args: any, context?: { signal?: AbortSignal }) => Promise<any>;
 }
 

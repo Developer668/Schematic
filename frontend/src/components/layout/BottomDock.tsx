@@ -29,15 +29,20 @@ import type {
   PreviewDiagnostic,
   PreviewSnapshot,
 } from "../../behavior/previewTypes.ts";
-import { getRegisteredToolNames, invokeWebMCPTool } from "../../webmcp/tools.ts";
+import { ensureWebMCPRegistration, getRegisteredToolNames, inspectNativeWebMCPRegistration, invokeInternalTool } from "../../webmcp/tools.ts";
 import { createStarterPlanAndPreview } from "../../behavior/starterPlan.ts";
 import ValidationPanel from "../validation/ValidationPanel.tsx";
 
 type DockTab = "webmcp" | "terminal" | "debug" | "validation";
 
+function internalConsoleEnabled() {
+  if (typeof window === "undefined") return false;
+  return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+}
+
 const tabLabels: Record<DockTab, { label: string; icon: typeof Braces }> = {
-  webmcp: { label: "WebMCP", icon: Braces },
-  terminal: { label: "Terminal", icon: Terminal },
+  webmcp: { label: "Native WebMCP", icon: Braces },
+  terminal: { label: "Internal Console", icon: Terminal },
   debug: { label: "Outcome", icon: Activity },
   validation: { label: "Problems", icon: ListChecks },
 };
@@ -74,7 +79,7 @@ export default function BottomDock({
   if (collapsed) {
     return (
       <div className="bottom-dock-collapsed">
-        {(Object.keys(tabLabels) as DockTab[]).map((key) => {
+        {(Object.keys(tabLabels) as DockTab[]).filter((key) => key !== "terminal" || internalConsoleEnabled()).map((key) => {
           const Icon = tabLabels[key].icon;
           return (
             <button type="button" key={key} onClick={() => selectTab(key)}>
@@ -100,7 +105,7 @@ export default function BottomDock({
     <div className="bottom-dock-redesign" style={{ height }}>
       <div className="bottom-dock-header">
         <div className="bottom-dock-tabs" role="tablist" aria-label="Workspace tools">
-          {(Object.keys(tabLabels) as DockTab[]).map((key) => {
+          {(Object.keys(tabLabels) as DockTab[]).filter((key) => key !== "terminal" || internalConsoleEnabled()).map((key) => {
             const Icon = tabLabels[key].icon;
             return (
               <DockTabButton
@@ -131,7 +136,9 @@ export default function BottomDock({
 
       <div className="bottom-dock-content">
         {tab === "webmcp" && <WebMCPCLI toolNames={toolNames} />}
-        {tab === "terminal" && <TerminalTab status={previewStatus} snapshot={snapshot} />}
+        {tab === "terminal" && (internalConsoleEnabled()
+          ? <TerminalTab status={previewStatus} snapshot={snapshot} />
+          : <div className="dock-console-empty is-compact"><TriangleAlert size={17} /><div><b>Internal console disabled on the published Site</b><p>Production agent actions must arrive through native WebMCP. Use the Native WebMCP panel to verify browser registration.</p></div></div>)}
         {tab === "debug" && (
           <PreviewTimeline
             status={previewStatus}
@@ -188,16 +195,16 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
   const [history, setHistory] = useState<CommandEntry[]>([]);
   const [input, setInput] = useState("");
   const activities = useWebMCPStore((state) => state.activities);
+  const registration = useWebMCPStore((state) => state.registration);
   const clearActivities = useWebMCPStore((state) => state.clearActivities);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const firstToken = input.trimStart().split(/\s/, 1)[0] ?? "";
+  const nativePanelCommands = ["registry", "retry", "tools", "clear"];
   const suggestions =
     firstToken && !input.includes(" ")
-      ? toolNames
-          .filter((toolName) => toolName.toLowerCase().includes(firstToken.toLowerCase()))
-          .slice(0, 7)
+      ? nativePanelCommands.filter((command) => command.includes(firstToken.toLowerCase()))
       : [];
 
   useEffect(() => {
@@ -221,75 +228,34 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
       return;
     }
 
-    const firstSpace = raw.indexOf(" ");
-    let name = raw;
-    let args: Record<string, unknown> = {};
-
-    if (firstSpace !== -1) {
-      name = raw.slice(0, firstSpace).trim();
-      const rest = raw.slice(firstSpace + 1).trim();
-      if (rest) {
-        try {
-          const parsed: unknown = JSON.parse(rest);
-          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-            throw new Error("Arguments must be a JSON object.");
-          }
-          args = parsed as Record<string, unknown>;
-        } catch (error) {
-          setHistory((current) => [
-            ...current,
-            {
-              cmd: raw,
-              out: error instanceof Error
-                ? `Invalid arguments: ${error.message}`
-                : "Invalid JSON arguments.",
-              isError: true,
-            },
-          ]);
-          setInput("");
-          return;
-        }
-      }
-    }
-
-    if (!toolNames.includes(name)) {
-      const suggestion = toolNames.find(
-        (toolName) => toolName.includes(name) || name.includes(toolName.split(".").pop() ?? ""),
-      );
-      setHistory((current) => [
-        ...current,
-        {
-          cmd: raw,
-          out: `Unknown tool “${name}”.${suggestion ? ` Try “${suggestion}”.` : " Type “tools” to see the available commands."}`,
-          isError: true,
-        },
-      ]);
+    if (raw === "registry") {
+      const native = await inspectNativeWebMCPRegistration();
+      const verified = "verified" in native && native.verified === true;
+      setHistory((current) => [...current, { cmd: raw, out: JSON.stringify(native, null, 2), isError: !native.native || !verified }]);
       setInput("");
       return;
     }
 
-    try {
-      const result = await invokeWebMCPTool(name, args);
-      const text = result.content
-        ?.filter((item: { type?: string; text?: string }) => item.type === "text" && typeof item.text === "string")
-        .map((item: { text?: string }) => item.text)
-        .join("\n");
-      const output = text || (result.data ? JSON.stringify(result.data, null, 2) : "Tool completed.");
-      setHistory((current) => [
-        ...current,
-        { cmd: raw, out: output, isError: Boolean(result.isError) },
-      ]);
-    } catch (error) {
-      setHistory((current) => [
-        ...current,
-        {
-          cmd: raw,
-          out: `Tool failed: ${(error as Error).message}`,
-          isError: true,
-        },
-      ]);
+    if (raw === "retry") {
+      try {
+        await ensureWebMCPRegistration();
+        const next = useWebMCPStore.getState().registration;
+        setHistory((current) => [...current, { cmd: raw, out: JSON.stringify(next, null, 2), isError: next.state === "error" || next.state === "unavailable" }]);
+      } catch (error) {
+        setHistory((current) => [...current, { cmd: raw, out: `WebMCP retry failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }]);
+      }
+      setInput("");
+      return;
     }
 
+    setHistory((current) => [
+      ...current,
+      {
+        cmd: raw,
+        out: "This panel does not execute Schematic tools directly. Native WebMCP calls must come from the browser through document.modelContext. Use “registry”, “retry”, or “tools” here. The separate Internal Console is for human debugging only and is not WebMCP proof.",
+        isError: true,
+      },
+    ]);
     setInput("");
   };
 
@@ -303,25 +269,39 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
 
   return (
     <div className="dock-console dock-webmcp">
+      <div className="dock-terminal-heading">
+        <span><Braces size={13} /> Native WebMCP</span>
+        <span>{registration.state} · {registration.registeredCount}/{registration.declaredCount || toolNames.length}{registration.discovery === "verified" ? " · discovered" : ""}</span>
+      </div>
       <div className="dock-console-log" role="log" aria-live="polite" tabIndex={0} aria-label="WebMCP activity log">
-        {empty && (
+        {(registration.state === "unavailable" || registration.state === "error") && registration.error && (
+          <div className="dock-console-empty is-compact">
+            <TriangleAlert size={17} />
+            <div>
+              <b>Native site tools are not connected</b>
+              <p>{registration.error}</p>
+              <p>Type “retry” after enabling site tools, or “registry” to inspect this browser's registration state.</p>
+            </div>
+          </div>
+        )}
+        {empty && registration.state !== "unavailable" && registration.state !== "error" && (
           <div className="dock-console-empty">
             <Braces size={18} />
             <div>
-              <b>Run a workspace tool</b>
-              <p>Type a tool name with a JSON object. The output below comes from the live workspace registry.</p>
+              <b>Native WebMCP proof surface</b>
+              <p>This panel never invokes application tools directly. It reports only the browser-native registration state and activity produced through document.modelContext.</p>
             </div>
             <div className="dock-console-samples">
-              {toolNames.slice(0, 4).map((toolName) => (
+              {["registry", "retry", "tools"].map((command) => (
                 <button
                   type="button"
-                  key={toolName}
+                  key={command}
                   onClick={() => {
-                    setInput(`${toolName} `);
+                    setInput(command);
                     inputRef.current?.focus();
                   }}
                 >
-                  {toolName}
+                  {command}
                 </button>
               ))}
             </div>
@@ -447,6 +427,10 @@ function TerminalTab({
   };
 
   const invokeToolCommand = async (raw: string, name: string, args: Record<string, unknown>) => {
+    if (!internalConsoleEnabled()) {
+      append(raw, "Internal tool invocation is disabled on the published Site. Production agent actions must use native document.modelContext WebMCP.", true);
+      return;
+    }
     if (!toolNames.includes(name)) {
       const suggestion = toolNames.find(
         (toolName) => toolName.includes(name) || name.includes(toolName.split(".").pop() ?? ""),
@@ -455,7 +439,7 @@ function TerminalTab({
       return;
     }
     try {
-      const result = await invokeWebMCPTool(name, args);
+      const result = await invokeInternalTool(name, args);
       append(raw, formatToolResult(result), Boolean(result?.isError));
     } catch (error) {
       append(raw, `Command failed: ${error instanceof Error ? error.message : String(error)}`, true);
@@ -484,7 +468,7 @@ function TerminalTab({
         "  tools       List all WebMCP commands",
         "  clear       Clear terminal history",
         "",
-        "You can also run any WebMCP tool directly:",
+        "Internal app callbacks for debugging only (not native WebMCP proof):",
         '  component.search {"query":"esp32"}',
         '  behavior.get_state {}',
       ].join("\n"));
@@ -568,7 +552,7 @@ function TerminalTab({
   return (
     <div className="dock-console">
       <div className="dock-terminal-heading">
-        <span><Terminal size={13} /> Schematic terminal</span>
+        <span><Terminal size={13} /> Internal application console</span>
         <span>{status} · {entries.length} outcome entries</span>
       </div>
       <div className="dock-console-log" role="log" aria-live="polite" aria-label="Schematic terminal output">
@@ -576,8 +560,8 @@ function TerminalTab({
           <div className="dock-console-empty is-compact">
             <Terminal size={17} />
             <div>
-              <b>Browser workspace terminal ready</b>
-              <p>Type “help” for commands, or run a WebMCP tool directly. This controls Schematic state, validation, code handoff, and Outcome.</p>
+              <b>Internal debugging console ready</b>
+              <p>These commands call Schematic application functions directly. They are for human debugging and are never evidence that native WebMCP was discovered or used.</p>
             </div>
           </div>
         )}
@@ -619,7 +603,7 @@ function TerminalTab({
             if (event.key === "Enter") void run();
             if (event.key === "Escape") setInput("");
           }}
-          placeholder='help · validate · outcome · component.search {"query":"led"}'
+          placeholder='registry · retry · tools · clear'
         />
         <button type="button" onClick={() => void run()} aria-label="Run terminal command" title="Run command">
           <CornerDownLeft size={13} />
@@ -639,7 +623,7 @@ function TerminalTab({
 
       <div className="dock-console-footer">
         <span>Enter to run</span>
-        <span>Browser workspace commands</span>
+        <span>Internal callbacks · not WebMCP proof</span>
         <span>No OS shell or source execution</span>
       </div>
     </div>

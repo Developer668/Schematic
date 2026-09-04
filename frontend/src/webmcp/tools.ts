@@ -31,8 +31,8 @@ import { verifyProject } from "../application/projectVerification.ts";
 
 type ToolAnnotations = {
   readOnlyHint?: boolean;
-  /** The operation can irreversibly remove user-created state. */
-  destructiveHint?: boolean;
+  /** The operation can make consequential changes to user-created state. */
+  consequentialHint?: boolean;
   /** Result may contain content supplied by an external provider or agent. */
   untrustedContentHint?: boolean;
 };
@@ -729,7 +729,7 @@ const tools: ToolDef[] = [
       },
       required: ["projectId", "confirmProjectId"],
     },
-    annotations: { destructiveHint: true },
+    annotations: { consequentialHint: true },
     execute: async ({ projectId, confirmProjectId }) => {
       const targetId = typeof projectId === "string" ? projectId : "";
       if (!targetId.trim() || confirmProjectId !== targetId) {
@@ -773,7 +773,7 @@ const tools: ToolDef[] = [
       },
       required: ["projectId", "confirmProjectId"],
     },
-    annotations: { destructiveHint: true },
+    annotations: { consequentialHint: true },
     execute: async ({ projectId, confirmProjectId }) => {
       const active = useProjectStore.getState().project;
       if (projectId !== active.id || confirmProjectId !== active.id) {
@@ -800,7 +800,7 @@ const tools: ToolDef[] = [
     name: "project.apply_blueprint",
     description: "Create a complete hardware design as a new project by default and prepare fallback Outcome behavior for mapped parts. Replacing the active project requires replace=true and its exact id in confirmProjectId.",
     inputSchema: { type: "object", properties: { blueprintId: { type: "string", enum: ["meta-glasses"] }, replace: { type: "boolean", default: false }, confirmProjectId: { type: "string" } }, required: ["blueprintId"] },
-    annotations: { destructiveHint: true },
+    annotations: { consequentialHint: true },
     execute: async ({ blueprintId, replace = false, confirmProjectId }) => {
       const blueprint = BLUEPRINTS[blueprintId];
       if (!blueprint) return { content: [{ type: "text", text: `Unknown blueprint ${blueprintId}` }], isError: true };
@@ -971,7 +971,7 @@ const tools: ToolDef[] = [
     name: "component.remove",
     description: "Remove a component instance and its connections after confirming the exact instance id, then refresh generated fallback Outcome behavior so it does not target the removed instance",
     inputSchema: { type: "object", properties: { instanceId: { type: "string" }, confirmInstanceId: { type: "string" } }, required: ["instanceId", "confirmInstanceId"] },
-    annotations: { destructiveHint: true },
+    annotations: { consequentialHint: true },
     execute: async ({ instanceId, confirmInstanceId }) => {
       if (instanceId !== confirmInstanceId) return toolFailure("CONFIRMATION_REQUIRED", "Removing a component requires confirmInstanceId to exactly match instanceId.", { instanceId });
       const exists = useProjectStore.getState().project.components.some((component) => component.id === instanceId);
@@ -1063,7 +1063,7 @@ const tools: ToolDef[] = [
     name: "connection.disconnect",
     description: "Disconnect (remove) a connection after confirming its exact id",
     inputSchema: { type: "object", properties: { connectionId: { type: "string" }, confirmConnectionId: { type: "string" } }, required: ["connectionId", "confirmConnectionId"] },
-    annotations: { destructiveHint: true },
+    annotations: { consequentialHint: true },
     execute: async ({ connectionId, confirmConnectionId }) => {
       if (connectionId !== confirmConnectionId) return toolFailure("CONFIRMATION_REQUIRED", "Disconnecting requires confirmConnectionId to exactly match connectionId.", { connectionId });
       const exists = useProjectStore.getState().project.connections.some((connection) => connection.id === connectionId);
@@ -1648,17 +1648,30 @@ async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> 
   }
 }
 
-/** Prefer the current document-scoped API, but keep the deprecated navigator surface as a compatibility fallback. */
+/**
+ * Production WebMCP is document-scoped only. That is the standards-track
+ * imperative API used by ChatGPT site tools and current browser implementations.
+ * A navigator.modelContext compatibility fallback is allowed only on localhost
+ * for older development probes; hosted Schematic never treats it as native proof.
+ */
+function isLocalWebMCPDevelopment() {
+  if (typeof window === "undefined") return false;
+  return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+}
+
 function getNativeModelContext() {
   const documentContext: any = (document as any).modelContext;
   if (typeof documentContext?.registerTool === "function") return documentContext;
-  const navigatorContext: any = (navigator as any).modelContext;
-  if (typeof navigatorContext?.registerTool === "function") return navigatorContext;
+  if (isLocalWebMCPDevelopment()) {
+    const navigatorContext: any = (navigator as any).modelContext;
+    if (typeof navigatorContext?.registerTool === "function") return navigatorContext;
+  }
   return null;
 }
 
-/** Chrome WebMCP Bridge reads navigator.modelContextTesting (consumer API). */
+/** Local-only compatibility surface for development probes. Never install on the hosted Site. */
 function installModelContextTestingPolyfill() {
+  if (!isLocalWebMCPDevelopment()) return;
   const nav = navigator as any;
   if (nav.modelContextTesting?.listTools && nav.modelContextTesting?.executeTool) return;
   try {
@@ -1674,7 +1687,7 @@ function installModelContextTestingPolyfill() {
         },
         async executeTool(toolName: string, inputArgsJson: string) {
           const tool = tools.find((candidate) => candidate.name === toolName);
-          if (!tool) throw new Error(`Unknown WebMCP tool: ${toolName}`);
+          if (!tool) throw new Error(`Unknown local test tool: ${toolName}`);
           const args = inputArgsJson ? JSON.parse(inputArgsJson) : {};
           const result = await executeToolWithActivity(tool, args);
           return typeof result === "string" ? result : JSON.stringify(result ?? null);
@@ -1685,9 +1698,7 @@ function installModelContextTestingPolyfill() {
       },
     });
   } catch (error) {
-    // This non-standard testing surface must never be able to prevent native
-    // document.modelContext registration in a host that owns Navigator.
-    console.warn("[WebMCP] modelContextTesting fallback could not be installed:", error);
+    console.warn("[WebMCP] local modelContextTesting compatibility surface could not be installed:", error);
   }
 }
 
@@ -1698,21 +1709,126 @@ function installModelContextTestingPolyfill() {
  * document/navigator.modelContext: a fake registry would report success while
  * the host still sees zero tools.
  */
-let lateNativeRetryScheduled = false;
-function scheduleLateNativeRetry(generation: number) {
-  if (lateNativeRetryScheduled || typeof window === "undefined") return;
-  lateNativeRetryScheduled = true;
-  const attempts = [250, 750, 1500, 3000, 6000, 12000];
-  for (const delayMs of attempts) {
-    window.setTimeout(() => {
-      if (generation !== registrationGeneration) return;
-      const current = getNativeModelContext();
-      if (current && useWebMCPStore.getState().registration.state === "unavailable") {
-        lateNativeRetryScheduled = false;
-        void registerWebMCPTools();
-      }
-      if (delayMs === attempts[attempts.length - 1]) lateNativeRetryScheduled = false;
-    }, delayMs);
+let lateNativeRetryTimer: number | null = null;
+let lateNativeWakeListenersInstalled = false;
+let registrationInFlight: Promise<void> | null = null;
+let registeredNativeContext: any = null;
+
+function clearLateNativeRetryTimer() {
+  if (lateNativeRetryTimer === null || typeof window === "undefined") return;
+  window.clearTimeout(lateNativeRetryTimer);
+  lateNativeRetryTimer = null;
+}
+
+function retryNativeRegistrationIfAvailable() {
+  if (typeof document === "undefined") return;
+  const registration = useWebMCPStore.getState().registration;
+  const currentNativeContext = getNativeModelContext();
+  const unavailableOrErrored = registration.state === "unavailable" || registration.state === "error";
+  const hostContextReplaced = registration.state === "native" && currentNativeContext && currentNativeContext !== registeredNativeContext;
+  if (currentNativeContext && (unavailableOrErrored || hostContextReplaced)) {
+    void ensureWebMCPRegistration();
+  }
+}
+
+function installLateNativeWakeListeners() {
+  if (lateNativeWakeListenersInstalled || typeof window === "undefined") return;
+  lateNativeWakeListenersInstalled = true;
+  window.addEventListener("focus", retryNativeRegistrationIfAvailable);
+  window.addEventListener("pageshow", retryNativeRegistrationIfAvailable);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") retryNativeRegistrationIfAvailable();
+  });
+}
+
+function scheduleLateNativeRetry(generation: number, attempt = 0) {
+  if (typeof window === "undefined") return;
+  installLateNativeWakeListeners();
+  clearLateNativeRetryTimer();
+  const delays = [100, 250, 500, 1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
+  if (attempt >= delays.length) return;
+  lateNativeRetryTimer = window.setTimeout(() => {
+    lateNativeRetryTimer = null;
+    if (generation !== registrationGeneration) return;
+    const current = getNativeModelContext();
+    const registration = useWebMCPStore.getState().registration;
+    if (current && (registration.state === "unavailable" || registration.state === "error")) {
+      void ensureWebMCPRegistration();
+      return;
+    }
+    scheduleLateNativeRetry(generation, attempt + 1);
+  }, delays[attempt]);
+}
+
+/**
+ * Idempotent production bootstrap used by both the outer ChatGPT Site client
+ * and the SPA. It prevents two React/client entry points from aborting and
+ * re-registering the same native tools during hydration, which otherwise
+ * creates a short zero-tool window exactly when the host may be discovering
+ * the page.
+ */
+export function ensureWebMCPRegistration() {
+  if (typeof document === "undefined") return Promise.resolve();
+  installLateNativeWakeListeners();
+  const registration = useWebMCPStore.getState().registration;
+  const currentNativeContext = getNativeModelContext();
+  if (currentNativeContext
+    && currentNativeContext === registeredNativeContext
+    && registration.state === "native"
+    && registration.registeredCount === WEBMCP_TOOL_COUNT) {
+    return Promise.resolve();
+  }
+  if (registrationInFlight) return registrationInFlight;
+  const pending = registerWebMCPTools();
+  registrationInFlight = pending.finally(() => {
+    registrationInFlight = null;
+  });
+  return registrationInFlight;
+}
+
+/** Query the browser's real document.modelContext registry; never synthesize names. */
+export async function inspectNativeWebMCPRegistration() {
+  const mc = getNativeModelContext();
+  if (!mc || typeof mc.getTools !== "function") {
+    return {
+      available: false,
+      native: false,
+      discoveredCount: 0,
+      toolNames: [] as string[],
+      registration: useWebMCPStore.getState().registration,
+    };
+  }
+  try {
+    const discovered = await mc.getTools();
+    const nativeTools = Array.isArray(discovered)
+      ? discovered.filter((tool: any) => typeof tool?.name === "string")
+      : [];
+    const toolNames = nativeTools.map((tool: any) => String(tool.name));
+    const verified = toolNames.length === WEBMCP_TOOL_COUNT
+      && getRegisteredToolNames().every((name) => toolNames.includes(name));
+    useWebMCPStore.getState().setRegistration({
+      discoveredCount: toolNames.length,
+      discovery: verified ? "verified" : "unverified",
+    });
+    return {
+      available: true,
+      native: true,
+      verified,
+      discoveredCount: toolNames.length,
+      toolNames,
+      origins: [...new Set(nativeTools.map((tool: any) => typeof tool?.origin === "string" ? tool.origin : null).filter(Boolean))],
+      registration: useWebMCPStore.getState().registration,
+    };
+  } catch (error) {
+    return {
+      available: true,
+      native: true,
+      verified: false,
+      discoveredCount: 0,
+      toolNames: [] as string[],
+      error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+      registration: useWebMCPStore.getState().registration,
+    };
   }
 }
 
@@ -1735,18 +1851,22 @@ export async function registerWebMCPTools() {
   // WebMCP surface. Some embedded hosts own or lock Navigator properties, and
   // a testing polyfill must not be allowed to break production registration.
   if (!mc) installModelContextTestingPolyfill();
-  // Test/degraded-runtime fallback only. Native agents must use the
-  // document.modelContext registration below; this same-origin object is not a
-  // cross-origin mutation bridge. Install it immediately so local probes and
-  // the ChatGPT host see a stable surface even while native registration is
-  // still awaiting per-tool promises.
-  (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(t, args, executionSignal(context))]));
-  (window as any).__schematicWebMCP = {
-    version: "schematic-webmcp.v1",
-    declaredToolNames: getRegisteredToolNames(),
-    getRegistration: () => useWebMCPStore.getState().registration,
-    listTools: () => getRegisteredToolNames(),
-  };
+  // Development-only direct callbacks are useful for unit tests and localhost
+  // inspection, but they are deliberately absent from the hosted Site so an
+  // agent cannot mistake an internal JavaScript registry for native WebMCP.
+  if (isLocalWebMCPDevelopment()) {
+    (window as any).__schematicTools = Object.fromEntries(tools.map((t) => [t.name, (args: Record<string, unknown>, context?: ToolExecutionContext | AbortSignal) => executeToolWithActivity(t, args, executionSignal(context))]));
+    (window as any).__schematicWebMCP = {
+      version: "schematic-webmcp.local-development.v1",
+      proof: "not-native-proof",
+      declaredToolNames: getRegisteredToolNames(),
+      getRegistration: () => useWebMCPStore.getState().registration,
+      listTools: () => getRegisteredToolNames(),
+    };
+  } else {
+    delete (window as any).__schematicTools;
+    delete (window as any).__schematicWebMCP;
+  }
   // Warm auth/persistence in the background without blocking discovery.
   // Failures here must never un-register tools; they only affect per-call
   // mutation gates.
@@ -1756,8 +1876,9 @@ export async function registerWebMCPTools() {
   });
   if (generation !== registrationGeneration) return;
   if (!mc || typeof mc.registerTool !== "function") {
-    useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error: "The browser did not expose document.modelContext." });
-    console.warn("[WebMCP] native document.modelContext is unavailable; no browser-visible tools were registered");
+    const error = "Native WebMCP is not exposed by this browser yet. In ChatGPT, open the published Site in the desktop app's built-in browser with Browser Settings > Permissions > Enable site tools turned on. Ordinary browsers need their own WebMCP support or experimental enablement.";
+    useWebMCPStore.getState().setRegistration({ state: "unavailable", registeredCount: 0, declaredCount: WEBMCP_TOOL_COUNT, discoveredCount: 0, discovery: "unavailable", error });
+    console.warn(`[WebMCP] ${error}`);
     scheduleLateNativeRetry(generation);
     return;
   }
@@ -1766,7 +1887,7 @@ export async function registerWebMCPTools() {
   // creates an avoidable window where a browser agent can observe only a
   // partial tool map during initial page discovery.
   const registrationResults = await Promise.all(tools.map(async (t) => {
-    if (generation !== registrationGeneration) return false;
+    if (generation !== registrationGeneration) return { ok: false as const, name: t.name, errorName: "Superseded", message: "Registration generation changed." };
     const ctrl = new AbortController();
     controllers.push(ctrl);
     try {
@@ -1782,15 +1903,18 @@ export async function registerWebMCPTools() {
       );
       await registration;
       console.log(`[WebMCP] registered ${t.name} (room-aware)`);
-      return true;
+      return { ok: true as const, name: t.name };
     } catch (e) {
-      console.error(`[WebMCP] failed to register ${t.name}:`, e);
-      return false;
+      const errorName = e instanceof Error ? e.name || "Error" : "Error";
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(`[WebMCP] failed to register ${t.name} [${errorName}]:`, e);
+      return { ok: false as const, name: t.name, errorName, message };
     }
   }));
   if (generation !== registrationGeneration) return;
-  const registeredCount = registrationResults.filter(Boolean).length;
-  const registrationErrors = WEBMCP_TOOL_COUNT - registeredCount;
+  const registeredCount = registrationResults.filter((result) => result.ok).length;
+  const failures = registrationResults.filter((result) => !result.ok);
+  const registrationErrors = failures.length;
   // listen for toolchange
   if ("ontoolchange" in mc) {
     mc.ontoolchange = () => console.log("[WebMCP] toolset changed");
@@ -1806,20 +1930,31 @@ export async function registerWebMCPTools() {
       console.warn("[WebMCP] native tool discovery check failed:", error);
     }
   }
+  registeredNativeContext = registrationErrors > 0 ? null : mc;
+  clearLateNativeRetryTimer();
+  const firstFailure = failures[0];
+  const registrationErrorMessage = firstFailure
+    ? `${registrationErrors} native tool registration${registrationErrors === 1 ? "" : "s"} failed. First failure: ${firstFailure.name} [${firstFailure.errorName}]${firstFailure.message ? ` ${firstFailure.message}` : ""}`
+    : undefined;
   useWebMCPStore.getState().setRegistration({
     state: registrationErrors > 0 ? "error" : "native",
     registeredCount,
     declaredCount: WEBMCP_TOOL_COUNT,
     discoveredCount,
     discovery,
-    ...(registrationErrors > 0 ? { error: `${registrationErrors} tool registration${registrationErrors === 1 ? "" : "s"} failed.` } : { error: undefined }),
+    error: registrationErrorMessage,
   });
-  (window as any).__schematicWebMCP.getRegistration = () => useWebMCPStore.getState().registration;
-  console.log(`[WebMCP] ready — ${WEBMCP_TOOL_COUNT} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
+  if (isLocalWebMCPDevelopment() && (window as any).__schematicWebMCP) {
+    (window as any).__schematicWebMCP.getRegistration = () => useWebMCPStore.getState().registration;
+  }
+  console.log(`[WebMCP] native ready — ${WEBMCP_TOOL_COUNT} tools, room:`, (window as any).__schematicRoom?.() || "global", "— agent may now place hardware on your behalf inside your room");
 }
 
 export function unregisterWebMCPTools() {
   registrationGeneration += 1;
+  clearLateNativeRetryTimer();
+  registrationInFlight = null;
+  registeredNativeContext = null;
   for (const c of controllers) c.abort();
   controllers = [];
 }
@@ -1828,9 +1963,16 @@ export function getRegisteredToolNames() {
   return tools.map((t) => t.name);
 }
 
-/** Invoke the exact same callback registered with document.modelContext. */
-export async function invokeWebMCPTool(name: string, args: Record<string, any> = {}, signal?: AbortSignal) {
+/**
+ * Internal application/test invocation. This bypasses browser-native WebMCP
+ * discovery and must never be presented as WebMCP evidence. Production agents
+ * use only the execute callbacks registered through document.modelContext.
+ */
+export async function invokeInternalTool(name: string, args: Record<string, any> = {}, signal?: AbortSignal) {
   const tool = tools.find((candidate) => candidate.name === name);
-  if (!tool) throw new Error(`Unknown WebMCP tool: ${name}`);
+  if (!tool) throw new Error(`Unknown internal tool: ${name}`);
   return executeToolWithActivity(tool, args, signal);
 }
+
+/** @deprecated Test compatibility alias. Use invokeInternalTool for explicit non-native calls. */
+export const invokeWebMCPTool = invokeInternalTool;

@@ -3,7 +3,7 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import LandingPage from "./pages/LandingPage.tsx";
 import LogoMark from "./components/LogoMark.tsx";
 import LoadingState from "./components/ui/loading-state.tsx";
-import { registerWebMCPTools } from "./webmcp/tools.ts";
+import { ensureWebMCPRegistration } from "./webmcp/tools.ts";
 
 const WorkspaceApp = lazy(() => import("./WorkspaceApp.tsx"));
 
@@ -12,7 +12,7 @@ let webMCPRegistrationStarted = false;
 function startWebMCPRegistration() {
   if (typeof document === "undefined" || webMCPRegistrationStarted) return;
   webMCPRegistrationStarted = true;
-  void registerWebMCPTools().catch((error) => {
+  void ensureWebMCPRegistration().catch((error) => {
     webMCPRegistrationStarted = false;
     console.error("[WebMCP] bootstrap registration failed", error);
   });

@@ -9,7 +9,7 @@ import { useShoppingStore } from "../store/useShoppingStore.ts";
 import { getCatalogComponent } from "../data/catalog.ts";
 import { resolveBoardPin } from "../data/hardware.ts";
 import { getAuthSession } from "../auth/session.ts";
-import { fetchJson, getRegisteredToolNames, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools, WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
+import { ensureWebMCPRegistration, fetchJson, getRegisteredToolNames, inspectNativeWebMCPRegistration, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools, WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
 
 const AGENT_PUBLICATION = {
   authenticated: true as const,
@@ -393,9 +393,60 @@ describe("WebMCP tools", () => {
     for (const name of shoppingNames) expect(definitions.get(name).annotations?.untrustedContentHint).toBe(true);
     expect(definitions.get("shopping.get_state").annotations?.readOnlyHint).toBe(true);
     expect(definitions.get("shopping.quote").annotations?.readOnlyHint).toBe(true);
-    expect(definitions.get("project.delete").annotations?.destructiveHint).toBe(true);
-    expect(definitions.get("project.clear").annotations?.destructiveHint).toBe(true);
+    expect(definitions.get("project.delete").annotations?.consequentialHint).toBe(true);
+    expect(definitions.get("project.clear").annotations?.consequentialHint).toBe(true);
     expect(definitions.get("behavior.plan.write").inputSchema.required).toEqual(["plan", "expectedRevision"]);
+  });
+
+  it("deduplicates Site-shell and SPA bootstrap into one native registration lease", async () => {
+    const resolvers: Array<() => void> = [];
+    const registerTool = vi.fn(() => new Promise<void>((resolve) => resolvers.push(resolve)));
+    (document as any).modelContext = { registerTool };
+
+    const siteShell = ensureWebMCPRegistration();
+    const spa = ensureWebMCPRegistration();
+    await vi.waitFor(() => expect(registerTool).toHaveBeenCalledTimes(WEBMCP_TOOL_COUNT));
+    expect(registerTool).toHaveBeenCalledTimes(WEBMCP_TOOL_COUNT);
+    for (const resolve of resolvers) resolve();
+    await Promise.all([siteShell, spa]);
+
+    expect(useWebMCPStore.getState().registration).toMatchObject({
+      state: "native",
+      registeredCount: WEBMCP_TOOL_COUNT,
+    });
+  });
+
+  it("re-registers when the host replaces the native modelContext object", async () => {
+    const firstRegisterTool = vi.fn(async () => undefined);
+    (document as any).modelContext = { registerTool: firstRegisterTool };
+    await ensureWebMCPRegistration();
+    expect(firstRegisterTool).toHaveBeenCalledTimes(WEBMCP_TOOL_COUNT);
+
+    const secondRegisterTool = vi.fn(async () => undefined);
+    (document as any).modelContext = { registerTool: secondRegisterTool };
+    await ensureWebMCPRegistration();
+
+    expect(secondRegisterTool).toHaveBeenCalledTimes(WEBMCP_TOOL_COUNT);
+    expect(useWebMCPStore.getState().registration).toMatchObject({ state: "native", registeredCount: WEBMCP_TOOL_COUNT });
+  });
+
+  it("proves the complete registry by enumerating native document.modelContext tools", async () => {
+    const registered: any[] = [];
+    const modelContext = {
+      registerTool: vi.fn(async (definition: any) => {
+        registered.push({ ...definition, origin: "https://schematic.example" });
+      }),
+      getTools: vi.fn(async () => registered),
+    };
+    (document as any).modelContext = modelContext;
+
+    await ensureWebMCPRegistration();
+    const proof = await inspectNativeWebMCPRegistration();
+
+    expect(modelContext.registerTool).toHaveBeenCalledTimes(WEBMCP_TOOL_COUNT);
+    expect(modelContext.getTools).toHaveBeenCalled();
+    expect(proof).toMatchObject({ native: true, verified: true, discoveredCount: WEBMCP_TOOL_COUNT });
+    expect(proof.toolNames).toEqual(expect.arrayContaining(getRegisteredToolNames()));
   });
 
   it("submits the complete native registry before awaiting registration promises", async () => {

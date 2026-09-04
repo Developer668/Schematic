@@ -40,6 +40,10 @@ export default defineConfig({
   server: {
     port: 3000,
     host: "0.0.0.0",
+    headers: {
+      'Origin-Agent-Cluster': '?1',
+      'Permissions-Policy': 'tools=(self)',
+    },
     fs: {
       allow: [path.resolve(__dirname, '..')],
     },
@@ -77,5 +81,12 @@ export default defineConfig({
       },
     },
   },
-  preview: { port: 4173, host: "0.0.0.0" },
+  preview: {
+    port: 4173,
+    host: "0.0.0.0",
+    headers: {
+      'Origin-Agent-Cluster': '?1',
+      'Permissions-Policy': 'tools=(self)',
+    },
+  },
 });

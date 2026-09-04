@@ -96,6 +96,9 @@ type ListingGroup = {
 };
 
 const WIRE_PART_ID = "wire";
+const THIN_HOOKUP_WIRE_IMAGE = typeof thinHookupWireImage === "string"
+  ? thinHookupWireImage
+  : (thinHookupWireImage as { src: string }).src;
 const MAX_DESIGN_SEARCHES = 12;
 // The discovery envelope accepts at most 24 candidates. Two options for each
 // of the 12 supported BOM lines keeps every required part represented instead
@@ -309,12 +312,12 @@ function buildCartItems(
         ? getCatalogComponent(requirement.catalogId)
         : null;
     const fallbackArtworkHref = requirement.kind === "wire"
-      ? thinHookupWireImage
+      ? THIN_HOOKUP_WIRE_IMAGE
       : definition
         ? componentArtworkHref(definition) ?? undefined
         : undefined;
     const artworkHref = requirement.kind === "wire"
-      ? thinHookupWireImage
+      ? THIN_HOOKUP_WIRE_IMAGE
       : choice?.imageUrl ?? fallbackArtworkHref;
     return {
       ...requirement,
@@ -456,7 +459,7 @@ function ListingResults({
             ? getCatalogComponent(requirement.catalogId)
             : null;
           const fallbackArtworkHref = requirement.kind === "wire"
-            ? thinHookupWireImage
+            ? THIN_HOOKUP_WIRE_IMAGE
             : definition
               ? componentArtworkHref(definition) ?? undefined
               : undefined;
@@ -470,7 +473,7 @@ function ListingResults({
               <div className="shopping-picker-part">
                 <span className="shopping-picker-image">
                   <ProductArtwork
-                    src={requirement.kind === "wire" ? thinHookupWireImage : choice?.imageUrl}
+                    src={requirement.kind === "wire" ? THIN_HOOKUP_WIRE_IMAGE : choice?.imageUrl}
                     fallback={fallbackArtworkHref}
                     alt={`${choice?.title ?? requirement.title} product image`}
                     wire={requirement.kind === "wire"}

@@ -1,9 +1,11 @@
 import type { NextConfig } from "next";
 
 const securityHeaders = [
-  // WebMCP is exposed through the standard `tools` policy. The old
-  // modelContext token was never a recognized Permissions-Policy directive.
+  // Native WebMCP requires both permission to use the `tools` feature and an
+  // origin-keyed agent cluster. Without Origin-Agent-Cluster, registerTool()
+  // may reject with SecurityError before ChatGPT can discover any site tools.
   { key: "Permissions-Policy", value: "tools=(self)" },
+  { key: "Origin-Agent-Cluster", value: "?1" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // Preserve the popup relationship required by the ChatGPT sign-in host.
