@@ -1,154 +1,127 @@
 <div align="center">
-  <img src="frontend/public/schematic-logo.png" width="118" alt="Schematic logo" />
+  <img src="frontend/public/schematic-logo.png" width="112" alt="Schematic logo" />
 
 # Schematic
 
-**An agent-native workspace for designing hardware behavior and preparing editable firmware code.**
+### Design connected hardware with an AI agent, without giving up human control
 
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-f97316.svg)](LICENSE)
-[![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
-[![WebMCP](https://img.shields.io/badge/WebMCP-56_tools-8b5cf6.svg)](frontend/src/webmcp/tools.ts)
+Schematic is an agent-native hardware workspace for assembling components, wiring circuits, validating designs, previewing behavior, and preparing editable firmware.
+
+[![Open Schematic](https://img.shields.io/badge/Open_live_studio-f97316?style=for-the-badge)](https://schematic-hardware-workspace.decipherer71.chatgpt.site/studio)
+[![WebMCP](https://img.shields.io/badge/WebMCP-56_native_tools-7c3aed?style=for-the-badge)](frontend/src/webmcp/tools.ts)
+[![License](https://img.shields.io/badge/License-AGPL--3.0-2563eb?style=for-the-badge)](LICENSE)
 
 </div>
 
-Schematic helps a person or an agent assemble a typed hardware graph, describe
-the intended behavior, see that behavior in the canvas, and keep ordinary
-Arduino/C/C++/Python source in an editable Code panel. Behavior Preview remains
-plan-driven and never executes source. Separately, Browser Check can execute a
-bounded documented Arduino/C++ subset for fast feedback before the source is
-handed to a real SDK, compiler, uploader, or physical hardware workflow.
+![Schematic hardware workspace](frontend/public/social-preview.png)
 
-## Product boundary
+## What Schematic does
 
-The Behavior Plan is the source of truth for the in-app outcome:
+Schematic turns a hardware goal into an inspectable project that a person and an agent can edit together. Both use the same project state, validation rules, behavior engine, and undo history.
 
-```text
-user intent
-    ├── graph tools ────────> hardware project
-    ├── behavior.plan.write -> validated Behavior Plan
-    │                              │
-    │                              v
-    │                     typed profiles/actions/events
-    │                              │
-    │                              v
-    │                     deterministic visual preview
-    │
-    └── code.write ----------> editable source files -> bounded Browser Check
-                                                   └-> external compiler/hardware handoff
+- Search a typed catalog of boards, sensors, displays, controls, and actuators
+- Place components and create pin-aware connections
+- Validate wiring and surface actionable issues
+- Propose, preview, approve, undo, and verify design changes
+- Create deterministic behavior plans and interact with their visual output
+- Write, edit, check, download, and export ordinary firmware source files
+- Save projects locally and exchange them through `.vlx` files
+
+## Why WebMCP fits hardware design
+
+Hardware design spans many precise actions. A visual-only agent must guess which controls to click, how components are represented, and whether a wire is valid. Web Model Context Protocol (WebMCP) gives the agent typed operations and structured results instead.
+
+With Schematic, a person states the goal and reviews consequential changes. The agent can inspect the current graph, find compatible parts, propose a design, show the pending diff, apply it after approval, validate the result, preview behavior, and prepare firmware. This collaboration was difficult to make reliable through coordinate-based browser automation alone.
+
+| Person | Agent | Shared result |
+| --- | --- | --- |
+| Describes the device and constraints | Searches compatible components | A concrete bill of materials |
+| Reviews a proposed design | Places parts and plans connections | An inspectable hardware graph |
+| Approves or rejects changes | Applies, validates, and explains issues | Controlled, reversible edits |
+| Tests the intended interaction | Drives typed behavior events | Deterministic preview evidence |
+| Edits and owns the source | Creates firmware documents | Exportable code for a real toolchain |
+
+## Try the complete calculator workflow
+
+Open the [live Schematic studio](https://schematic-hardware-workspace.decipherer71.chatgpt.site/studio) in ChatGPT's in-app browser. In Google Chrome, enable `chrome://flags/#enable-webmcp-testing` first.
+
+Ask your agent:
+
+> Create a calculator with an Arduino Uno, a 4×4 membrane keypad, and an I2C LCD. Wire it, validate it, add calculator behavior, preview 7 + 5, write the firmware, and verify the project. Show me the proposal before applying it.
+
+The agent can complete the workflow through WebMCP while every component, wire, validation result, preview state, and source file remains visible in the workspace.
+
+## Native WebMCP implementation
+
+Schematic registers 56 tools through the browser-native imperative API. The production registration is in [`frontend/src/webmcp/tools.ts`](frontend/src/webmcp/tools.ts):
+
+```typescript
+document.modelContext.registerTool({
+  name: definition.name,
+  title: definition.title,
+  description: definition.description,
+  inputSchema: definition.inputSchema,
+  annotations: definition.annotations,
+  execute: async (input, options) =>
+    definition.execute(input, options),
+}, { signal: controller.signal });
 ```
 
-Behavior Preview applies checked-in typed component actions to deterministic
-reducers. It can show an LED turning on, text appearing on a display, a relay
-changing state, a servo moving, a motor changing speed, or a calculator keypad
-driving an LCD. Behavior Preview does not parse or execute Code; Browser Check
-is a separate bounded source-execution/preflight surface.
+Each tool definition includes a stable name, concise description, JSON Schema input, security annotations, and an executable handler. Tool calls enter the same command layer used by the visible interface, so agent actions immediately appear on the canvas.
 
-Every preview result carries the same honest boundary:
+Schematic does not create a fake `document.modelContext`. When the browser does not provide native WebMCP, the app reports the missing capability. A separate `window.schematicWebMCP` bridge supports local development and deterministic tests without claiming native discovery.
 
-> Behavior Preview is a plan-driven visual outcome. No source code ran in that
-> preview, and electrical behavior and physical hardware were not verified.
+### Tool surface
 
-Browser Check is intentionally narrower: it executes only its documented
-Arduino/C++ subset and fails closed on unsupported constructs. It is **not a
-compiler, MCU emulator, electrical simulator, uploader, or physical test**.
-Real compilation, upload, and hardware bring-up remain external.
+The registry groups 56 tools around complete tasks instead of exposing UI clicks:
 
-## What is implemented
+| Area | Examples | Purpose |
+| --- | --- | --- |
+| Projects | `project.create`, `project.get_graph`, `project.verify` | Manage and inspect hardware projects |
+| Components | `component.search`, `component.add`, `component.remove` | Find and place compatible parts |
+| Connections | `connection.connect`, `connection.remove` | Create and edit pin-aware wiring |
+| Design | `design.propose`, `design.preview`, `design.apply`, `design.undo` | Review and control multi-step changes |
+| Behavior | `behavior.plan.write`, `behavior.preview`, `behavior.invoke` | Define and inspect deterministic interactions |
+| Code | `code.write`, `code.read`, `code.export` | Manage editable firmware documents |
+| Validation | `validation.check` | Return structured graph diagnostics |
+| Shopping | `shopping.search`, `shopping.compare`, `shopping.quote` | Research parts with provenance |
 
-- A React/Zustand hardware graph with catalog search, typed ports, wiring,
-  project switching, validation, browser-local persistence, and `.vlx` import/
-  export.
-- The `@schematic/behavior` package with versioned data-only plans, exact
-  catalog profile bindings, bounded payload schemas, deterministic reducers,
-  visual projections, logical time, replayable session logs, diagnostics, and
-  SHA-256 provenance hashes.
-- Profiles for buttons, membrane keypads, deterministic calculator state,
-  LEDs/indicators, text displays, buzzers, relays, servos, motors, and numeric
-  sensors. A catalog item without an exact profile remains explicitly
-  unsupported rather than receiving guessed behavior.
-- A Code panel backed by durable multi-file documents. Code can be generated,
-  edited, copied, downloaded, and exported without being treated as verified
-  firmware.
-- Exactly **56 WebMCP tools** across the source registry: 11 project, 5
-  workspace, 5 component, 3 connection, 3 firmware, 6 behavior, 3 code, 2
-  validation, 10 shopping, and 8 design tools. The high-level design surface
-  adds propose → preview → approve/discard, shared undo/redo, goal-level verify,
-  and a state-aware shortlist while the primitive tools remain available.
-  `firmware.compile` and every `simulation.*` tool remain absent.
-- A same-origin Site API limited to health, catalog, import analysis, parts
-  discovery, and identity helpers. The retired compile and simulation API paths
-  are not canonical ChatGPT Site routes and return 404 there. Repository-root
-  compatibility handlers are excluded from the Site package and are not
-  product capabilities.
+See the [complete tool inventory and schemas](docs/webmcp/tools.md).
 
-## Behavior and code are intentionally independent
+## How it works
 
-`behavior.plan.write` validates a plan against the active graph and the exact
-profile registry. Every write requires `expectedRevision`: `null` is
-create-only and the exact current integer revision is required to replace an
-existing plan; omission and stale revisions are rejected. `behavior.preview`
-prepares a plan and opens an ephemeral
-session; `behavior.invoke` dispatches only typed events/actions; and
-`behavior.get_state` returns the current snapshot, hashes, diagnostics, and
-claims. The session is recreated on reload and invalidated on graph, plan, or
-project changes. It is never persisted as executable state.
+```mermaid
+flowchart LR
+    A["Human goal"] --> B["WebMCP tools"]
+    B --> C["Shared command layer"]
+    D["React interface"] --> C
+    C --> E["Hardware graph"]
+    C --> F["Validation"]
+    C --> G["Behavior preview"]
+    C --> H["Editable firmware"]
+    E --> D
+    F --> D
+    G --> D
+    H --> D
+```
 
-`code.write`, Monaco edits, and `firmware.write` save source documents with:
+The frontend uses React, TypeScript, React Flow, Zustand, Zod, Monaco Editor, and IndexedDB. The ChatGPT Site wrapper serves the application and same-origin helper routes. WebMCP handlers call the frontend's existing domain operations rather than maintaining a second agent-only state.
 
-- a normalized file list and content SHA-256;
-- language, board/FQBN metadata, dependencies, origin, and revision;
-- mandatory optimistic exact-hash conflict protection (`expectedContentSha256:
-  null` creates source and may replace only Schematic's exact marked generated
-  starter scaffold; every real existing document still requires the exact hash
-  returned by `code.read`/`firmware.read`; omission is rejected);
-- an optional link to a plan/project hash, marked `stale` when either side
-  changes; and
-- export history plus `inAppVerification: "not-performed"`.
+## Honest verification boundary
 
-An export from `code.export` includes every file hash, source/project hashes,
-target metadata, dependencies, graph diagnostics, preview-link provenance, and
-machine-readable false claims for build, execution, upload, and physical test.
+Schematic distinguishes visual evidence from physical verification:
 
-## WebMCP surface
+- Behavior Preview runs typed, deterministic plans. It does not execute firmware
+- Browser Check supports a bounded Arduino/C++ subset. It is not a compiler or microcontroller emulator
+- Graph validation checks the modeled project. It does not verify electrical physics
+- Compilation, upload, and physical hardware testing remain external steps
+- Projects persist in the current browser profile, not as cross-device cloud storage
 
-The complete inventory and schemas are in
-[`docs/webmcp/tools.md`](docs/webmcp/tools.md). The reviewed calculator loop is:
+These boundaries appear in tool results, exports, and the interface so an agent cannot present a preview as physical proof.
 
-1. `design.propose` → `design.preview` → explicit `design.apply` approval.
-2. Schematic places Arduino + membrane keypad + I2C LCD and validates wiring.
-3. `behavior.preview` opens the saved calculator plan.
-4. `behavior.press_key` drives the real typed keypad reducer; `7`, `+`, `5`, `=`
-   makes the LCD projection show `12`, with inputs/results in session evidence.
-5. `code.write` replaces only the marked starter with project firmware.
-6. `firmware.check` runs bounded Browser Check and `project.verify`/
-   `design.verify` report the honest browser-side evidence boundary.
-7. Agent graph mutations can be reversed with `design.undo` and replayed with
-   `design.redo`; `workspace.get_tool_surface` recommends only stage-relevant
-   tools.
+## Run locally
 
-Human controls and WebMCP share the same project store, behavior command layer,
-validation, reducers, hashes, persistence rules, and structured errors.
-
-Schematic exposes the same definitions through two deliberately separate
-surfaces:
-
-- Native WebMCP registers all tools with `document.modelContext.registerTool`
-  when ChatGPT Site Tools or a WebMCP-enabled browser supplies that API.
-- The deterministic fallback is available as `window.schematicWebMCP`. Browser
-  agents and evaluation harnesses can inspect `.tools`, call
-  `.invoke(name, args)`, and read `.getStatus()`. It never creates
-  `document.modelContext`, and reports `native: false` when the host API is
-  missing.
-
-For example, a non-native browser harness can call
-`await window.schematicWebMCP.invoke("workspace.get_state", {})`. Native proof
-must instead come from `document.modelContext.getTools()` or
-`window.schematicWebMCP.inspectNative()`.
-
-## Local development
-
-Requirements: Node.js 22.13+, pnpm 9+, and a browser for the UI. Python is
-needed only for the optional standalone reference API.
+Install Node.js 22.13 or newer and pnpm 9 or newer. Then run:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -156,119 +129,46 @@ npm ci --prefix chatgpt-site
 pnpm --filter @schematic/frontend dev
 ```
 
-The standalone frontend is normally at `http://localhost:3000`. The hosted
-Site wrapper can be run with:
+Open `http://localhost:3000`. To run the ChatGPT Site wrapper instead:
 
 ```bash
 pnpm --dir chatgpt-site dev
 ```
 
-The Site's same-origin API does not require a second server. The optional
-standalone reference service is:
+The optional standalone reference API runs with `pnpm dev:backend`. Hosted deployments must use a strong `SCHEMATIC_SESSION_SECRET`.
+
+## Verify the project
+
+Run the complete release gate:
 
 ```bash
-pnpm dev:backend
+pnpm verify
 ```
 
-Never use development authentication or an empty/weak
-`SCHEMATIC_SESSION_SECRET` in a hosted deployment.
-
-## Checks
-
-Focused behavior checks:
+For a focused WebMCP check:
 
 ```bash
-pnpm --filter @schematic/frontend typecheck
-pnpm --filter @schematic/frontend test -- --run
-pnpm run verify:behavior-preview
+pnpm --filter @schematic/frontend test -- src/__tests__/webmcp.test.ts
 ```
 
-Site checks:
+The WebMCP suite verifies all 56 definitions, native registration, complete discovery, duplicate-registration protection, security annotations, and the non-native fallback boundary.
 
-```bash
-npm --prefix chatgpt-site run lint
-npm --prefix chatgpt-site run typecheck
-npm --prefix chatgpt-site run test
-npm --prefix chatgpt-site run build
-```
+## Repository guide
 
-`pnpm run verify` is the repository-wide release gate. It may build or test
-dormant/reference workspaces included by the monorepo; that does not make those
-packages part of the Site product path. The release gate must additionally
-confirm that the initial Site bundle does not import legacy compiler/runtime
-modules and that `/api/compile` and `/api/simulation/*` return 404 on the
-canonical ChatGPT Site route.
+| Path | Contents |
+| --- | --- |
+| [`frontend/`](frontend/) | Hardware studio and native WebMCP registry |
+| [`packages/behavior/`](packages/behavior/) | Typed plans, profiles, reducers, and preview engine |
+| [`chatgpt-site/`](chatgpt-site/) | ChatGPT Site application and same-origin routes |
+| [`docs/webmcp/tools.md`](docs/webmcp/tools.md) | Complete WebMCP tool reference |
+| [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) | Judge-focused demonstration flow |
+| [`docs/CHATGPT_SITE_RUNBOOK.md`](docs/CHATGPT_SITE_RUNBOOK.md) | Publishing and live verification steps |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | System architecture and trust boundaries |
 
-## Persistence, limits, and migration
+## Deployment
 
-Projects are stored locally in IndexedDB with localStorage compatibility and
-verified-user room keying. This is device-local persistence, not cloud backup or
-cross-device synchronization. Preview sessions, timers, reducers, and active
-snapshots are ephemeral; plans and code documents are durable JSON data.
-
-Current safety limits include 100 plans/project, 200 rules/plan, 20 actions/rule,
-2,000 cues/plan, 100 code documents/project, 128 files/document, 1 MiB/file,
-256 dependencies/document, 50 export-history entries, and a 10 MiB `.vlx`
-import limit. A local workspace may contain at most 50 projects and its
-serialized room snapshot is capped at 8 MiB. If an existing room is over either
-workspace limit, hydration enters recovery: the original stored room is left
-untouched, every preserved project remains visible and can be selected/exported,
-and ordinary edits are blocked. The only recovery mutations are confirmed
-project `clear` or `delete` operations that strictly reduce project count or
-serialized size; once the room fits, normal authoring resumes. If the room is
-beyond the bounded recovery window, make a manual backup before attempting
-repair. The behavior runtime also bounds logical preview duration to ten
-minutes and validates bounded profile payloads.
-
-Editable source has separate aggregate limits. A single source file is capped
-at 1 MiB, but the canonical code documents in one project may contain at most
-512 KiB total across all files/documents. The legacy `firmwareTargets` source
-mirror is checked with the canonical documents against a 1 MiB serialized
-source-container envelope; this is a compatibility/import boundary, not a
-compiler or build limit. Source that exceeds a limit is rejected before a
-project mutation is persisted.
-
-Destructive model mutations require explicit identity confirmation. Project
-delete/clear repeat the exact `projectId`, component removal repeats the exact
-`instanceId`, connection removal repeats the exact `connectionId`, and replacing
-an active project with a blueprint requires `replace: true` plus the exact
-active project id. Blueprint application otherwise creates a new project and
-keeps the existing project intact.
-
-The importer accepts legacy firmware source containers and materializes editable
-code documents once. Legacy simulation configuration, compiled artifacts,
-unknown fields, and unsupported plan versions are retained only under inert
-`legacyBehaviorData` quarantine for round-tripping. They are not active preview
-inputs, status claims, or executable data. Imported plans and source are
-untrusted data: import validates IDs, payloads, paths, sizes, and hashes, and
-records `origin: "imported"` plus stale/linked provenance where applicable.
-Source code is never loaded as a reducer, callback, or script.
-
-## ChatGPT Site release
-
-- Canonical Site URL:
-  [schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
-- Sites project ID: `appgprj_6a913ce4a58881918a47ea49fa0ca505`
-- Hosting configuration: [`chatgpt-site/.openai/hosting.json`](chatgpt-site/.openai/hosting.json)
-- Release procedure: [`docs/CHATGPT_SITE_RUNBOOK.md`](docs/CHATGPT_SITE_RUNBOOK.md)
-
-The repository records the canonical project binding, but this worktree must be
-re-verified before release. Run `pnpm verify`, push only after it is green, then
-publish and record the deployed revision. Native WebMCP discovery, the complete
-calculator journey, undo/redo, Browser Check, persistence, shopping provenance,
-and retired-route 404s remain live acceptance checks. The deployment never
-claims that Browser Check is compilation or that physical hardware was tested.
-
-## Further reading
-
-- [Architecture](ARCHITECTURE.md)
-- [Behavior Preview and Editable Code Handoff](docs/TYPESCRIPT_WEB_SIMULATION_HANDOFF.md)
-- [WebMCP tool schemas](docs/webmcp/tools.md)
-- [Demo script](docs/DEMO_SCRIPT.md)
-- [ChatGPT Site runbook](docs/CHATGPT_SITE_RUNBOOK.md)
-- [Site capability probes](chatgpt-site/SITES_CAPABILITY.md)
+The canonical deployment is the [Schematic hardware workspace](https://schematic-hardware-workspace.decipherer71.chatgpt.site/studio). Follow the [ChatGPT Site release runbook](docs/CHATGPT_SITE_RUNBOOK.md) to build, publish, and verify native tool discovery.
 
 ## License
 
-Schematic is licensed under [AGPL-3.0](LICENSE). Third-party components retain
-their original licenses; see [NOTICE](NOTICE).
+Schematic is open source under the [GNU Affero General Public License v3.0](LICENSE). Third-party components retain their original licenses as documented in [NOTICE](NOTICE).
