@@ -132,8 +132,10 @@ describe("parts workspace automatic sourcing", () => {
 
     const container = renderWorkspace();
     expect(container.textContent).toContain("3 line items");
-    expect(container.textContent).toContain("Hookup wire");
+    expect(container.textContent).toContain("Thin hookup wire bundle");
     expect(container.textContent).toContain("Qty 2");
+    expect(container.querySelector("[data-testid='listing-picker-wire']")?.textContent).toContain("Qty 1");
+    expect(container.querySelector("[data-testid='listing-picker-wire'] img")).toBeTruthy();
     expect(container.textContent).toContain("$17.00");
     expect(container.textContent).toContain("$18.25");
     expect(container.textContent).toContain("Choose one listing for each cart line");

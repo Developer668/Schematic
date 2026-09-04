@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { getCatalogComponent } from "../../data/catalog.ts";
 import { componentArtworkHref } from "../../data/componentArtwork.ts";
+import thinHookupWireImage from "../../assets/thin-hookup-wire.png";
 import { useProjectStore } from "../../store/useProjectStore.ts";
 import {
   createShoppingHandoff,
@@ -231,9 +232,9 @@ function buildDesignRequirements(
     requirements.push({
       key: WIRE_PART_ID,
       catalogId: WIRE_PART_ID,
-      title: "Hookup wire",
-      query: "22 AWG stranded electronics hookup wire spool price",
-      quantity: connectionCount,
+      title: "Thin hookup wire bundle",
+      query: "thin 22 AWG stranded silicone hookup wire assortment bundle for Arduino breadboard electronics",
+      quantity: 1,
       kind: "wire",
     });
   }
@@ -307,13 +308,18 @@ function buildCartItems(
       requirement.kind === "component"
         ? getCatalogComponent(requirement.catalogId)
         : null;
-    const fallbackArtworkHref = definition
-      ? componentArtworkHref(definition) ?? undefined
-      : undefined;
+    const fallbackArtworkHref = requirement.kind === "wire"
+      ? thinHookupWireImage
+      : definition
+        ? componentArtworkHref(definition) ?? undefined
+        : undefined;
+    const artworkHref = requirement.kind === "wire"
+      ? thinHookupWireImage
+      : choice?.imageUrl ?? fallbackArtworkHref;
     return {
       ...requirement,
-      ...(choice?.imageUrl ? { artworkHref: choice.imageUrl } : fallbackArtworkHref ? { artworkHref: fallbackArtworkHref } : {}),
-      ...(choice?.imageUrl && fallbackArtworkHref ? { fallbackArtworkHref } : {}),
+      ...(artworkHref ? { artworkHref } : {}),
+      ...(fallbackArtworkHref ? { fallbackArtworkHref } : {}),
       unitPrice: choice?.price ?? null,
       currency: choice?.currency ?? "USD",
       retailer: choice?.retailer,
@@ -449,9 +455,11 @@ function ListingResults({
           const definition = requirement.kind === "component"
             ? getCatalogComponent(requirement.catalogId)
             : null;
-          const fallbackArtworkHref = definition
-            ? componentArtworkHref(definition) ?? undefined
-            : undefined;
+          const fallbackArtworkHref = requirement.kind === "wire"
+            ? thinHookupWireImage
+            : definition
+              ? componentArtworkHref(definition) ?? undefined
+              : undefined;
           return (
             <section
               className="shopping-listing-picker"
@@ -462,7 +470,7 @@ function ListingResults({
               <div className="shopping-picker-part">
                 <span className="shopping-picker-image">
                   <ProductArtwork
-                    src={choice?.imageUrl}
+                    src={requirement.kind === "wire" ? thinHookupWireImage : choice?.imageUrl}
                     fallback={fallbackArtworkHref}
                     alt={`${choice?.title ?? requirement.title} product image`}
                     wire={requirement.kind === "wire"}
