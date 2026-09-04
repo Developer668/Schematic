@@ -23,8 +23,11 @@ import { explainIssue } from "@schematic/validation";
 import { apiUrl, getAuthHeaders, getAuthSession, getCurrentUserId, waitForAuth } from "../auth/session.ts";
 import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.json";
 import { behaviorToolDefinitions } from "./behaviorTools.ts";
-import { getBehaviorState, readCode, writeCode } from "../application/behaviorCommands.ts";
-import { ensureStarterPlanForAgentBuild } from "../behavior/starterPlan.ts";
+import { designToolDefinitions, recordDesignMutation, setDesignSurfaceFullCount } from "./designTools.ts";
+import { readCode, writeCode } from "../application/behaviorCommands.ts";
+import { ensureAgentBuildArtifacts, agentBuildSourceText } from "../application/agentBuildArtifacts.ts";
+import { checkFirmware, MAX_FIRMWARE_CHECK_DURATION_MS, MAX_FIRMWARE_CHECK_INPUTS } from "../application/firmwareCommands.ts";
+import { verifyProject } from "../application/projectVerification.ts";
 
 type ToolAnnotations = {
   readOnlyHint?: boolean;
@@ -325,6 +328,15 @@ function bindShoppingPublication(results: ShoppingResult[], publication: AgentPu
   }));
 }
 
+function exactCatalogIdForShoppingQuery(query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return null;
+  const direct = getCatalogComponent(query.trim()) ?? getCatalogComponent(normalized);
+  if (direct) return direct.id;
+  const exact = searchCatalog(query).filter((component) => component.id.toLowerCase() === normalized || component.title.trim().toLowerCase() === normalized);
+  return exact.length === 1 ? exact[0].id : null;
+}
+
 function normalizeShoppingDiscovery(raw: unknown): ShoppingDiscovery | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Record<string, unknown>;
@@ -332,7 +344,9 @@ function normalizeShoppingDiscovery(raw: unknown): ShoppingDiscovery | null {
   const candidates = rawCandidates.slice(0, 24).flatMap((entry): ShoppingDiscovery["candidates"] => {
     if (!entry || typeof entry !== "object") return [];
     const item = entry as Record<string, unknown>;
-    const source = item.source === "jlcsearch" || item.source === "adafruit" ? item.source : null;
+    const source = ["jlcsearch", "adafruit", "brightdata-serp"].includes(String(item.source))
+      ? String(item.source) as ShoppingDiscovery["candidates"][number]["source"]
+      : null;
     const id = String(item.id ?? "").trim();
     const sourcePartId = String(item.sourcePartId ?? "").trim();
     const title = String(item.title ?? "").trim();
@@ -342,7 +356,7 @@ function normalizeShoppingDiscovery(raw: unknown): ShoppingDiscovery | null {
       || !shoppingText(id, 160)
       || !shoppingText(sourcePartId, 160)
       || !shoppingText(title, 240)
-      || !shoppingText(partNumber, 160)
+      || (source !== "brightdata-serp" && !shoppingText(partNumber, 160))
       || !shoppingText(verificationUrl, 2_000)
       || item.verificationRequired !== true) return [];
     try {
@@ -369,26 +383,34 @@ function normalizeShoppingDiscovery(raw: unknown): ShoppingDiscovery | null {
       currency,
       verificationUrl,
       verificationRequired: true as const,
+      ...(item.retailer ? { retailer: String(item.retailer).trim().slice(0, 160) } : {}),
+      ...(item.shipping ? { shipping: String(item.shipping).trim().slice(0, 180) } : {}),
+      ...(item.imageUrl && shoppingHttpsUrl(item.imageUrl) ? { imageUrl: String(item.imageUrl).trim() } : {}),
+      ...(typeof item.rating === "number" && Number.isFinite(item.rating) && item.rating >= 0 && item.rating <= 5 ? { rating: item.rating } : {}),
+      ...(typeof item.reviewCount === "number" && Number.isFinite(item.reviewCount) && item.reviewCount >= 0 ? { reviewCount: Math.round(item.reviewCount) } : {}),
+      ...(typeof item.rank === "number" && Number.isFinite(item.rank) && item.rank >= 0 ? { rank: Math.round(item.rank) } : {}),
+      ...(item.catalogId ? { catalogId: String(item.catalogId).trim().slice(0, 160) } : {}),
+      ...(item.matchNote ? { matchNote: String(item.matchNote).trim().slice(0, 240) } : {}),
     }];
   });
   const rawAttempts = Array.isArray(value.attempts) ? value.attempts : [];
   const attempts = rawAttempts.slice(0, 8).flatMap((entry): ShoppingDiscovery["attempts"] => {
     if (!entry || typeof entry !== "object") return [];
     const item = entry as Record<string, unknown>;
-    const source = ["jlcsearch", "adafruit", "request"].includes(String(item.source)) ? String(item.source) as ShoppingDiscovery["attempts"][number]["source"] : null;
+    const source = ["jlcsearch", "adafruit", "brightdata-serp", "request"].includes(String(item.source)) ? String(item.source) as ShoppingDiscovery["attempts"][number]["source"] : null;
     const status = ["success", "empty", "error", "timeout", "rate_limited", "circuit_open", "skipped"].includes(String(item.status)) ? String(item.status) as ShoppingDiscovery["attempts"][number]["status"] : null;
     if (!source || !status) return [];
     return [{ source, status, durationMs: Math.max(0, Number(item.durationMs) || 0), resultCount: Math.max(0, Math.min(24, Number(item.resultCount) || 0)), ...(item.cache === "fresh" || item.cache === "stale" ? { cache: item.cache } : {}), ...(item.retryAfterSeconds ? { retryAfterSeconds: Math.max(1, Number(item.retryAfterSeconds)) } : {}), ...(item.message ? { message: String(item.message).slice(0, 180) } : {}) }];
   });
   return {
     candidates,
-    sourceOrder: Array.isArray(value.sourceOrder) ? value.sourceOrder.map(String).slice(0, 8) : ["jlcsearch", "adafruit", "web-search"],
+    sourceOrder: Array.isArray(value.sourceOrder) ? value.sourceOrder.map(String).slice(0, 8) : ["brightdata-serp"],
     attempts,
     cacheHit: value.cacheHit === true,
     staleCache: value.staleCache === true,
     rateLimited: value.rateLimited === true,
     ...(value.retryAfterSeconds ? { retryAfterSeconds: Math.max(1, Number(value.retryAfterSeconds)) } : {}),
-    message: String(value.message ?? "Public candidates are ready for agent verification.").slice(0, 240),
+    message: String(value.message ?? "Shopping candidates are ready for exact verification.").slice(0, 240),
   };
 }
 
@@ -433,7 +455,9 @@ function shoppingHttpsUrl(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return false;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password;
+    const googleSearchFallback = (url.hostname === "google.com" || url.hostname.endsWith(".google.com"))
+      && (url.pathname === "/search" || url.pathname === "/url");
+    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password && !googleSearchFallback;
   } catch {
     return false;
   }
@@ -553,7 +577,7 @@ function shoppingPublicationIssues(listings: unknown, publication: unknown): Sho
       const retailerName = offer.retailer as string;
       const offerProvider = offer.provider as string;
       if (!shoppingHttpsUrl(offer.url)) {
-        issues.push({ code: "NON_HTTPS_OFFER", message: `Offer ${offerIndex + 1} in listing ${listingIndex + 1} must use an HTTPS retailer URL without embedded credentials.`, listingIndex, offerIndex });
+        issues.push({ code: "NON_HTTPS_OFFER", message: `Offer ${offerIndex + 1} in listing ${listingIndex + 1} must use a direct HTTPS retailer URL without embedded credentials; search-results URLs are not publishable offers.`, listingIndex, offerIndex });
       }
       const retailer = retailerName.toLowerCase();
       if (retailers.has(retailer)) {
@@ -608,6 +632,7 @@ function publicProjectGraph(graph: HardwareGraph) {
 
 const tools: ToolDef[] = [
   ...behaviorToolDefinitions,
+  ...designToolDefinitions,
   {
     name: "project.get_graph",
     description: "Get the current hardware graph and source-document metadata. Source contents and quarantined legacy data are excluded; use code.read for source.",
@@ -616,6 +641,24 @@ const tools: ToolDef[] = [
     execute: async () => {
       const g = publicProjectGraph(useProjectStore.getState().getGraph());
       return { content: [{ type: "text", text: JSON.stringify(g, null, 2) }], data: g };
+    },
+  },
+  {
+    name: "project.verify",
+    description: "Produce one honest browser-side readiness report: static graph checks, Behavior Plan coverage, board source coverage, bounded Browser Check execution, static source preflight, and explicit no-compile/no-physical-hardware claims.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        componentId: { type: "string", minLength: 1, maxLength: MAX_TOOL_IDENTIFIER_LENGTH },
+        durationMs: { type: "integer", minimum: 0, maximum: MAX_FIRMWARE_CHECK_DURATION_MS, default: 1_000 },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    execute: async ({ componentId, durationMs = 1_000 }) => {
+      const result = await verifyProject({ componentId, durationMs });
+      if (!result.ok) return { content: [{ type: "text", text: JSON.stringify(result.error) }], isError: true, error: result.error, data: { code: result.error.code, ...(result.data ?? {}) } };
+      return { content: [{ type: "text", text: JSON.stringify(result.data) }], data: result.data };
     },
   },
   {
@@ -776,42 +819,50 @@ const tools: ToolDef[] = [
         throw cause;
       }
       const applied = useProjectStore.getState().project;
+      if (replace) recordDesignMutation(`Apply ${blueprintId} blueprint`, current);
       useSelectionStore.getState().setActive(applied.components.find((component) => isBoardDefinition(getCatalogComponent(component.definitionId)))?.id ?? null);
       useValidationStore.getState().clear();
-      const behaviorSetup = await ensureStarterPlanForAgentBuild();
+      const buildArtifacts = await ensureAgentBuildArtifacts();
       const persisted = await persistProjectMutation("Blueprint application", applied.id);
       if ("failure" in persisted) return persisted.failure;
       return {
-        content: [{ type: "text", text: `${replace ? "Replaced the active project with" : "Created a new project from"} ${blueprintId}: ${applied.components.length} components, ${applied.connections.length} connections. Outcome setup: ${behaviorSetup.status}.` }],
-        data: { blueprintId, projectId: applied.id, replaced: replace, name: applied.name, components: applied.components.length, connections: applied.connections.length, firmwareTargets: applied.firmwareTargets.length, behaviorSetup, ...persisted },
+        content: [{ type: "text", text: `${replace ? "Replaced the active project with" : "Created a new project from"} ${blueprintId}: ${applied.components.length} components, ${applied.connections.length} connections. Outcome setup: ${buildArtifacts.behaviorSetup.status}. ${agentBuildSourceText(buildArtifacts)}` }],
+        data: { blueprintId, projectId: applied.id, replaced: replace, name: applied.name, components: applied.components.length, connections: applied.connections.length, firmwareTargets: useProjectStore.getState().project.firmwareTargets.length, behaviorSetup: buildArtifacts.behaviorSetup, buildArtifacts, undoAvailable: replace, ...persisted },
       };
     },
   },
   {
     name: "workspace.get_state",
-    description: "Read the live workspace panel state and recent WebMCP activity",
-    inputSchema: { type: "object", properties: {} },
+    description: "Read a compact workspace summary: project counts, current stage, validation status, selection, and the latest few agent actions. Use paginated specialist tools for detailed logs or Behavior state.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
     execute: async () => {
-      const workspace = useWorkspaceStore.getState();
+      const project = useProjectStore.getState().project;
       const validation = useValidationStore.getState();
       const selection = useSelectionStore.getState();
-      const behavior = await getBehaviorState();
+      const hasPlan = (project.behaviorPlans ?? []).length > 0;
+      const stage = project.components.length === 0 ? "empty" : !project.connections.length ? "parts" : validation.valid === false ? "repair" : !hasPlan ? "behavior" : "verify";
       const state = {
-        project: { id: useProjectStore.getState().activeProjectId, name: useProjectStore.getState().project.name },
-        projects: useProjectStore.getState().projects.map((project) => ({ id: project.id, name: project.name, active: project.id === useProjectStore.getState().activeProjectId })),
-        selection: { activeComponentId: selection.activeComponentId, selectedIds: selection.selectedIds },
-        panel: workspace.bottomPanel,
-        collapsed: workspace.bottomCollapsed,
-        height: workspace.bottomHeight,
-        rightPanelWidth: workspace.rightPanelWidth,
-        panels: {
-          webmcp: { activities: useWebMCPStore.getState().activities.slice(0, 12) },
-          behavior: behavior.ok ? behavior.data : { status: "unavailable", error: behavior.error },
-          validation: { valid: validation.valid, issues: validation.issues, checkedAt: validation.checkedAt },
-        },
+        project: { id: project.id, name: project.name, componentCount: project.components.length, connectionCount: project.connections.length },
+        stage,
+        validation: { valid: validation.valid, errors: validation.issues.filter((issue) => issue.severity === "error").length, warnings: validation.issues.filter((issue) => issue.severity === "warning").length, checkedAt: validation.checkedAt },
+        selection: { activeComponentId: selection.activeComponentId },
+        recentActivity: useWebMCPStore.getState().activities.slice(0, 5).map((activity) => ({ name: activity.name, status: activity.status })),
+        details: { behavior: "behavior.get_state", activity: "workspace.get_activity", tools: "workspace.get_tool_surface", graph: "project.get_graph" },
       };
-      return { content: [{ type: "text", text: JSON.stringify(state, null, 2) }], data: state };
+      return { content: [{ type: "text", text: JSON.stringify(state) }], data: state };
+    },
+  },
+  {
+    name: "workspace.get_activity",
+    description: "Read bounded paginated WebMCP activity without inflating workspace.get_state.",
+    inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 80, default: 12 }, offset: { type: "integer", minimum: 0, default: 0 } }, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+    execute: async ({ limit = 12, offset = 0 }) => {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 80 || !Number.isInteger(offset) || offset < 0) return toolFailure("INVALID_ACTIVITY_REQUEST", "limit must be 1-80 and offset must be a non-negative integer.");
+      const all = useWebMCPStore.getState().activities;
+      const data = { total: all.length, limit, offset, activities: all.slice(offset, offset + limit).map((activity) => ({ name: activity.name, status: activity.status, startedAt: activity.startedAt, finishedAt: activity.finishedAt, isError: activity.isError })) };
+      return { content: [{ type: "text", text: JSON.stringify(data) }], data };
     },
   },
   {
@@ -904,15 +955,15 @@ const tools: ToolDef[] = [
         return { content: [{ type: "text", text: "x and y must both be finite numbers when coordinates are provided" }], isError: true };
       }
       const position = hasX ? { x: x as number, y: y as number } : undefined;
+      const before = useProjectStore.getState().project;
       const { id } = useProjectStore.getState().addComponent(componentId, position);
+      recordDesignMutation(`Add ${componentId}`, before);
       useSelectionStore.getState().setActive(id);
       const resolvedPosition = useProjectStore.getState().project.components.find((component) => component.id === id)?.position ?? position;
-      const behaviorSetup = def.behavior
-        ? await ensureStarterPlanForAgentBuild()
-        : { ready: false as const, status: "not-applicable" as const, previewStarted: false as const };
+      const buildArtifacts = await ensureAgentBuildArtifacts();
       return {
-        content: [{ type: "text", text: `Added ${componentId} as ${id} at (${resolvedPosition?.x}, ${resolvedPosition?.y}). Outcome setup: ${behaviorSetup.status}.` }],
-        data: { instanceId: id, position: resolvedPosition, behaviorSetup },
+        content: [{ type: "text", text: `Added ${componentId} as ${id} at (${resolvedPosition?.x}, ${resolvedPosition?.y}). Outcome setup: ${buildArtifacts.behaviorSetup.status}. ${agentBuildSourceText(buildArtifacts)} design.undo reverses this agent mutation.` }],
+        data: { instanceId: id, position: resolvedPosition, behaviorSetup: buildArtifacts.behaviorSetup, buildArtifacts, undoAvailable: true },
       };
     },
   },
@@ -925,12 +976,14 @@ const tools: ToolDef[] = [
       if (instanceId !== confirmInstanceId) return toolFailure("CONFIRMATION_REQUIRED", "Removing a component requires confirmInstanceId to exactly match instanceId.", { instanceId });
       const exists = useProjectStore.getState().project.components.some((component) => component.id === instanceId);
       if (!exists) return { content: [{ type: "text", text: `Unknown component instance ${instanceId}` }], isError: true };
+      const before = useProjectStore.getState().project;
       useProjectStore.getState().removeComponent(instanceId);
+      recordDesignMutation(`Remove ${instanceId}`, before);
       if (useSelectionStore.getState().activeComponentId === instanceId) useSelectionStore.getState().clear();
-      const behaviorSetup = await ensureStarterPlanForAgentBuild();
+      const buildArtifacts = await ensureAgentBuildArtifacts();
       return {
-        content: [{ type: "text", text: `Removed ${instanceId}. Outcome setup: ${behaviorSetup.status}.` }],
-        data: { instanceId, behaviorSetup },
+        content: [{ type: "text", text: `Removed ${instanceId}. Outcome setup: ${buildArtifacts.behaviorSetup.status}. ${agentBuildSourceText(buildArtifacts)} design.undo reverses this agent mutation.` }],
+        data: { instanceId, behaviorSetup: buildArtifacts.behaviorSetup, buildArtifacts, undoAvailable: true },
       };
     },
   },
@@ -987,13 +1040,18 @@ const tools: ToolDef[] = [
       const projectBefore = useProjectStore.getState().project;
       try {
         const created = useProjectStore.getState().connectPorts(requested.source, requested.target);
+        recordDesignMutation(`Connect ${created.source.componentId}.${created.source.portId} to ${created.target.componentId}.${created.target.portId}`, projectBefore);
+        const buildArtifacts = await ensureAgentBuildArtifacts();
         return {
-          content: [{ type: "text", text: `Connected ${created.source.componentId}.${created.source.portId} → ${created.target.componentId}.${created.target.portId} as ${created.id} (${created.domain})` }],
+          content: [{ type: "text", text: `Connected ${created.source.componentId}.${created.source.portId} → ${created.target.componentId}.${created.target.portId} as ${created.id} (${created.domain}). Outcome setup: ${buildArtifacts.behaviorSetup.status}. ${agentBuildSourceText(buildArtifacts)} design.undo reverses this agent mutation.` }],
           data: {
             connectionId: created.id,
             domain: created.domain,
             requested,
             resolved: { source: created.source, target: created.target },
+            behaviorSetup: buildArtifacts.behaviorSetup,
+            buildArtifacts,
+            undoAvailable: true,
           },
         };
       } catch (e) {
@@ -1010,8 +1068,11 @@ const tools: ToolDef[] = [
       if (connectionId !== confirmConnectionId) return toolFailure("CONFIRMATION_REQUIRED", "Disconnecting requires confirmConnectionId to exactly match connectionId.", { connectionId });
       const exists = useProjectStore.getState().project.connections.some((connection) => connection.id === connectionId);
       if (!exists) return { content: [{ type: "text", text: `Unknown connection ${connectionId}` }], isError: true };
+      const before = useProjectStore.getState().project;
       useProjectStore.getState().disconnectPorts(connectionId);
-      return { content: [{ type: "text", text: `Disconnected ${connectionId}` }] };
+      recordDesignMutation(`Disconnect ${connectionId}`, before);
+      const buildArtifacts = await ensureAgentBuildArtifacts();
+      return { content: [{ type: "text", text: `Disconnected ${connectionId}. Outcome setup: ${buildArtifacts.behaviorSetup.status}. ${agentBuildSourceText(buildArtifacts)} design.undo reverses this agent mutation.` }], data: { connectionId, behaviorSetup: buildArtifacts.behaviorSetup, buildArtifacts, undoAvailable: true } };
     },
   },
   {
@@ -1026,7 +1087,7 @@ const tools: ToolDef[] = [
   },
   {
     name: "firmware.write",
-    description: "Compatibility alias for code.write. Save ordinary editable source for a board; Schematic does not compile, run, upload, or physically test it.",
+    description: "Compatibility alias for code.write. expectedContentSha256=null may create source or replace only Schematic's marked generated starter scaffold; real existing source still requires its exact current hash.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1034,19 +1095,28 @@ const tools: ToolDef[] = [
         files: { type: "array", minItems: 1, maxItems: 128, items: { type: "object", properties: { name: { type: "string", minLength: 1, maxLength: 240 }, content: { type: "string", maxLength: 1048576 } }, required: ["name", "content"], additionalProperties: false } },
         language: { type: "string", enum: ["arduino", "micropython", "espidf", "c", "cpp", "python"] },
         boardFqbn: { type: "string", minLength: 1, maxLength: MAX_TOOL_IDENTIFIER_LENGTH },
-        expectedContentSha256: { anyOf: [{ type: "string", pattern: "^[0-9a-fA-F]{64}$" }, { type: "null" }], description: "null for create-only, or the exact hash returned by firmware.read/code.read for replacement" },
-    },
-    required: ["componentId", "files", "expectedContentSha256"],
+        expectedContentSha256: { anyOf: [{ type: "string", pattern: "^[0-9a-fA-F]{64}$" }, { type: "null" }], description: "null to create source or replace only Schematic's marked generated starter scaffold; otherwise use the exact current hash from firmware.read/code.read" },
+      },
+      required: ["componentId", "files", "expectedContentSha256"],
+      additionalProperties: false,
     },
     execute: async (args) => {
       const { componentId, files, language, boardFqbn, expectedContentSha256 } = args;
       if (!boundedToolIdentifier(componentId)) return toolFailure("INVALID_CODE_REQUEST", "componentId must be a bounded identifier and expectedContentSha256 must be null or a 64-character SHA-256 hash.");
-      if (!Object.prototype.hasOwnProperty.call(args ?? {}, "expectedContentSha256") || expectedContentSha256 === undefined) return toolFailure("SOURCE_PRECONDITION_REQUIRED", "Code writes require expectedContentSha256: null for create-only, or the exact current hash for replacement.");
+      if (!Object.prototype.hasOwnProperty.call(args ?? {}, "expectedContentSha256") || expectedContentSha256 === undefined) return toolFailure("SOURCE_PRECONDITION_REQUIRED", "Code writes require expectedContentSha256: null to create (or replace only Schematic's generated starter scaffold), or the exact current hash for any other replacement.");
       if (!validSha256(expectedContentSha256)) return toolFailure("INVALID_CODE_REQUEST", "expectedContentSha256 must be null or a 64-character SHA-256 hash.");
-      const result = await writeCode({ targetComponentId: componentId, files: Array.isArray(files) ? files : [], language: language ?? "arduino", boardFqbn, expectedContentSha256, origin: "ai-generated" });
-      if (!result.ok) return { content: [{ type: "text", text: JSON.stringify(result.error, null, 2) }], isError: true, error: result.error, data: { code: result.error.code, ...(result.data ?? {}) } };
+      const result = await writeCode({
+        targetComponentId: componentId,
+        files: Array.isArray(files) ? files : [],
+        language: language ?? "arduino",
+        boardFqbn,
+        expectedContentSha256,
+        replaceGeneratedStarter: expectedContentSha256 === null,
+        origin: "ai-generated",
+      });
+      if (!result.ok) return { content: [{ type: "text", text: JSON.stringify(result.error) }], isError: true, error: result.error, data: { code: result.error.code, ...(result.data ?? {}) } };
       useSelectionStore.getState().setActive(String(componentId ?? ""));
-      return { content: [{ type: "text", text: JSON.stringify({ ...result.data, compatibilityAlias: "firmware.write" }, null, 2) }], data: { ...result.data, compatibilityAlias: "firmware.write" } };
+      return { content: [{ type: "text", text: JSON.stringify({ ...result.data, compatibilityAlias: "firmware.write" }) }], data: { ...result.data, compatibilityAlias: "firmware.write" } };
     },
   },
   {
@@ -1063,18 +1133,23 @@ const tools: ToolDef[] = [
   },
   {
     name: "firmware.check",
-    description: "Compatibility diagnostic alias. Reports editable source metadata only; Schematic does not compile or preflight source in the preview workflow.",
-    inputSchema: { type: "object", properties: { componentId: { type: "string", minLength: 1, maxLength: MAX_TOOL_IDENTIFIER_LENGTH } }, required: ["componentId"] },
+    description: "Run Schematic's bounded Browser Check for one board. It executes the supported Arduino/C++ subset and returns topology/protocol/serial/static diagnostics; it is not compilation, electrical simulation, upload, or physical verification.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        componentId: { type: "string", minLength: 1, maxLength: MAX_TOOL_IDENTIFIER_LENGTH },
+        durationMs: { type: "integer", minimum: 0, maximum: MAX_FIRMWARE_CHECK_DURATION_MS, default: 1_000 },
+        inputs: { type: "object", maxProperties: MAX_FIRMWARE_CHECK_INPUTS, additionalProperties: { anyOf: [{ type: "number" }, { type: "boolean" }] } },
+      },
+      required: ["componentId"],
+      additionalProperties: false,
+    },
     annotations: { readOnlyHint: true },
-    execute: async ({ componentId }) => {
-      if (!boundedToolIdentifier(componentId)) return toolFailure("INVALID_CODE_REQUEST", "componentId must be a bounded non-empty identifier of at most 200 characters.");
-      const id = String(componentId ?? "");
-      const result = await readCode(id);
-      if (!result.ok) return { content: [{ type: "text", text: JSON.stringify(result.error, null, 2) }], isError: true, error: result.error, data: { code: result.error.code, ...(result.data ?? {}) } };
-      return {
-        content: [{ type: "text", text: JSON.stringify({ componentId: id, status: "not-performed", notice: "Schematic does not compile or preflight editable source. Use the board SDK/toolchain externally.", document: result.data.document }, null, 2) }],
-        data: { componentId: id, status: "not-performed", notice: "Schematic does not compile or preflight editable source. Use the board SDK/toolchain externally.", document: result.data.document },
-      };
+    execute: async ({ componentId, durationMs = 1_000, inputs = {} }) => {
+      if (!boundedToolIdentifier(componentId)) return toolFailure("INVALID_FIRMWARE_CHECK", "componentId must be a bounded programmable-board instance id.");
+      const result = await checkFirmware({ componentId, durationMs, inputs });
+      if (!result.ok) return { content: [{ type: "text", text: JSON.stringify(result.error) }], isError: true, error: result.error, data: { code: result.error.code, ...(result.data ?? {}) } };
+      return { content: [{ type: "text", text: JSON.stringify(result.data) }], data: result.data };
     },
   },
   {
@@ -1181,11 +1256,15 @@ const tools: ToolDef[] = [
       const trustedAuth = __trustedAuth as TrustedToolContext | undefined;
       const discoveryRequest = typeof listings === "undefined" && typeof publication === "undefined";
       if (discoveryRequest) {
-        shopping.setRequestStatus("searching");
-        shopping.setResults([]);
+        // Discovery is request-scoped. Clear only the previous untrusted
+        // candidate set; accepted listings/cart must survive a new lookup.
+        shopping.setDiscovery(null);
         shopping.setHandoff(handoff);
+        shopping.setRequestStatus("searching");
         let providerFallback: Record<string, unknown> = { attempted: false, reason: "trusted_webmcp_session_required" };
         let discovery: ShoppingDiscovery | null = null;
+        let discoveryHttpStatus: number | null = null;
+        let discoveryTransportError = "";
         if (trustedAuth?.authenticated && trustedAuth.subject) {
           const lookup = await fetchJson(`/api/parts/search?query=${encodeURIComponent(searchQuery)}&quantity=${requestedQuantity}`, { signal });
           if (!persistenceContextStillCurrent(persistenceContext)) {
@@ -1196,9 +1275,12 @@ const tools: ToolDef[] = [
               true,
             );
           }
+          discoveryHttpStatus = lookup.response?.status ?? null;
+          discoveryTransportError = lookup.error ?? "";
           providerFallback = {
             attempted: true,
             available: Boolean(lookup.response?.ok),
+            httpStatus: discoveryHttpStatus,
             ...(lookup.data && typeof lookup.data === "object" ? lookup.data : {}),
             ...(lookup.error ? { error: lookup.error } : {}),
           };
@@ -1206,23 +1288,87 @@ const tools: ToolDef[] = [
           if (discovery) shopping.setDiscovery(discovery);
           else shopping.setRequestStatus("agent-required");
         }
-        // A stale persistence/broadcast event may arrive while the upstream
-        // lookup is awaiting a response. Re-assert the active request after
-        // discovery so get_state and the UI cannot show candidates without
-        // their matching handoff.
+        // Reassert the active request after the async lookup so a cross-tab
+        // update cannot pair candidates with a stale query/handoff.
         shopping.setQuery(searchQuery);
         shopping.setHandoff(handoff);
         if (discovery) shopping.setDiscovery(discovery);
-        const data = { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: shopping.results, cart: shopping.cart, unchanged: shopping.results.length > 0 || shopping.cart.length > 0, requiresWebMCPAgent: true, handoff, discovery: shopping.discovery ?? discovery, providerFallback };
-        const hasCandidates = (Array.isArray(providerFallback.candidates) && providerFallback.candidates.length > 0)
-          || (Array.isArray(providerFallback.results) && providerFallback.results.length > 0);
+        const activeDiscovery = shopping.discovery ?? discovery;
+        const hasCandidates = Boolean(activeDiscovery?.candidates.length);
+        const discoveryRateLimited = activeDiscovery?.rateLimited === true || discoveryHttpStatus === 429;
+        const discoveryUnavailable = Boolean(trustedAuth?.authenticated
+          && !hasCandidates
+          && !discoveryRateLimited
+          && (discoveryTransportError || (discoveryHttpStatus !== null && (discoveryHttpStatus < 200 || discoveryHttpStatus >= 300))));
+        if (discoveryRateLimited) shopping.setRequestStatus("rate-limited");
+        else if (discoveryUnavailable) shopping.setRequestStatus("failed");
+        else shopping.setRequestStatus("agent-required");
+        const discoverySource = activeDiscovery?.sourceOrder[0] ?? null;
+        // The requested catalog id is a target hint, never proof that a given
+        // provider result is that exact part.
+        const requestedCatalogId = exactCatalogIdForShoppingQuery(searchQuery);
+        const publicationReadiness = (activeDiscovery?.candidates ?? []).map((candidate) => {
+          const missing: string[] = [];
+          if (!candidate.catalogId) missing.push("canonical catalogId");
+          if (!candidate.partNumber) missing.push("manufacturer/distributor partNumber");
+          if (!candidate.retailer || candidate.retailer === "Retailer listing") missing.push("retailer");
+          if (!shoppingHttpsUrl(candidate.verificationUrl)) missing.push("direct HTTPS retailer URL");
+          return {
+            candidateId: candidate.id,
+            source: candidate.source,
+            catalogId: candidate.catalogId ?? null,
+            partNumber: candidate.partNumber || null,
+            retailer: candidate.retailer ?? null,
+            price: candidate.price,
+            currency: candidate.currency,
+            readyForExactReview: missing.length === 0,
+            missing,
+            nextAction: missing.length
+              ? `Verify ${missing.join(", ")} from the retailer/provider result before publishing. Do not infer missing values from the search query.`
+              : "Verify that the provider title/model/part number is the exact canonical component and that the retailer page is current, then publish through shopping.search with exactMatch=true and recent timestamps.",
+          };
+        });
+        const code = hasCandidates
+          ? "DISCOVERY_READY"
+          : discoveryRateLimited
+            ? "DISCOVERY_RATE_LIMITED"
+            : discoveryUnavailable
+              ? "DISCOVERY_UNAVAILABLE"
+              : trustedAuth?.authenticated
+                ? "DISCOVERY_EMPTY"
+                : "AGENT_REQUIRED";
+        const data = {
+          code,
+          query: searchQuery,
+          source: discoverySource ?? (trustedAuth?.authenticated ? "none" : "agent-handoff"),
+          httpStatus: discoveryHttpStatus,
+          liveOffers: false,
+          discoveryReady: Boolean(activeDiscovery),
+          publicationRequired: true,
+          requestedCatalogId,
+          publicationReadiness,
+          results: shopping.results,
+          cart: shopping.cart,
+          unchanged: shopping.results.length > 0 || shopping.cart.length > 0,
+          requiresWebMCPAgent: true,
+          handoff,
+          discovery: activeDiscovery,
+          providerFallback,
+        };
+        const discoveryLabel = discoverySource === "brightdata-serp" ? "Bright Data" : discoverySource ? "Bounded parts discovery" : "Shopping discovery";
+        const providerMessage = activeDiscovery?.message || (typeof providerFallback.message === "string" ? providerFallback.message : "") || discoveryTransportError;
         const message = hasCandidates
-          ? "Public candidates are ready. Check canonical catalog IDs, part numbers, timestamps, and HTTPS retailer offers, then call shopping.search again with listings and publication. These remain agent-published claims; confirm identity and live availability with the retailer."
-          : "Parts shopping requires a connected, authenticated WebMCP agent to publish listings. Public discovery was checked and the handoff JSON is ready for another browsing agent.";
-        return shoppingError("AGENT_PUBLICATION_REQUIRED", message, data);
+          ? `${discoveryLabel} returned ${activeDiscovery?.candidates.length ?? 0} current shopping candidate${activeDiscovery?.candidates.length === 1 ? "" : "s"}. Use them as sourcing evidence; canonical cart publication requires verified catalog identity and a direct current retailer offer.`
+          : discoveryRateLimited
+            ? providerMessage || "Shopping discovery is temporarily rate limited; do not invent replacement listings."
+            : discoveryUnavailable
+              ? providerMessage || "Shopping discovery is unavailable; do not invent listing data. Check the server-side provider configuration before retrying."
+              : trustedAuth?.authenticated
+                ? providerMessage || "Shopping discovery completed without matching candidates. Try an exact manufacturer part number or a more specific board/module name; no listing data was invented."
+                : "Shopping discovery needs a trusted signed-in Schematic session. The handoff remains available, but no provider result was fabricated.";
+        return { content: [{ type: "text", text: JSON.stringify({ ...data, message }) }], data: { ...data, message } };
       }
       if (!trustedAuth?.authenticated || !trustedAuth.subject) {
-        shopping.setResults([]);
         shopping.setHandoff(handoff);
         return shoppingError("AUTH_REQUIRED", "Listing publication was rejected because no trusted WebMCP session was present. Caller-supplied authentication fields are ignored; resume the handoff from a trusted WebMCP session.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: shopping.results, cart: shopping.cart, unchanged: true, requiresWebMCPAgent: true, handoff, discovery: shopping.discovery });
       }
@@ -1230,14 +1376,12 @@ const tools: ToolDef[] = [
       const provider = String(requestedPublication.provider ?? "").trim();
       const publishedAt = String(requestedPublication.publishedAt ?? "").trim();
       if (!provider || !publishedAt) {
-        shopping.setResults([]);
         shopping.setHandoff(handoff);
         return shoppingError("PUBLICATION_METADATA_REQUIRED", "Each WebMCP publication must include the parts provider and the time the agent sourced the listings.", { query: searchQuery, source: "webmcp-agent-required", liveOffers: false, results: shopping.results, cart: shopping.cart, unchanged: true, requiresWebMCPAgent: true, handoff, discovery: shopping.discovery });
       }
       const publicationIssues = shoppingPublicationIssues(listings, publication);
       if (publicationIssues.length > 0) {
         const firstIssue = publicationIssues[0];
-        shopping.setResults([]);
         shopping.setHandoff(handoff);
         return shoppingError(firstIssue.code, firstIssue.message, {
           query: searchQuery,
@@ -1426,13 +1570,15 @@ const tools: ToolDef[] = [
       const proj = useProjectStore.getState().project;
       const next = layoutComponentPositions(proj.components);
       useProjectStore.getState().loadProject({ ...proj, components: next });
-      return { content: [{ type: "text", text: `Auto-layout applied to ${next.length} components` }] };
+      recordDesignMutation("Auto-layout components", proj);
+      return { content: [{ type: "text", text: `Auto-layout applied to ${next.length} components; design.undo can restore the previous layout.` }], data: { componentCount: next.length, semanticGraphChanged: false, undoAvailable: true } };
     },
   },
 ];
 
 /** Single source of truth for the tool count shown in the product UI. */
 export const WEBMCP_TOOL_COUNT = tools.length;
+setDesignSurfaceFullCount(WEBMCP_TOOL_COUNT);
 
 let controllers: AbortController[] = [];
 let registrationGeneration = 0;
@@ -1447,12 +1593,17 @@ async function executeToolWithActivity(tool: ToolDef, args: Record<string, any> 
     // Read-only inspection stays available so ChatGPT discovery + exploration
     // works even before sign-in; mutations still require a verified session.
     const hosted = typeof window !== "undefined" && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
-    const session = await getAuthSession(false, signal);
+    // Read-only tools intentionally operate on the already-visible room
+    // snapshot and must not wait for auth. Waiting here creates an avoidable
+    // yield where a queued session/persistence update can swap the graph after
+    // the user/agent invoked validation or inspection but before it is read.
+    // Mutations still require the verified session below.
+    const shoppingSearch = tool.name === "shopping.search";
+    const isReadOnly = tool.annotations?.readOnlyHint === true;
+    const session = isReadOnly ? null : await getAuthSession(false, signal);
     // shopping.search owns a phase-aware gate: query-only calls can return a
     // bounded machine-readable handoff while unauthenticated, while its
     // publication branch returns AUTH_REQUIRED without a trusted session.
-    const shoppingSearch = tool.name === "shopping.search";
-    const isReadOnly = tool.annotations?.readOnlyHint === true;
     if (hosted && !session && !isReadOnly && !shoppingSearch) {
       const denied = toolFailure("AUTH_REQUIRED", "Sign in to use Schematic WebMCP mutation tools; read-only tools (search, inspect, graph, validation, behavior capabilities) remain available. Project mutations are scoped to your verified account.");
       useWebMCPStore.getState().finishTool(activityId, denied, true);
@@ -1543,7 +1694,7 @@ function installModelContextTestingPolyfill() {
 /**
  * ChatGPT's in-app browser may inject document.modelContext just after page
  * scripts run. If no native surface existed at bootstrap, re-register once one
- * appears so the host actually discovers the 45 tools. We never polyfill
+ * appears so the host actually discovers the complete tool registry. We never polyfill
  * document/navigator.modelContext: a fake registry would report success while
  * the host still sees zero tools.
  */
@@ -1611,7 +1762,7 @@ export async function registerWebMCPTools() {
     return;
   }
   // Submit the complete registry before awaiting any individual registration.
-  // registerTool() returns a Promise, and awaiting each of 45 tools serially
+  // registerTool() returns a Promise, and awaiting each tool serially
   // creates an avoidable window where a browser agent can observe only a
   // partial tool map during initial page discovery.
   const registrationResults = await Promise.all(tools.map(async (t) => {

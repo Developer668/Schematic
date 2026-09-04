@@ -271,8 +271,8 @@ function WebMCPCLI({ toolNames }: { toolNames: string[] }) {
     try {
       const result = await invokeWebMCPTool(name, args);
       const text = result.content
-        ?.filter((item) => item.type === "text" && typeof item.text === "string")
-        .map((item) => item.text)
+        ?.filter((item: { type?: string; text?: string }) => item.type === "text" && typeof item.text === "string")
+        .map((item: { text?: string }) => item.text)
         .join("\n");
       const output = text || (result.data ? JSON.stringify(result.data, null, 2) : "Tool completed.");
       setHistory((current) => [

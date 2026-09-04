@@ -42,7 +42,7 @@ describe("Uno AVR artifact handoff", () => {
     await adapter.loadArtifact({ format: "intel-hex", text: validHex, bytes, sha256, targetFqbn: "arduino:avr:uno" });
     expect(adapter.getLoadedArtifactSha256()).toBe(sha256);
     expect(adapter.getCpuCycles()).toBe(0);
-    expect(() => adapter.loadArtifact({ format: "intel-hex", text: validHex, bytes, sha256: "0".repeat(64) })).rejects.toThrow(/hash mismatch/);
+    await expect(adapter.loadArtifact({ format: "intel-hex", text: validHex, bytes, sha256: "0".repeat(64) })).rejects.toThrow(/hash mismatch/);
   });
 
   it("maps Arduino digital pins to AVR ports and reports output transitions", async () => {

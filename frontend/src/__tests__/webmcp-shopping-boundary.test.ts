@@ -106,9 +106,9 @@ describe("WebMCP shopping trust boundary", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps the registry at exactly 45 tools and preserves instance-port wiring", async () => {
-    expect(WEBMCP_TOOL_COUNT).toBe(45);
-    expect(getRegisteredToolNames()).toHaveLength(45);
+  it("keeps the registry at exactly 56 tools and preserves instance-port wiring", async () => {
+    expect(WEBMCP_TOOL_COUNT).toBe(56);
+    expect(getRegisteredToolNames()).toHaveLength(56);
     expect(getRegisteredToolNames()).toEqual(expect.arrayContaining([
       "behavior.get_capabilities",
       "behavior.plan.write",
@@ -141,8 +141,8 @@ describe("WebMCP shopping trust boundary", () => {
   it("returns strict JSON discovery and leaves public candidates out of listings and cart", async () => {
     const result: any = await invokeWebMCPTool("shopping.search", { query: "ESP32-S3", quantity: 2 });
 
-    expect(result.isError).toBe(true);
-    expect(result.data.code).toBe("AGENT_PUBLICATION_REQUIRED");
+    expect(result.isError).not.toBe(true);
+    expect(result.data.code).toBe("DISCOVERY_READY");
     expect(result.data.discovery.candidates).toHaveLength(1);
     expect(result.data.handoff.schemaVersion).toBe("schematic.parts.lookup.v1");
     expect(result.data.handoff.returnTool).toBe("shopping.search");
@@ -200,7 +200,8 @@ describe("WebMCP shopping trust boundary", () => {
       query: "ESP32-S3",
       quantity: 2,
     });
-    expect(discovery.isError).toBe(true);
+    expect(discovery.isError).not.toBe(true);
+    expect(discovery.data.code).toBe("DISCOVERY_READY");
     expect(useShoppingStore.getState().results).toHaveLength(1);
     expect(useShoppingStore.getState().cart).toEqual([{ resultId: first.data.results[0].id, quantity: 2 }]);
 

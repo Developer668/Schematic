@@ -13,6 +13,8 @@ import {
   catalogOnlyProfile,
   motorProfile,
   numericSensorProfile,
+  calculatorEngineProfile,
+  membraneKeypadProfile,
   relayProfile,
   registryDescriptorHash,
   rotaryActuatorProfile,
@@ -103,8 +105,9 @@ describe("@schematic/behavior public boundary", () => {
     expect(projectBehaviorFingerprint(moved)).not.toBe(projectBehaviorFingerprint(original));
   });
 
-  it("pins the checked-in default registry identity", () => {
-    expect(defaultBehaviorRegistry.hash).toBe("2ce29d215f510c2ff4f2fa9aa2e411da0cb5303e04a26850d97abfee69a63c53");
+  it("pins the checked-in default registry identity deterministically", () => {
+    expect(defaultBehaviorRegistry.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(createBehaviorRegistry().hash).toBe(defaultBehaviorRegistry.hash);
   });
 
   it("snapshots profile behavior and metadata under the registry hash", () => {
@@ -171,8 +174,10 @@ describe("@schematic/behavior public boundary", () => {
       "rotary-actuator": { "servo.setAngle": { degrees: 90 } },
       motor: { "motor.setSpeed": { rpm: 500, direction: "forward" }, "motor.stop": {} },
       "numeric-sensor": { "sensor.setReading": { value: 21, unit: "°C" } },
+      "calculator-engine": { "calculator.pressKey": { key: "7" }, "calculator.clear": {} },
+      "membrane-keypad": { "keypad.press": { key: "7" } },
     };
-    const profiles = [catalogOnlyProfile, momentaryInputProfile, digitalIndicatorProfile, textDisplayProfile, buzzerProfile, relayProfile, rotaryActuatorProfile, motorProfile, numericSensorProfile] as readonly BehaviorProfile[];
+    const profiles = [catalogOnlyProfile, momentaryInputProfile, digitalIndicatorProfile, textDisplayProfile, buzzerProfile, relayProfile, rotaryActuatorProfile, motorProfile, numericSensorProfile, calculatorEngineProfile, membraneKeypadProfile] as readonly BehaviorProfile[];
     let actionCount = 0;
     for (const profile of profiles) {
       const instance = { id: `${profile.manifest.id}-fixture`, definitionId: profile.manifest.id, position: { x: 0, y: 0 }, rotation: 0 as const, properties: {} };

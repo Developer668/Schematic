@@ -268,8 +268,10 @@ for (const file of activeServerFiles) {
 
 const webmcpFile = resolve(repoRoot, "frontend/src/webmcp/tools.ts");
 const behaviorToolsFile = resolve(repoRoot, "frontend/src/webmcp/behaviorTools.ts");
+const designToolsFile = resolve(repoRoot, "frontend/src/webmcp/designTools.ts");
 const webmcpSource = existsSync(webmcpFile) ? read(webmcpFile) : "";
 const behaviorToolsSource = existsSync(behaviorToolsFile) ? read(behaviorToolsFile) : "";
+const designToolsSource = existsSync(designToolsFile) ? read(designToolsFile) : "";
 const registrationStart = webmcpSource.indexOf("const tools");
 const registrationEnd = webmcpSource.indexOf("export const WEBMCP_TOOL_COUNT", registrationStart);
 const registration = registrationStart >= 0
@@ -282,6 +284,9 @@ if (!registration) {
   if (!registration.includes("...behaviorToolDefinitions")) {
     fail("webmcp-registration", "The default WebMCP registration does not spread `behaviorToolDefinitions`; behavior/code tools would not be available to the model in the normal Site startup path.");
   }
+  if (!registration.includes("...designToolDefinitions")) {
+    fail("webmcp-registration", "The default WebMCP registration does not spread `designToolDefinitions`; proposal/approval/undo/state-aware tools would disappear from a clean build.");
+  }
 
   const forbiddenToolNames = registration.match(/\bname\s*:\s*["'](?:firmware\.compile|simulation\.[^"']+)["']/g) ?? [];
   if (forbiddenToolNames.length > 0) {
@@ -293,22 +298,56 @@ if (!registration) {
     fail("webmcp-registration", `Default WebMCP registration still contains legacy compiler/simulation endpoints: ${[...new Set(forbiddenEndpoints)].join(", ")}. Preview must call the Behavior System directly and code tools must only save/export source.`);
   }
 
-  const requiredTools = [
+  const requiredBehaviorTools = [
     "behavior.get_capabilities",
     "behavior.plan.write",
     "behavior.preview",
     "behavior.invoke",
+    "behavior.press_key",
     "behavior.get_state",
     "code.write",
     "code.read",
     "code.export",
   ];
-  for (const name of requiredTools) {
-    const presentInDefinition = new RegExp(`\\bname\\s*:\\s*["']${escapeRegExp(name)}["']`).test(behaviorToolsSource);
-    const presentInDefault = new RegExp(`\\bname\\s*:\\s*["']${escapeRegExp(name)}["']`).test(registration);
-    if (!presentInDefinition || !presentInDefault && !registration.includes("...behaviorToolDefinitions")) {
-      fail("webmcp-required-tools", `Required tool ${name} is absent from the default WebMCP surface. Define it in frontend/src/webmcp/behaviorTools.ts and include that definition in the startup registration.`);
+  for (const name of requiredBehaviorTools) {
+    if (!new RegExp(`\\bname\\s*:\\s*["']${escapeRegExp(name)}["']`).test(behaviorToolsSource)) {
+      fail("webmcp-required-tools", `Required behavior/code tool ${name} is absent from frontend/src/webmcp/behaviorTools.ts.`);
     }
+  }
+
+  const requiredDesignTools = [
+    "design.propose",
+    "design.preview",
+    "design.apply",
+    "design.discard",
+    "design.undo",
+    "design.redo",
+    "design.verify",
+    "workspace.get_tool_surface",
+  ];
+  for (const name of requiredDesignTools) {
+    if (!new RegExp(`\\bname\\s*:\\s*["']${escapeRegExp(name)}["']`).test(designToolsSource)) {
+      fail("webmcp-required-tools", `Required collaboration/state-aware tool ${name} is absent from frontend/src/webmcp/designTools.ts.`);
+    }
+  }
+
+  for (const name of ["project.verify", "workspace.get_activity", "workspace.get_state", "firmware.check"]) {
+    if (!new RegExp(`\\bname\\s*:\\s*["']${escapeRegExp(name)}["']`).test(webmcpSource)) {
+      fail("webmcp-required-tools", `Required release tool ${name} is absent from frontend/src/webmcp/tools.ts.`);
+    }
+  }
+
+  const toolNamePattern = new RegExp("\\bname\\s*:\\s*[\\\"']([^\\\"']+)[\\\"']", "g");
+  const declaredToolNames = [webmcpSource, behaviorToolsSource, designToolsSource]
+    .flatMap((source) => [...source.matchAll(toolNamePattern)].map((match) => match[1]))
+    .filter((name) => /^(?:behavior|code|design|workspace|project|component|connection|firmware|validation|shopping)\./.test(name));
+  const uniqueToolNames = [...new Set(declaredToolNames)];
+  if (uniqueToolNames.length !== 56) {
+    fail("webmcp-tool-count", `Expected exactly 56 WebMCP tool definitions in source, found ${uniqueToolNames.length}. Generated dist files do not count; reconcile the source registry before release.`);
+  }
+  if (declaredToolNames.length !== uniqueToolNames.length) {
+    const duplicates = uniqueToolNames.filter((name) => declaredToolNames.filter((candidate) => candidate === name).length > 1);
+    fail("webmcp-tool-count", `Duplicate WebMCP tool definitions detected: ${duplicates.join(", ") || "unknown duplicate"}. Keep one source-of-truth definition per tool name.`);
   }
 }
 
@@ -324,8 +363,10 @@ const catalogFile = resolve(repoRoot, "frontend/src/data/catalog.ts");
 const catalogSource = existsSync(catalogFile) ? stripComments(read(catalogFile)) : "";
 const requiredBindings = [
   ["pushbutton", "momentary-input"],
+  ["membrane-keypad", "membrane-keypad"],
   ["led", "digital-indicator"],
   ["lcd1602", "text-display"],
+  ["lcd1602-i2c", "text-display"],
   ["buzzer", "buzzer"],
   ["relay", "relay"],
   ["servo", "rotary-actuator"],
@@ -368,18 +409,18 @@ const honestyChecks = [
   },
   {
     label: "not compiled claim",
-    test: /(?:has not|not) compiled|compile, upload, and physical bring-up happen[^.\n]{0,100}(?:external|connected hardware)/i,
-    repair: "State that Schematic does not compile the editable source in the preview workflow.",
+    test: /(?:has not|not) compiled|compil(?:e|ation)[^.\n]{0,100}(?:not-performed|remain external|external toolchain|does not claim compile)/i,
+    repair: "State that Browser Check is not compilation and that real compilation remains external.",
   },
   {
     label: "not uploaded claim",
-    test: /(?:has not[^.\n]{0,120}|not\s+)uploaded|compile, upload, and physical bring-up happen[^.\n]{0,100}(?:external|connected hardware)/i,
-    repair: "State that Schematic does not upload the editable source in the preview workflow.",
+    test: /(?:has not[^.\n]{0,120}|not\s+)uploaded|upload[^.\n]{0,100}(?:remain external|not performed|does not|physical)/i,
+    repair: "State that Schematic does not upload editable source to hardware.",
   },
   {
     label: "not physically tested claim",
-    test: /(?:has not[^.\n]{0,120}|not\s+)physically tested|physical (?:wiring|hardware) (?:and|behavior)[^.\n]{0,80}unverified|physical bring-up happen[^.\n]{0,100}(?:external|connected hardware)/i,
-    repair: "State that physical bring-up and hardware testing happen only after the source is taken to a connected board.",
+    test: /(?:has not[^.\n]{0,120}|not\s+)physically tested|physical (?:wiring|hardware|bring-up|verification)[^.\n]{0,120}(?:unverified|not verified|remain external|external)/i,
+    repair: "State that physical bring-up and hardware testing remain external to Browser Check.",
   },
   {
     label: "Behavior Plan/source separation",
@@ -422,8 +463,36 @@ if (forbiddenPreviewStatuses.length > 0) {
   fail("preview-claims", `Active preview code emits compiler/hardware success status (${[...new Set(forbiddenPreviewStatuses)].join(", ")}). Use preview statuses such as ready, playing, paused, partial, or blocked; code lifecycle remains external.`);
 }
 
-if (/preflight\s+balanced_braces|balanced[_ -]?braces\s*:\s*true/i.test(activeApplicationSource)) {
-  fail("honesty-copy", "Active product copy advertises a source preflight/balanced-braces result. Editable source is not parsed or checked in the compiler-free workflow.");
+const browserCheckFile = resolve(repoRoot, "frontend/src/application/firmwareCommands.ts");
+const browserCheckSource = existsSync(browserCheckFile) ? read(browserCheckFile) : "";
+if (!browserCheckSource) {
+  fail("browser-check-source", "frontend/src/application/firmwareCommands.ts is missing. Browser Check must exist in source, not only in generated dist output.");
+} else {
+  if (!/bounded[^\n]{0,100}(?:Browser Check|Arduino\/C\+\+ subset)|Browser Check[^\n]{0,100}bounded/i.test(browserCheckSource)) {
+    fail("browser-check-honesty", "Browser Check source must describe itself as bounded rather than as full compilation or hardware simulation.");
+  }
+  if (!/sourceCodeCompiled\s*:\s*false/.test(browserCheckSource) || !/physicalHardwareVerified\s*:\s*false/.test(browserCheckSource)) {
+    fail("browser-check-honesty", "Browser Check must keep compile and physical-hardware success claims explicitly false.");
+  }
+  if (/sourceCodeCompiled\s*:\s*true|physicalHardwareVerified\s*:\s*true|uploadedToHardware\s*:\s*true/.test(browserCheckSource)) {
+    fail("browser-check-honesty", "Browser Check contains a forbidden compile/upload/physical success claim.");
+  }
+}
+
+const requiredSourceOfTruthFiles = [
+  "packages/behavior/src/profiles/calculator-engine.ts",
+  "packages/behavior/src/profiles/membrane-keypad.ts",
+  "frontend/src/application/firmwareCommands.ts",
+  "frontend/src/application/agentBuildArtifacts.ts",
+  "frontend/src/webmcp/designTools.ts",
+  "packages/behavior/tests/calculator-workflow.test.ts",
+  "frontend/src/__tests__/calculator-agent-journey.test.ts",
+  "frontend/src/__tests__/firmware-commands.test.ts",
+];
+for (const relativePath of requiredSourceOfTruthFiles) {
+  if (!existsSync(resolve(repoRoot, relativePath))) {
+    fail("source-of-truth", `${relativePath} is missing. Do not ship a feature that exists only in dist/build output.`);
+  }
 }
 
 // ---------------------------------------------------------------------------

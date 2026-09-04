@@ -17,7 +17,7 @@ import type { HardwareProject } from "@schematic/hardware-graph";
 import { getCatalogComponent } from "../data/catalog.ts";
 import { isBoardDefinition, resolveFirmwareBinding } from "../data/hardware.ts";
 import { useBehaviorPreviewStore, registerBehaviorPreviewAdapter, PREVIEW_DISCLAIMER } from "../behavior/useBehaviorPreviewStore.ts";
-import { useProjectStore, type HardwareGraph } from "../store/useProjectStore.ts";
+import { GENERATED_STARTER_BEHAVIOR_PLAN_ID, useProjectStore, type HardwareGraph } from "../store/useProjectStore.ts";
 import {
   flushProjectPersistence,
   getProjectPersistenceContext,
@@ -57,7 +57,8 @@ const NO_SOURCE_CLAIM: PreviewClaims = {
   physicalBehaviorVerified: false,
 };
 
-const CODE_NOTICE = "Editable source handoff for external board testing. Behavior Preview follows the Behavior Plan; compile, upload, and physical bring-up happen on connected hardware.";
+const CODE_NOTICE = "Editable source for external testing and Schematic's bounded Browser Check. Behavior Preview follows the Behavior Plan; compilation, upload, electrical validation, and physical bring-up remain external.";
+export const AGENT_STARTER_SOURCE_MARKER = "Schematic agent-build starter source";
 
 export interface CommandError {
   code: string;
@@ -75,7 +76,7 @@ export interface CodeWriteRequest {
   files: readonly CodeFileRecord[];
   language: CodeLanguage;
   dependencies?: readonly CodeDependencyRecord[];
-  /** Required optimistic precondition: null creates only; an exact hash replaces. */
+  /** Required optimistic precondition: null creates, except the marked generated-starter replacement path; an exact hash replaces all real source. */
   expectedContentSha256: string | null;
   origin?: CodeDocumentRecord["origin"];
   boardFqbn?: string;
@@ -84,6 +85,8 @@ export interface CodeWriteRequest {
     planSha256: string;
     projectSha256: string;
   };
+  /** Internal WebMCP affordance: null may replace only Schematic's exact generated starter scaffold. */
+  replaceGeneratedStarter?: boolean;
 }
 
 export interface CodeExportResult {
@@ -626,6 +629,13 @@ function codeContentHash(files: readonly CodeFileRecord[]) {
   return sha256([...files].sort((left, right) => left.name.localeCompare(right.name)).map((file) => ({ name: file.name, content: file.content })));
 }
 
+export function isGeneratedAgentStarterDocument(document: Pick<CodeDocumentRecord, "origin" | "files"> | null | undefined) {
+  return Boolean(document
+    && document.origin === "ai-generated"
+    && document.files.length === 1
+    && document.files[0]?.content.startsWith(`// ${AGENT_STARTER_SOURCE_MARKER}\n`));
+}
+
 function reconciledCodeDocument(document: CodeDocumentRecord, project: HardwareGraph): CodeDocumentRecord {
   if (document.previewLink.status === "unlinked") return document;
   const link = document.previewLink;
@@ -710,17 +720,29 @@ export async function writeCode(request: CodeWriteRequest) {
   const nextSourceBytes = files.data.reduce((total, file) => total + new TextEncoder().encode(file.content).byteLength, 0);
   if (otherSourceBytes + nextSourceBytes > MAX_PROJECT_SOURCE_BYTES) return failure("PROJECT_SOURCE_LIMIT_EXCEEDED", "A project may contain at most 512 KiB of editable source across all board documents.");
   const currentHash = existing?.contentSha256 ?? null;
-  if (currentHash !== request.expectedContentSha256) {
-    const sourceDeleted = existing === undefined && request.expectedContentSha256 !== null;
+  const replacingGeneratedStarter = request.replaceGeneratedStarter === true
+    && request.expectedContentSha256 === null
+    && isGeneratedAgentStarterDocument(existing);
+  const effectiveExpectedContentSha256 = replacingGeneratedStarter ? currentHash : request.expectedContentSha256;
+  if (currentHash !== effectiveExpectedContentSha256) {
+    const sourceDeleted = existing === undefined && effectiveExpectedContentSha256 !== null;
     return failure(
       "SOURCE_CONFLICT",
       sourceDeleted ? `Code for ${id} was deleted since the caller last read it.` : `Code for ${id} changed since the caller last read it.`,
       true,
-      { targetComponentId: id, expectedContentSha256: request.expectedContentSha256, currentContentSha256: currentHash, current: existing, sourceDeleted },
+      { targetComponentId: id, expectedContentSha256: request.expectedContentSha256, effectiveExpectedContentSha256, currentContentSha256: currentHash, current: existing, sourceDeleted },
     );
   }
-  const link = sourceLink(request, project);
-  if (request.linkToBehaviorPlan && !link) return failure("PLAN_LINK_INVALID", "The requested code/Behavior Plan link does not match the current exact plan and project hashes.", false, { targetComponentId: id });
+  const selectedPlan = state.getBehaviorPlan();
+  const autoPlanLink = replacingGeneratedStarter
+    && request.linkToBehaviorPlan === undefined
+    && selectedPlan
+    && selectedPlan.id !== GENERATED_STARTER_BEHAVIOR_PLAN_ID
+      ? { planId: selectedPlan.id, planSha256: planHash(selectedPlan), projectSha256: currentProjectHash(project) }
+      : undefined;
+  const effectiveLinkRequest: CodeWriteRequest = autoPlanLink ? { ...request, linkToBehaviorPlan: autoPlanLink } : request;
+  const link = sourceLink(effectiveLinkRequest, project);
+  if (effectiveLinkRequest.linkToBehaviorPlan && !link) return failure("PLAN_LINK_INVALID", "The requested code/Behavior Plan link does not match the current exact plan and project hashes.", false, { targetComponentId: id });
   const linked = link && link.status === "linked" ? { ...link, linkedContentSha256: contentSha256 } : link;
   const language = request.language ?? "arduino";
   const boardFqbn = request.boardFqbn ?? binding.targetConfig?.fqbn ?? binding.target?.boardFqbn;
@@ -735,7 +757,7 @@ export async function writeCode(request: CodeWriteRequest) {
       files: files.data,
       language,
       ...(dependencies.data !== undefined ? { dependencies: dependencies.data } : {}),
-      expectedContentSha256: request.expectedContentSha256,
+      expectedContentSha256: effectiveExpectedContentSha256,
       contentSha256,
       origin: request.origin ?? existing?.origin ?? "ai-generated",
       ...(linked ? { linkToBehaviorPlan: linked } : {}),
@@ -762,6 +784,8 @@ export async function writeCode(request: CodeWriteRequest) {
   return success({
     document: written.document,
     replaced: written.replaced,
+    replacedGeneratedStarter: replacingGeneratedStarter,
+    autoLinkedBehaviorPlanId: autoPlanLink?.planId ?? null,
     notice: CODE_NOTICE,
     ...durable,
     claims: { sourceCodeRead: false, sourceCodeExecuted: false, sourceCodeCompiled: false, hardwareUploaded: false, physicallyTestedBySchematic: false },

@@ -1,171 +1,151 @@
-# Judge demo — Behavior Preview plus editable code
+# Judge demo: agent-built interactive calculator
 
 Target: the published ChatGPT Site at
 [schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site)
 
-This is a three-minute demo of the product's actual boundary. The model uses
-WebMCP to build a graph, declare a Behavior Plan, preview typed outcomes, and
-write ordinary source into Code. The preview is not firmware execution, and
-the source is not compiled or run by Schematic.
+This demo proves one focused story: a ChatGPT agent can move from intent to a visible, editable hardware design, demonstrate its declared behavior, repair it with the same shared workspace history, and prepare source without pretending that browser checks equal physical hardware verification.
 
-Use the native WebMCP surface in the ChatGPT in-app browser. A local
-`window.__schematicTools` bridge is useful for tests but is not native-host
-evidence.
+Use the native WebMCP surface in the ChatGPT in-app browser. A local compatibility bridge is useful for tests but is not native-host evidence.
 
-## 0:00–0:20 — Discover the contract
+## 0:00–0:20: show the agent-native surface
 
-Ask the agent:
+Ask the agent to inspect the current Schematic tool surface.
 
-> Inspect the Schematic WebMCP surface. Report the count, the five behavior
-> tools, the three code tools, and whether any compiler or legacy runtime tools
-> are registered.
+Expected evidence:
 
-Expected result:
+- native discovery exposes exactly **56 tools**;
+- `workspace.get_tool_surface` returns a smaller state-aware recommendation set;
+- the full registry includes proposal/preview/apply/discard, undo/redo, calculator key interaction, project verification, Browser Check, and the primitive graph tools;
+- no `firmware.compile` or `simulation.*` tool is registered.
 
-- exactly 45 tools;
-- `behavior.get_capabilities`, `behavior.plan.write`, `behavior.preview`,
-  `behavior.invoke`, and `behavior.get_state`;
-- `code.write`, `code.read`, and `code.export`;
-- `firmware.write`/`firmware.read` only as source compatibility aliases; and
-- no `firmware.compile` or `simulation.*` registration.
+The point is not the raw tool count. The point is that the model can use a small relevant surface while the complete semantic hardware API remains available.
 
-The UI should show the WebMCP count and the activity panel. Native discovery
-must be confirmed by the host, not inferred from a compatibility shim.
+## 0:20–0:45: propose before mutating
 
-## 0:20–0:55 — Build a small graph
+Start from an empty project and ask:
 
-Use tools, not visual clicking, for the agent workflow:
+> Build me a basic calculator with an Arduino, keypad, and LCD. Show me the design before changing my project.
 
-1. Call `component.search` for an ESP32 or other board, `pushbutton`, and `led`.
-2. Call `component.add` for one board, button, and LED. Keep the returned
-   instance IDs; do not invent IDs.
-3. Call `component.list_ports` for each instance.
-4. Call `connection.connect` with the exact returned endpoint IDs. If the graph
-   rejects a connection, show the structured repair diagnostic instead of
-   claiming that the wire exists.
-5. Call `validation.check` and leave graph diagnostics visible.
+The agent should call `design.propose`, then `design.preview`.
 
-The graph proves catalog identity, typed topology, and validation results. It
-does not prove electrical safety or that a physical board will work.
+Show that the preview contains:
 
-## 0:55–1:35 — Declare and preview the outcome
+- one Arduino Uno;
+- one membrane keypad;
+- one I2C LCD;
+- the reviewed typed wiring plan; and
+- validation diagnostics.
 
-Call `behavior.get_capabilities` and use the exact profile IDs, definition IDs,
-event IDs, and action IDs it returns. For instance IDs represented here as
-`<button-instance>`, `<led-instance>`, and `<definition-id>`, write this
-data-only plan:
+Nothing on the active canvas should change yet.
 
-```json
-{
-  "schemaVersion": 1,
-  "id": "button-led-preview",
-  "projectId": "<active-project-id>",
-  "name": "Button turns LED on",
-  "intent": "Show the requested button-to-indicator outcome",
-  "revision": 0,
-  "rules": [
-    {
-      "id": "on-press",
-      "enabled": true,
-      "when": {
-        "type": "component.event",
-        "componentId": "<button-instance>",
-        "definitionId": "<button-definition-id>",
-        "eventId": "button.pressed",
-        "payload": { "pressed": true }
-      },
-      "then": [
-        {
-          "componentId": "<led-instance>",
-          "definitionId": "<led-definition-id>",
-          "actionId": "indicator.set",
-          "payload": { "kind": "literal", "value": { "on": true } }
-        }
-      ]
-    }
-  ]
-}
+Optionally demonstrate the safety boundary by trying `design.apply` with the wrong confirmation ID. It must reject the mutation. Then approve the exact proposal ID.
+
+## 0:45–1:10: apply the complete hardware design
+
+Call `design.apply` with the exact `proposalId`.
+
+Expected active project:
+
+- **3 components**;
+- **12 typed connections**;
+- saved Behavior Plan `calculator-interaction-v1`;
+- generated starter source for the programmable board, clearly marked as scaffold rather than finished firmware; and
+- Browser Check/preflight evidence for that scaffold without compilation or physical-hardware claims.
+
+Briefly show the canvas. The design should be visually inspectable and editable by the human immediately after the agent creates it.
+
+## 1:10–1:45: make the calculator actually respond
+
+Call `behavior.preview` for `calculator-interaction-v1`.
+
+Then call `behavior.press_key` four times:
+
+```text
+7
++
+5
+=
 ```
 
-Call `behavior.plan.write`, then `behavior.preview` with the returned plan ID.
-Call `behavior.invoke` with:
+Expected visible result:
 
-```json
-{
-  "componentId": "<button-instance>",
-  "definitionId": "<button-definition-id>",
-  "eventId": "button.pressed",
-  "payload": { "pressed": true }
-}
+- membrane keypad projection records the typed keys;
+- the deterministic keypad calculator reducer computes the result;
+- `keypad.displayChanged` is emitted as a typed component event;
+- the saved Behavior Plan routes that event payload into `display.showText`; and
+- the LCD projection displays **12**.
+
+Call `behavior.get_state` if useful and show the accepted `keypad.keyPressed` / `keypad.displayChanged` evidence plus the final LCD/keypad projections.
+
+Explain the boundary precisely: this is genuine in-app typed behavior through Schematic's Behavior System. It is not a fake scripted LCD text replacement. It also does not prove that real physical hardware is wired correctly or that target firmware compiles.
+
+## 1:45–2:10: show shared repair with undo/redo
+
+Disconnect one existing wire using its exact connection ID.
+
+Show the graph now has 11 connections. Then call `design.undo` and confirm the exact prior 12-connection project is restored. Call `design.redo` to reapply the break, then `design.undo` once more to restore the working design.
+
+This demonstrates that agent edits participate in an explicit shared design history rather than becoming irreversible hidden mutations.
+
+## 2:10–2:30: show compact state and verification
+
+Call `workspace.get_state` and `workspace.get_tool_surface`.
+
+The default state response should remain compact. Detailed history belongs in `workspace.get_activity` or specialist tools rather than a giant every-detail state dump.
+
+Call `design.verify` or `project.verify`.
+
+Expected truth before authored firmware replaces the scaffold:
+
+- graph validation is reported explicitly;
+- calculator behavior is ready/interactable;
+- source is identified as generated starter source, not completed project firmware;
+- Browser Check/preflight status is separate;
+- compilation is `not-performed`; and
+- physical hardware is `not-verified`.
+
+## 2:30–2:50: replace the scaffold and run Browser Check
+
+Write project-specific Arduino source through `code.write`. `expectedContentSha256: null` may replace only Schematic's exact marked generated starter scaffold. Any real existing source requires its exact current hash.
+
+Then call `firmware.check`.
+
+Browser Check may execute its documented bounded Arduino/C/C++ subset in the browser. Show the returned source hash, outputs/events/serial data if applicable, unsupported constructs or warnings, and the explicit claims:
+
+```text
+sourceCodeCompiled = false
+electricalBehaviorSimulated = false
+uploadedToHardware = false
+physicalHardwareVerified = false
 ```
 
-Call `behavior.get_state` and show the LED indicator projection, timeline, and
-snapshot hash. The expected explanation is:
+If the code uses an unsupported construct, the correct outcome is partial/unavailable with diagnostics, not guessed success.
 
-> Scripted preview: the declared typed action changed the visual LED state. No
-> source code ran; wiring, electrical behavior, and hardware were not verified.
+## 2:50–3:00: close on the product story
 
-The same pattern can show `display.showText`, `buzzer.start`, `relay.set`,
-`servo.setAngle`, `motor.setSpeed`, or `sensor.setReading` when the selected
-catalog component has that exact profile. An unsupported action must fail
-explicitly without changing visual state.
+Summarize what the judge just saw:
 
-## 1:35–2:20 — Put normal code in the side panel
+- The user kept the same ChatGPT context and moved directly into a shared hardware workspace.
+- The agent proposed before mutating, then built exact semantic hardware rather than clicking pixels.
+- The finished in-app calculator was interactively testable through typed keypad and LCD behavior.
+- Human and agent shared the same editable graph and undo/redo history.
+- The model received a small state-aware tool surface instead of needing to reason over every tool at once.
+- Source was editable and browser-checkable without misleading compiler or physical-hardware claims.
 
-Call `code.write` for the selected board. The content can be an ordinary
-multi-file Arduino/C++/Python response; it does not need to be reduced to the
-preview vocabulary:
+Do not claim that a real Arduino was flashed, that the browser performed target compilation, that electrical behavior was simulated, or that physical wiring was verified. Those remain external acceptance steps.
 
-```json
-{
-  "targetComponentId": "<board-instance>",
-  "language": "arduino",
-  "files": [
-    {
-      "name": "sketch.ino",
-      "content": "void setup() {}\nvoid loop() {}\n"
-    }
-  ],
-  "origin": "ai-generated"
-}
-```
+## Live acceptance before recording the demo
 
-Show the Code panel opening the editable document. Call `code.read` to show
-the revision, `contentSha256`, origin, preview-link status, and
-`inAppVerification: "not-performed"`. Edit the file manually, save it, and
-show that the source hash changes while the Behavior Preview snapshot remains
-plan-driven. A linked plan/code pair becomes `stale` after either side changes;
-the source is never silently overwritten.
+Before using this script for judges, verify the published revision in the ChatGPT in-app browser:
 
-## 2:20–2:45 — Export the external handoff
+1. Native tool discovery is 56.
+2. Proposal preview does not mutate.
+3. Exact approval applies 3 components and 12 connections.
+4. `7 + 5 =` visibly produces `12` through the Behavior Preview path.
+5. Undo/redo restores the graph correctly.
+6. Default workspace state is compact and the state-aware tool surface is useful.
+7. Browser Check behaves honestly for supported and unsupported source.
+8. `/api/compile` and `/api/simulation/*` remain retired.
+9. Auth, persistence, project isolation, and shopping provenance still pass their release checks.
 
-Call `code.export`. Show the JSON manifest containing:
-
-- project and behavior-relevant graph hashes;
-- target component, definition, and optional board FQBN;
-- source file contents and per-file SHA-256 values;
-- source hash, language, and declared dependencies;
-- preview-link provenance and graph diagnostics; and
-- explicit false claims for in-app build, execution, upload, and physical test.
-
-Say:
-
-> This is ready to carry to the user's external SDK, IDE, compiler, or board
-> workflow. Schematic has not built or tested it.
-
-## 2:45–3:00 — Close with limits
-
-Call `project.save` if needed, then summarize:
-
-- Behavior Plan is the source of truth for the visual outcome.
-- Code is an independently editable/exportable artifact.
-- Preview is deterministic typed projection, not source execution or electrical
-  simulation.
-- Plans and code persist in the verified user's local browser room; preview
-  sessions are ephemeral.
-- The product does not compile, upload, flash, or physically test in the Site.
-- `/api/compile` and `/api/simulation/*` are retired and must return 404 on the canonical ChatGPT Site route.
-
-Do not claim that a light turned on on real hardware, that generated firmware
-compiles, or that the graph is electrically correct. Those are external
-testing outcomes.
+If any of those fail on the published Site, do not substitute a local test or old deployment as evidence.

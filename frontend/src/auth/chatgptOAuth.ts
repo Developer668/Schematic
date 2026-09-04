@@ -72,7 +72,6 @@ export function consumeChatGPTOAuthReturn(): { returnTo: string; expectedState: 
   } catch {
     stored = null;
   }
-  const params = new URLSearchParams(window.location.search);
   return {
     returnTo: typeof stored?.returnTo === "string" && stored.returnTo.startsWith("/") ? stored.returnTo : "/studio",
     expectedState: typeof stored?.state === "string" ? stored.state : null,

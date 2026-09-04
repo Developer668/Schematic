@@ -474,7 +474,7 @@ describe("project migration and WebMCP surface", () => {
     expect(names.some((name) => name.startsWith("simulation."))).toBe(false);
     expect(names).not.toContain("firmware.compile");
 
-    const throughTool = await invokeWebMCPTool("behavior.get_state");
+    const throughTool = await invokeWebMCPTool("behavior.get_state", { detail: "full" });
     const direct = await getBehaviorState();
     expect(throughTool.isError).not.toBe(true);
     expect(throughTool.data).toMatchObject(direct.ok ? direct.data : {});

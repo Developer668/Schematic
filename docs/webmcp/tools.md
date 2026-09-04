@@ -1,269 +1,186 @@
 # Schematic WebMCP tools
 
-Status: current default registry (repository checked 2026-08-31)
+Status: current default registry (repository reconciled 2026-09-03)
 
-The single default registry is
-[`frontend/src/webmcp/tools.ts`](../../frontend/src/webmcp/tools.ts). It spreads
-the eight definitions in
-[`frontend/src/webmcp/behaviorTools.ts`](../../frontend/src/webmcp/behaviorTools.ts)
-and exports `WEBMCP_TOOL_COUNT = tools.length`. The current registry contains
-exactly **45 tools**:
+The default registry is assembled by [`frontend/src/webmcp/tools.ts`](../../frontend/src/webmcp/tools.ts), which spreads the shared Behavior/Code tools from [`frontend/src/webmcp/behaviorTools.ts`](../../frontend/src/webmcp/behaviorTools.ts) and the reviewed collaboration tools from [`frontend/src/webmcp/designTools.ts`](../../frontend/src/webmcp/designTools.ts).
+
+`WEBMCP_TOOL_COUNT = tools.length` is the source of truth. The current registry contains exactly **56 tools**:
 
 ```text
-10 project + 3 workspace + 5 component + 3 connection + 3 firmware
-+ 5 behavior + 3 code + 2 validation + 10 shopping + 1 design = 45
+11 project + 5 workspace + 5 component + 3 connection + 3 firmware
++ 6 behavior + 3 code + 2 validation + 10 shopping + 8 design = 56
 ```
 
-The browser attempts native registration through the host's
-`document.modelContext`/`navigator.modelContext`. The ChatGPT in-app browser
-is the acceptance host. `window.__schematicTools` and local producer shims are
-test/compatibility bridges, not proof of native discovery.
+The browser attempts native registration through `document.modelContext` with a compatibility fallback for older host surfaces. The ChatGPT in-app browser is the acceptance host. `window.__schematicTools` and `navigator.modelContextTesting` are local/test compatibility surfaces and are not proof of native discovery.
 
-There is no `firmware.compile` registration and no `simulation.*` registration.
-The corresponding canonical ChatGPT Site API paths (`/api/compile` and
-`/api/simulation/*`) are retired and must return 404 there. Repository-root
-compatibility handlers are excluded from the Site package. `firmware.write` and `firmware.read` remain thin
-source-authoring aliases; `firmware.check` only reports editable-document
-metadata with `not-performed` status and is not a build check.
+There is no `firmware.compile` registration and no `simulation.*` registration. The canonical ChatGPT Site must keep `/api/compile` and `/api/simulation/*` retired. `firmware.write` and `firmware.read` are compatibility aliases for editable code documents. `firmware.check` is the separate bounded Browser Check: it can execute the documented Arduino/C/C++ subset and static preflight in the browser, but it is not compilation, electrical simulation, upload, or physical verification.
 
-## Notation and common result contract
+## Result and trust contract
 
-- `RO`: the source annotation includes `readOnlyHint: true`.
-- `M`: the tool may mutate browser-local project/workspace state.
-- `U`: the source annotation includes `untrustedContentHint: true`; this is
-  used for shopping data supplied by providers or agents.
-
-The eight Behavior/Code tools return a JSON text block plus `data` on success.
-Failures return `isError: true`, an `error` object with stable `code`, human
-message, and `retryable`, and optional structured details. Other tools use the
-same WebMCP/MCP-shaped `{content, data?, isError?}` envelope where applicable.
-Unexpected callback failures are recorded in the WebMCP activity store and
-re-raised to the host.
-
-Every behavior result states that preview is a typed, scripted visual outcome;
-it is not source execution, compilation, electrical simulation, upload, or a
-physical test. Code results state `inAppVerification: "not-performed"`.
+- `RO`: read-only tool, declared with `readOnlyHint: true`.
+- `M`: may mutate browser-local project/workspace state.
+- `U`: handles untrusted provider/agent content using `untrustedContentHint: true`.
+- Behavior Preview is driven only by typed Behavior Plans and checked-in profiles. It never reads or executes board source.
+- Browser Check is separate from Behavior Preview and reports explicit execution, compilation, simulation, upload, and physical-hardware claims.
+- Generated starter Behavior Plans and marked starter firmware are scaffolds. They do not count as completed project-specific behavior or firmware.
+- Destructive graph/project operations require exact confirmation IDs where documented.
+- Code writes use exact-hash optimistic concurrency. `expectedContentSha256: null` creates source and may replace only Schematic's marked generated starter scaffold. Authored source requires its exact current hash.
 
 ## Inventory
 
-All inputs are JSON objects. Optional properties are marked `?`.
+### Project, 11
 
-### Project (10)
+| Tool | Mode | Purpose |
+| --- | :---: | --- |
+| `project.get_graph` | RO | Read the active hardware graph and bounded source metadata. Source contents are excluded; use `code.read`. |
+| `project.verify` | RO | Return the unified readiness report for graph, Behavior Plan, editable source, Browser Check, preflight, compilation boundary, and physical-hardware boundary. |
+| `project.list` | RO | List browser-local projects and the active project. |
+| `project.create` | M | Create and activate a new empty project. |
+| `project.switch` | M | Switch the active project. |
+| `project.duplicate` | M | Duplicate a saved project and activate the copy. |
+| `project.delete` | M | Delete a project after exact-ID confirmation; the final project is protected. |
+| `project.save` | M | Flush the current browser-local project collection. |
+| `project.clear` | M | Clear the active project after exact-ID confirmation. |
+| `project.rename` | M | Rename the active project. |
+| `project.apply_blueprint` | M | Create a project from a reviewed blueprint, or replace the active project only with explicit confirmation. |
 
-| # | Tool | Input | Mode | Purpose |
-| ---: | --- | --- | :---: | --- |
-| 1 | `project.get_graph` | `{}` | RO | Read the active graph plus bounded code/firmware metadata. Source contents, compiled artifacts, retired simulation config, and quarantined legacy data are excluded; use `code.read` for source. |
-| 2 | `project.list` | `{}` | RO | List browser-local projects and the active project summary. |
-| 3 | `project.create` | `{name?: string}` | M | Create and activate an empty project. |
-| 4 | `project.switch` | `{projectId: string}` | M | Activate one saved project; unknown IDs fail. |
-| 5 | `project.duplicate` | `{projectId?: string, name?: string}` | M | Duplicate a saved project and activate the copy. |
-| 6 | `project.delete` | `{projectId: string, confirmProjectId: string}` | M | Delete a project after the confirmation id exactly matches the target; the final remaining project is protected. |
-| 7 | `project.save` | `{}` | M | Flush the browser-local project collection and notify same-origin tabs. |
-| 8 | `project.clear` | `{projectId: string, confirmProjectId: string}` | M | Clear the active project after both ids exactly match it; removes components, connections, and firmware. |
-| 9 | `project.rename` | `{name: string}` | M | Rename the active project with unique-name handling. |
-| 10 | `project.apply_blueprint` | `{blueprintId: "meta-glasses", replace?: boolean, confirmProjectId?: string}` | M | Create a new project by default; replacement requires `replace:true` plus the exact active project id. |
+### Workspace, 5
 
-### Workspace (3)
+| Tool | Mode | Purpose |
+| --- | :---: | --- |
+| `workspace.get_state` | RO | Return a compact state summary designed to stay small enough for agent use. |
+| `workspace.get_activity` | RO | Read bounded paginated WebMCP activity. |
+| `workspace.get_tool_surface` | RO | Return the small state-aware shortlist of tools relevant to the current project stage. |
+| `workspace.set_panel` | M | Open a bottom workspace panel. |
+| `workspace.set_right_width` | M | Resize the right inspector/code panel. |
 
-| # | Tool | Input | Mode | Purpose |
-| ---: | --- | --- | :---: | --- |
-| 11 | `workspace.get_state` | `{}` | RO | Read active project, selection, panel state, activity, validation, and Behavior Preview summary. |
-| 12 | `workspace.set_panel` | `{panel: "webmcp" \| "terminal" \| "debug" \| "validation"}` | M | Select the bottom panel. `debug` is the Behavior Preview panel. |
-| 13 | `workspace.set_right_width` | `{width: number}` (`300–720`) | M | Set the right inspector/Code panel width. |
+### Components, 5
 
-### Components (5)
+| Tool | Mode | Purpose |
+| --- | :---: | --- |
+| `component.search` | RO | Search the canonical component catalog and return exact preview binding metadata. |
+| `component.inspect` | RO | Inspect one catalog definition, ports, metadata, and Behavior binding. |
+| `component.add` | M | Add a component, keep generated fallback artifacts synchronized, and record an undoable design mutation. |
+| `component.remove` | M | Remove a component after exact-ID confirmation and refresh dependent generated artifacts. |
+| `component.list_ports` | RO | List exact ports for an instance or catalog definition. |
 
-| # | Tool | Input | Mode | Purpose |
-| ---: | --- | --- | :---: | --- |
-| 14 | `component.search` | `{query?: string, category?: "board" | "sensor" | "actuator" | "display" | "power" | "logic" | "communication" | "mechanical" | "rf" | "custom" | "analog" | "passive" | "", domain?: "power" | "power_output" | "ground" | "gpio" | "adc" | "pwm" | "i2c" | "spi" | "uart" | "usb" | "ethernet" | "can" | "pcie" | "csi" | "hdmi" | "displayport" | "rf" | "mechanical" | "optical" | ""}` | RO | Search the canonical catalog and return typed-preview binding metadata (`preview.mapped`, profile id/version, and optional variant). |
-| 15 | `component.inspect` | `{componentId: string}` | RO | Read one catalog definition, ports, electrical data, and metadata. |
-| 16 | `component.add` | `{componentId: string, x?: number, y?: number}` | M | Add a catalog component. Omit both coordinates for collision-aware placement. |
-| 17 | `component.remove` | `{instanceId: string, confirmInstanceId: string}` | M | Remove an instance after the confirmation id exactly matches; attached connections and source targets are removed too. |
-| 18 | `component.list_ports` | `{componentId?: string, instanceId?: string}` | RO | List ports for an instance or catalog definition. At least one ID is required. |
+### Connections, 3
 
-### Connections (3)
+| Tool | Mode | Purpose |
+| --- | :---: | --- |
+| `connection.connect` | M | Connect two exact component ports with typed validation and structured repair errors. |
+| `connection.disconnect` | M | Remove a connection after exact-ID confirmation. |
+| `connection.get_connections` | RO | Read all current connections. |
 
-| # | Tool | Input | Mode | Purpose |
-| ---: | --- | --- | :---: | --- |
-| 19 | `connection.connect` | Either `{sourceComponentId, sourcePortId, targetComponentId, targetPortId}` or `{source: {componentId\|instanceId, portId}, target: {componentId\|instanceId, portId}}` | M | Add a typed connection after endpoint, self-wire, duplicate, and domain checks. |
-| 20 | `connection.disconnect` | `{connectionId: string, confirmConnectionId: string}` | M | Remove one existing connection after the confirmation id exactly matches. |
-| 21 | `connection.get_connections` | `{}` | RO | Read all active project connections. |
+### Firmware compatibility / Browser Check, 3
 
-### Compatibility source tools (3)
+| Tool | Mode | Purpose |
+| --- | :---: | --- |
+| `firmware.write` | M | Compatibility alias for `code.write`. |
+| `firmware.read` | RO | Compatibility alias for `code.read`. |
+| `firmware.check` | RO | Run bounded Browser Check for one programmable board. It may execute the supported Arduino/C/C++ subset and reports unsupported constructs explicitly. It never claims compilation, electrical simulation, upload, or physical verification. |
 
-These names exist only to ease migration of clients that already call firmware
-operations. They write/read editable documents and never build or execute them.
+### Behavior, 6
 
-| # | Tool | Input | Mode | Purpose |
-| ---: | --- | --- | :---: | --- |
-| 22 | `firmware.write` | `{componentId: string, files: File[], language?: CodeLanguage, boardFqbn?: string, expectedContentSha256: string \| null}` | M | Alias for `code.write`; saves ordinary source with mandatory optimistic concurrency. `null` is create-only; an exact prior hash replaces. |
-| 23 | `firmware.read` | `{componentId: string}` | RO | Alias for `code.read`; returns source and metadata. |
-| 24 | `firmware.check` | `{componentId: string}` | RO | Reports document metadata and `not-performed`; no source check is run. |
+| Tool | Mode | Purpose |
+| --- | :---: | --- |
+| `behavior.get_capabilities` | RO | Read exact typed actions/events declared by checked-in behavior profiles for current component instances. |
+| `behavior.plan.write` | M | Validate and persist a versioned Behavior Plan using revision preconditions. |
+| `behavior.preview` | M | Prepare and open a deterministic typed Behavior Preview session. Source code is not read or executed. |
+| `behavior.invoke` | M | Dispatch one validated event, input, or typed action into the active preview session. |
+| `behavior.press_key` | M | Press one calculator key on a membrane-keypad instance through the exact `keypad.press` action. |
+| `behavior.get_state` | RO | Read compact or full Behavior Preview state with bounded log/event pagination. |
 
-`CodeLanguage` is `arduino | micropython | espidf | c | cpp | python`.
-`File` is `{name: string, content: string}`.
+### Code, 3
 
-### Behavior (5)
+| Tool | Mode | Purpose |
+| --- | :---: | --- |
+| `code.write` | M | Create or replace editable multi-file board source with exact-hash concurrency and safe generated-starter replacement. |
+| `code.read` | RO | Read editable source, hashes, revision, origin, and Behavior Plan link state. |
+| `code.export` | M | Record and return an external source handoff manifest with hashes and graph diagnostics. |
 
-Behavior Plans are data-only JSON. The command layer validates each request
-against the active graph, exact catalog definition, profile version, action or
-event descriptor, payload schema, and current project hash.
+Supported code-language metadata is `arduino | micropython | espidf | c | cpp | python`. Browser Check execution is currently limited to its documented Arduino/C/C++ subset; other languages remain editable/exportable and are reported as unavailable for Browser Check execution.
 
-| # | Tool | Input | Mode | Purpose |
-| ---: | --- | --- | :---: | --- |
-| 25 | `behavior.get_capabilities` | `{}` | RO | Return exact typed actions/events, profile bindings, availability, and limitations for every component. |
-| 26 | `behavior.plan.write` | `{plan: BehaviorPlanV1, expectedRevision: integer \| null}` | M | Validate and persist a plan with a mandatory precondition. `null` is create-only; the exact current revision replaces; omission or a stale revision is rejected without overwriting. |
-| 27 | `behavior.preview` | `{planId?: string, onUnsupported?: "block" \| "skip", durationMs?: integer}` | M | Prepare the saved plan and open a bounded, deterministic ephemeral session. |
-| 28 | `behavior.invoke` | `{componentId: string, definitionId: string, eventId?: string, inputId?: string, value?: JsonValue, actionId?: string, payload?: JsonValue}` | M | Dispatch exactly one typed event, input change, or action to the active session. |
-| 29 | `behavior.get_state` | `{}` | RO | Read preview status, snapshot, logical time, plan/project/registry hashes, diagnostics, timeline, and claims. |
+### Validation, 2
 
-`behavior.invoke` never mutates the durable plan and never calls arbitrary
-JavaScript. `behavior.preview` and `behavior.get_state` expose `sourceCodeExecution:
-"none"` and the false source/build/upload/physical-test claims.
+| Tool | Mode | Purpose |
+| --- | :---: | --- |
+| `validation.check` | RO | Run static graph-rule validation. This is not compilation or physical wiring verification. |
+| `validation.explain_error` | RO | Explain a known graph validation code with repair guidance. |
 
-### Code (3)
+### Shopping, 10
 
-| # | Tool | Input | Mode | Purpose |
-| ---: | --- | --- | :---: | --- |
-| 30 | `code.write` | `{targetComponentId: string, files: File[], language: CodeLanguage, dependencies?: Dependency[], expectedContentSha256: string \| null, origin?: Origin, boardFqbn?: string, linkToBehaviorPlan?: Link}` | M | Create or replace an editable multi-file document with mandatory exact-hash optimistic concurrency. `null` is create-only; an exact prior hash replaces. |
-| 31 | `code.read` | `{targetComponentId?: string, documentId?: string}` | RO | Read source, revision, content hash, origin, link status, export history, and honesty claims. |
-| 32 | `code.export` | `{targetComponentId?: string, documentId?: string}` | M | Record an export and return the external handoff manifest with file/project hashes and graph diagnostics. |
+Every shopping tool treats provider/retailer content as untrusted data. Public or Bright Data discovery candidates are sourcing evidence only and never become cart listings automatically.
 
-`Dependency` is `{ecosystem: "arduino-library" | "platformio" | "python-package" | "vendor-sdk" | "other", name: string, version?: string, sourceUrl?: string}`.
-`Origin` is `ai-generated | human-authored | imported | mixed`.
-`Link` is `{planId: string, planSha256: string, projectSha256: string}`.
+| Tool | Mode | Purpose |
+| --- | :---: | --- |
+| `shopping.search` | M,U | Run bounded discovery when listings are omitted, or publish trusted agent-reviewed canonical listings when strict publication data is supplied. |
+| `shopping.get_state` | RO,U | Read discovery, handoff, accepted results, cart, budget, and quote state. |
+| `shopping.cart_add` | M,U | Add an accepted exact-match result to the cart. |
+| `shopping.cart_remove` | M,U | Remove a cart line. |
+| `shopping.cart_set_quantity` | M,U | Set or clear a cart quantity. |
+| `shopping.cart_set_budget` | M,U | Set or clear the target USD budget. |
+| `shopping.cart_undo` | M,U | Undo the last cart change. |
+| `shopping.cart_reset` | M,U | Rebuild cart lines from required canonical catalog IDs that have accepted results. |
+| `shopping.choose_alternative` | M,U | Replace a cart result with an already-published compatible alternative. |
+| `shopping.quote` | RO,U | Calculate totals from accepted priced offers and report missing prices/budget overage. |
 
-Code is not preview input. Manual edits change `contentSha256`; plan or graph
-changes mark a linked document `stale`. Omitting `expectedContentSha256`, or
-providing `undefined`, is rejected. `null` is create-only; replacing an existing
-document requires the exact `contentSha256` returned by `code.read` or
-`firmware.read`. A wrong hash returns `SOURCE_CONFLICT` and preserves the
-existing document.
+Bright Data discovery may provide current shopping candidates when configured server-side. A candidate can omit an exact manufacturer part number if the provider did not establish one; Schematic must not infer the missing identity from the user's query. Exact canonical publication still requires reviewed identity, current direct HTTPS retailer data, and recent provenance.
 
-### Validation (2)
+### Design and collaboration, 8
 
-| # | Tool | Input | Mode | Purpose |
-| ---: | --- | --- | :---: | --- |
-| 33 | `validation.check` | `{}` | RO | Validate graph topology/electrical wiring and return issues. This is not source verification. |
-| 34 | `validation.explain_error` | `{code: string}` | RO | Return repair guidance for a known graph validation code. |
+| Tool | Mode | Purpose |
+| --- | :---: | --- |
+| `design.propose` | M | Stage a non-mutating reviewed goal-level proposal. The current reviewed template is the interactive calculator. |
+| `design.preview` | RO | Preview a staged proposal and graph diagnostics without mutating the active project. |
+| `design.apply` | M | Apply a proposal only after exact proposal-ID approval; the transaction rolls back on failure. |
+| `design.discard` | M | Discard a staged proposal without changing the project. |
+| `design.undo` | M | Restore the exact snapshot before the latest recorded agent design mutation. |
+| `design.redo` | M | Reapply the latest undone agent design mutation. |
+| `design.verify` | RO | Return a compact goal-level readiness summary, including calculator interactivity and honest external boundaries. |
+| `design.auto_layout` | M | Apply the shared collision-aware grid layout and record it as undoable. |
 
-### Shopping (10)
+## Reviewed calculator journey
 
-All shopping tools have `untrustedContentHint: true`. Provider/retailer text,
-URLs, prices, and part metadata are untrusted data, never instructions.
+The release demo for the goal-level design surface is:
 
-| # | Tool | Input | Mode | Purpose |
-| ---: | --- | --- | :---: | --- |
-| 35 | `shopping.search` | `{query?: string, quantity?: integer, listings?: Listing[], publication?: {provider: string, publishedAt: string}}` | M,U | Start bounded public discovery, or publish canonical listings only when a trusted agent supplies current listings and publication metadata. |
-| 36 | `shopping.get_state` | `{}` | RO,U | Read discovery, pending handoff, published results, cart, budget, and quote. |
-| 37 | `shopping.cart_add` | `{resultId: string, quantity?: number}` | M,U | Add an exact published result. |
-| 38 | `shopping.cart_remove` | `{resultId: string}` | M,U | Remove a cart line. |
-| 39 | `shopping.cart_set_quantity` | `{resultId: string, quantity: number}` | M,U | Set a cart quantity; zero removes it. |
-| 40 | `shopping.cart_set_budget` | `{budget: number \| null}` | M,U | Set or clear the USD target budget. |
-| 41 | `shopping.cart_undo` | `{}` | M,U | Undo the last cart change. |
-| 42 | `shopping.cart_reset` | `{requiredCatalogIds?: string[]}` | M,U | Reset cart from supplied or active-project catalog IDs. |
-| 43 | `shopping.choose_alternative` | `{resultId: string, catalogId: string}` | M,U | Replace a cart part with an already searched alternative. |
-| 44 | `shopping.quote` | `{}` | RO,U | Calculate live-offer total and report missing prices/budget overage. |
+1. Start with an empty project.
+2. `design.propose` a basic calculator.
+3. `design.preview` the staged Arduino Uno + membrane keypad + I2C LCD design.
+4. Approve using the exact `proposalId` in `design.apply`.
+5. Confirm three components and twelve typed wires are present.
+6. Start `behavior.preview` for `calculator-interaction-v1`.
+7. Call `behavior.press_key` for `7`, `+`, `5`, `=`.
+8. Confirm the LCD projection displays `12` and the keypad projection records `=`.
+9. Make a graph edit and demonstrate `design.undo` / `design.redo`.
+10. Read `workspace.get_tool_surface` and `design.verify`.
+11. Replace the marked starter source with project-specific firmware, run `firmware.check`, then verify again.
 
-Public discovery is not a verified listing and cannot enter the cart. A trusted
-agent's publication must match canonical catalog IDs, exact part numbers,
-current HTTPS offers, recent timestamps, and provider/auth metadata. There is
-no purchase, checkout, or silent retailer-navigation tool.
+The calculator's preview path is a real typed Behavior System flow: `keypad.press` updates deterministic keypad calculator state, emits `keypad.displayChanged`, and the saved Behavior Plan routes that value to `display.showText`. This demonstrates the declared in-app behavior. It still does not prove that physical hardware is wired correctly, that target firmware compiles, or that a real board produces the same outcome.
 
-### Design (1)
+## Hashes and persistence
 
-| # | Tool | Input | Mode | Purpose |
-| ---: | --- | --- | :---: | --- |
-| 45 | `design.auto_layout` | `{}` | M | Apply the shared collision-safe grid layout. |
+The Behavior/Code workflow uses canonical hashes including `planSha256`, `projectSha256`, `registrySha256`, `contentSha256`, `sessionLogSha256`, and `snapshotSha256` where applicable. Hashes identify exact data/revisions and support concurrency/auditability; they are not correctness or physical-hardware proofs.
 
-## Behavior Plan example
+Behavior Plans and code documents are durable project data. Preview sessions, reducers, timers, and snapshots are ephemeral and are recreated against the current graph.
 
-After adding components, use their returned instance IDs and exact definition
-IDs. A plan rule that turns an LED on when a button is pressed looks like:
-
-```json
-{
-  "schemaVersion": 1,
-  "id": "button-led-preview",
-  "projectId": "<active-project-id>",
-  "name": "Button turns LED on",
-  "revision": 0,
-  "rules": [
-    {
-      "id": "on-press",
-      "enabled": true,
-      "when": {
-        "type": "component.event",
-        "componentId": "<button-instance>",
-        "definitionId": "pushbutton",
-        "eventId": "button.pressed",
-        "payload": { "pressed": true }
-      },
-      "then": [
-        {
-          "componentId": "<led-instance>",
-          "definitionId": "led",
-          "actionId": "indicator.set",
-          "payload": { "kind": "literal", "value": { "on": true } }
-        }
-      ]
-    }
-  ]
-}
-```
-
-The preview demonstrates the declared outcome. It does not assert that the
-source file implements the rule or that the physical connection is correct.
-
-## Hashes, persistence, and limits
-
-The command layer and UI share these hashes:
-
-- `planSha256`: canonical Behavior Plan data;
-- `projectSha256`: behavior-relevant graph identity, components, and
-  connections; source files and timestamps are excluded;
-- `registrySha256`: exact checked-in profile registry;
-- `contentSha256`: normalized code filenames and contents;
-- per-file `sha256` values in exports; and
-- `sessionLogSha256`/`snapshotSha256`: deterministic preview history/state.
-
-Hashes identify content and support conflict/staleness checks. They are not
-compiler, electrical, or physical correctness proofs.
-
-Durable plans and code documents are stored in the browser-local verified-user
-project room. Preview sessions, timers, reducers, and snapshots are ephemeral.
-Current limits are 100 plans/project, 200 rules/plan, 20 actions/rule, 2,000
-cues/plan, 100 code documents/project, 128 files/document, 1 MiB/file, 512
-KiB/document, 512 KiB of editable source across one project, 256
-dependencies/document, 50 export-history records, 50 projects/workspace, 8 MiB
-of serialized workspace data, 600,000 ms logical preview duration, and a 10 MiB
-`.vlx` import. These limits are enforced before durable writes; oversized
-legacy data is not hydrated into the active project room.
-
-## Registration and acceptance checks
+## Release acceptance
 
 From the repository root:
 
 ```bash
-pnpm --filter @schematic/frontend typecheck
-pnpm --filter @schematic/frontend test -- --run
-pnpm run verify:behavior-preview
-npm --prefix chatgpt-site run verify
+pnpm run verify
 ```
 
-The release agent must verify the published Site in the ChatGPT in-app browser:
+Before publishing, the release agent must also confirm `git diff --check`, the intended Git revision, and the canonical Site project. After publishing, native acceptance in the ChatGPT in-app browser must verify:
 
-1. Native discovery reports 45 tools.
-2. All eight Behavior/Code tools appear and no `firmware.compile` or
-   `simulation.*` name appears.
-3. A button→LED plan previews and responds to `behavior.invoke`.
-4. `code.write/read/export` preserve ordinary editable source and return hashes.
-5. `/api/compile` and `/api/simulation/*` return 404 on the canonical Site route.
-6. Auth, local persistence, project switching, and shopping trust boundaries
-   behave as documented.
+1. Native discovery exposes exactly 56 tools.
+2. The state-aware tool surface works and the full registry contains no `firmware.compile` or `simulation.*` names.
+3. The reviewed calculator journey produces `12` through the live Behavior Preview path.
+4. `workspace.get_state` remains compact and detailed state is available through paginated specialist tools.
+5. Proposal approval/discard and shared design undo/redo behave correctly.
+6. `firmware.check` reports Browser Check execution honestly and keeps compilation, electrical simulation, upload, and physical verification false.
+7. `/api/compile` and `/api/simulation/*` remain retired on the canonical Site.
+8. Auth, browser-local persistence, project isolation, and shopping trust boundaries behave as documented.
 
-Local tests and compatibility bridges cannot establish publication status or
-native host support. The canonical Site is
-[schematic-hardware-workspace.decipherer71.chatgpt.site](https://schematic-hardware-workspace.decipherer71.chatgpt.site),
-bound to Sites project `appgprj_6a913ce4a58881918a47ea49fa0ca505`; the release
-agent must record which revision is actually live.
+Local tests and compatibility bridges do not prove that a revision is published or that the host discovered the native tools.

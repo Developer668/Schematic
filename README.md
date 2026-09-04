@@ -7,15 +7,16 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-f97316.svg)](LICENSE)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
-[![WebMCP](https://img.shields.io/badge/WebMCP-45_tools-8b5cf6.svg)](frontend/src/webmcp/tools.ts)
+[![WebMCP](https://img.shields.io/badge/WebMCP-56_tools-8b5cf6.svg)](frontend/src/webmcp/tools.ts)
 
 </div>
 
 Schematic helps a person or an agent assemble a typed hardware graph, describe
 the intended behavior, see that behavior in the canvas, and keep ordinary
-Arduino/C/C++/Python source in an editable Code panel. The source is an
-artifact for later use in an SDK, IDE, compiler, or physical hardware workflow;
-it is not the input to the browser preview.
+Arduino/C/C++/Python source in an editable Code panel. Behavior Preview remains
+plan-driven and never executes source. Separately, Browser Check can execute a
+bounded documented Arduino/C++ subset for fast feedback before the source is
+handed to a real SDK, compiler, uploader, or physical hardware workflow.
 
 ## Product boundary
 
@@ -32,22 +33,25 @@ user intent
     │                              v
     │                     deterministic visual preview
     │
-    └── code.write ----------> editable source files -> external handoff
+    └── code.write ----------> editable source files -> bounded Browser Check
+                                                   └-> external compiler/hardware handoff
 ```
 
-Preview applies checked-in, typed component actions to visual reducers. It can
-show an LED turning on, text appearing on a display, a relay changing state, a
-servo moving, a motor changing speed, or a sensor reading changing. It does
-not parse or execute the source shown in Code.
+Behavior Preview applies checked-in typed component actions to deterministic
+reducers. It can show an LED turning on, text appearing on a display, a relay
+changing state, a servo moving, a motor changing speed, or a calculator keypad
+driving an LCD. Behavior Preview does not parse or execute Code; Browser Check
+is a separate bounded source-execution/preflight surface.
 
 Every preview result carries the same honest boundary:
 
-> This scripted preview shows the requested outcome. No source code ran, and
-> wiring, electrical behavior, and physical hardware were not verified.
+> Behavior Preview is a plan-driven visual outcome. No source code ran in that
+> preview, and electrical behavior and physical hardware were not verified.
 
-Schematic currently does not compile, interpret, emulate, upload, flash, or
-physically test source. Those actions belong to the user's chosen external
-toolchain or connected-hardware workflow.
+Browser Check is intentionally narrower: it executes only its documented
+Arduino/C++ subset and fails closed on unsupported constructs. It is **not a
+compiler, MCU emulator, electrical simulator, uploader, or physical test**.
+Real compilation, upload, and hardware bring-up remain external.
 
 ## What is implemented
 
@@ -58,18 +62,19 @@ toolchain or connected-hardware workflow.
   catalog profile bindings, bounded payload schemas, deterministic reducers,
   visual projections, logical time, replayable session logs, diagnostics, and
   SHA-256 provenance hashes.
-- Profiles for buttons, LEDs/indicators, text displays, buzzers, relays,
-  servos, motors, and numeric sensors. A catalog item without an exact profile
-  remains explicitly unsupported rather than receiving guessed behavior.
+- Profiles for buttons, membrane keypads, deterministic calculator state,
+  LEDs/indicators, text displays, buzzers, relays, servos, motors, and numeric
+  sensors. A catalog item without an exact profile remains explicitly
+  unsupported rather than receiving guessed behavior.
 - A Code panel backed by durable multi-file documents. Code can be generated,
   edited, copied, downloaded, and exported without being treated as verified
   firmware.
-- Exactly 45 WebMCP tools in
-  [`frontend/src/webmcp/tools.ts`](frontend/src/webmcp/tools.ts): 5 behavior
-  tools and 3 code tools, plus graph, workspace, component, connection,
-  validation, shopping, layout, and `firmware.write`/`firmware.read`
-  compatibility aliases. `firmware.compile` and every `simulation.*` tool are
-  absent from the default registration.
+- Exactly **56 WebMCP tools** across the source registry: 11 project, 5
+  workspace, 5 component, 3 connection, 3 firmware, 6 behavior, 3 code, 2
+  validation, 10 shopping, and 8 design tools. The high-level design surface
+  adds propose → preview → approve/discard, shared undo/redo, goal-level verify,
+  and a state-aware shortlist while the primitive tools remain available.
+  `firmware.compile` and every `simulation.*` tool remain absent.
 - A same-origin Site API limited to health, catalog, import analysis, parts
   discovery, and identity helpers. The retired compile and simulation API paths
   are not canonical ChatGPT Site routes and return 404 there. Repository-root
@@ -93,8 +98,9 @@ project changes. It is never persisted as executable state.
 - a normalized file list and content SHA-256;
 - language, board/FQBN metadata, dependencies, origin, and revision;
 - mandatory optimistic exact-hash conflict protection (`expectedContentSha256:
-  null` is create-only; an exact hash returned by `code.read`/`firmware.read`
-  is required to replace an existing document; omitting it is rejected);
+  null` creates source and may replace only Schematic's exact marked generated
+  starter scaffold; every real existing document still requires the exact hash
+  returned by `code.read`/`firmware.read`; omission is rejected);
 - an optional link to a plan/project hash, marked `stale` when either side
   changes; and
 - export history plus `inAppVerification: "not-performed"`.
@@ -106,21 +112,23 @@ machine-readable false claims for build, execution, upload, and physical test.
 ## WebMCP surface
 
 The complete inventory and schemas are in
-[`docs/webmcp/tools.md`](docs/webmcp/tools.md). The important authoring loop is:
+[`docs/webmcp/tools.md`](docs/webmcp/tools.md). The reviewed calculator loop is:
 
-1. Build or inspect the graph with project/component/connection tools.
-2. Call `behavior.get_capabilities` to discover exact actions and events.
-3. Call `behavior.plan.write` with a data-only Behavior Plan.
-4. Call `behavior.preview`, then `behavior.invoke` for typed events/actions.
-5. Call `code.write` to place ordinary source in Code, or edit it manually.
-6. Call `code.read` and `code.export` when handing the project to an external
-   SDK, IDE, compiler, or hardware workflow.
+1. `design.propose` → `design.preview` → explicit `design.apply` approval.
+2. Schematic places Arduino + membrane keypad + I2C LCD and validates wiring.
+3. `behavior.preview` opens the saved calculator plan.
+4. `behavior.press_key` drives the real typed keypad reducer; `7`, `+`, `5`, `=`
+   makes the LCD projection show `12`, with inputs/results in session evidence.
+5. `code.write` replaces only the marked starter with project firmware.
+6. `firmware.check` runs bounded Browser Check and `project.verify`/
+   `design.verify` report the honest browser-side evidence boundary.
+7. Agent graph mutations can be reversed with `design.undo` and replayed with
+   `design.redo`; `workspace.get_tool_surface` recommends only stage-relevant
+   tools.
 
-All eight authoring tools are thin adapters over the shared application command
-layer in [`frontend/src/application/behaviorCommands.ts`](frontend/src/application/behaviorCommands.ts).
-The human UI and WebMCP therefore use the same validation, reducers, hashes,
-staleness rules, persistence, and structured errors. Models never receive an
-arbitrary JavaScript function bridge.
+Human controls and WebMCP share the same project store, behavior command layer,
+validation, reducers, hashes, persistence rules, and structured errors. Models
+never receive an arbitrary JavaScript function bridge.
 
 ## Local development
 
@@ -229,12 +237,12 @@ Source code is never loaded as a reducer, callback, or script.
 - Hosting configuration: [`chatgpt-site/.openai/hosting.json`](chatgpt-site/.openai/hosting.json)
 - Release procedure: [`docs/CHATGPT_SITE_RUNBOOK.md`](docs/CHATGPT_SITE_RUNBOOK.md)
 
-The repository records the canonical project binding. Repository-wide release
-gates passed on 2026-09-01 and the current-account Site revision is published
-from the pushed release commit. Native WebMCP discovery and interactive
-button→LED acceptance still belong to the ChatGPT in-app browser checklist;
-the deployment does not claim that source compiles or hardware works. See the
-implementation audit and Site runbook for the exact release record.
+The repository records the canonical project binding, but this worktree must be
+re-verified before release. Run `pnpm verify`, push only after it is green, then
+publish and record the deployed revision. Native WebMCP discovery, the complete
+calculator journey, undo/redo, Browser Check, persistence, shopping provenance,
+and retired-route 404s remain live acceptance checks. The deployment never
+claims that Browser Check is compilation or that physical hardware was tested.
 
 ## Further reading
 

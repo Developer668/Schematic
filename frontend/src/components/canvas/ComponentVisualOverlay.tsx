@@ -57,6 +57,8 @@ function actionForPrimitive(primitive: PreviewPrimitive): VisualAction | undefin
       return undefined;
     case "button":
       return { actionId: "button.setPressed", payload: { kind: "literal", value: { pressed: !primitive.pressed } }, label: primitive.pressed ? "Release preview button" : "Press preview button" };
+    case "keypad":
+      return undefined;
     default:
       return undefined;
   }
@@ -111,6 +113,23 @@ function Primitive({ primitive, onEvent, onAction }: { primitive: PreviewPrimiti
       const body = <><i />{primitive.state}</>;
       if (!onAction || !action) return <span className={`component-visual-activity is-${primitive.state}`} aria-hidden="true">{body}</span>;
       return <button type="button" className={`component-visual-activity component-visual-control nodrag nopan is-${primitive.state}`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onAction(action.actionId, action.payload); }} aria-label={action.label} title={action.label}>{body}</button>;
+    }
+    case "keypad": {
+      const keys = primitive.keys.slice(0, 20);
+      if (!onAction) return <span className="component-visual-keypad" aria-label={primitive.lastKey ? `Keypad last pressed ${primitive.lastKey}` : "Calculator keypad ready"}>{keys.join(" ")}</span>;
+      return (
+        <span className="component-visual-keypad nodrag nopan" role="group" aria-label={primitive.lastKey ? `Calculator keypad; last pressed ${primitive.lastKey}` : "Calculator keypad"}>
+          {keys.map((key) => <button
+            key={key}
+            type="button"
+            className={`component-visual-keypad-key component-visual-control nodrag nopan ${primitive.lastKey === key ? "is-active" : ""}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); onAction("keypad.press", { kind: "literal", value: { key } }); }}
+            aria-label={`Press calculator key ${key}`}
+            title={`Press ${key}`}
+          >{key}</button>)}
+        </span>
+      );
     }
   }
 }

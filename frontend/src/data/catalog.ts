@@ -67,6 +67,7 @@ type RawComponent = {
 // discovery, never for granting a component executable preview behavior.
 const EXPLICIT_BEHAVIOR_BINDINGS: Readonly<Record<string, CatalogBehaviorBinding>> = {
   pushbutton: { profileId: "momentary-input", profileVersion: 1 },
+  "membrane-keypad": { profileId: "membrane-keypad", profileVersion: 1 },
   led: { profileId: "digital-indicator", profileVersion: 1 },
   lcd1602: { profileId: "text-display", profileVersion: 1 },
   // Text-display bindings are intentionally explicit: these common modules
@@ -581,6 +582,10 @@ const PORTS_BY_ID: Record<string, HardwarePort[]> = {
   "mcp3008-adc": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")],
   "mcp3424-adc": I2C,
   "mcp6002-opamp": PASSIVE_2,
+  "membrane-keypad": [
+    port("R1", "gpio"), port("R2", "gpio"), port("R3", "gpio"), port("R4", "gpio"),
+    port("C1", "gpio"), port("C2", "gpio"), port("C3", "gpio"), port("C4", "gpio"),
+  ],
   "mfrc522-2": [port("VCC", "power", "power"), port("GND", "ground", "power"), port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi"), port("DC", "gpio", "input"), port("RST", "gpio", "input")],
   "micro-sd-module": [...POWER, port("SCK", "spi"), port("MOSI", "spi"), port("MISO", "spi"), port("CS", "spi")],
   "mlx90393-magnet": I2C,

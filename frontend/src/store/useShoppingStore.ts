@@ -206,10 +206,11 @@ function validUrl(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return false;
   try {
     const url = new URL(value.trim());
-    // Do not allow cleartext links or embedded credentials from an
-    // untrusted agent publication. The retailer domain remains agent-owned
-    // and is shown as a link only after this transport-level check.
-    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password;
+    // Do not allow cleartext links, embedded credentials, or Google search
+    // result fallbacks to masquerade as a direct retailer offer.
+    const googleSearchFallback = (url.hostname === "google.com" || url.hostname.endsWith(".google.com"))
+      && (url.pathname === "/search" || url.pathname === "/url");
+    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password && !googleSearchFallback;
   } catch { return false; }
 }
 

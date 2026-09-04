@@ -350,7 +350,8 @@ export type VisualPrimitive =
   | { kind: "text-display"; key: string; lines: readonly string[] }
   | { kind: "numeric-readout"; key: string; value: number; unit?: string }
   | { kind: "rotation"; key: string; degrees: number }
-  | { kind: "activity"; key: string; state: "idle" | "active" | "warning" };
+  | { kind: "activity"; key: string; state: "idle" | "active" | "warning" }
+  | { kind: "keypad"; key: string; lastKey: string | null; keys: readonly string[] };
 
 export interface ComponentVisualProjection {
   primitives: readonly VisualPrimitive[];

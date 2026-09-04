@@ -16,6 +16,8 @@ import { digitalIndicatorProfile } from "./profiles/digital-indicator";
 import { momentaryInputProfile } from "./profiles/momentary-input";
 import { motorProfile } from "./profiles/motor";
 import { numericSensorProfile } from "./profiles/numeric-sensor";
+import { calculatorEngineProfile } from "./profiles/calculator-engine";
+import { membraneKeypadProfile } from "./profiles/membrane-keypad";
 import { relayProfile } from "./profiles/relay";
 import { rotaryActuatorProfile } from "./profiles/rotary-actuator";
 import { textDisplayProfile } from "./profiles/text-display";
@@ -31,6 +33,8 @@ export const DEFAULT_BEHAVIOR_PROFILES: readonly BehaviorProfile[] = [
   rotaryActuatorProfile,
   motorProfile,
   numericSensorProfile,
+  calculatorEngineProfile,
+  membraneKeypadProfile,
 ];
 
 export function profileKey(profileId: string, version: number): string {

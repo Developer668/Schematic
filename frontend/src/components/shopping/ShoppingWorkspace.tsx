@@ -1021,7 +1021,7 @@ export default function ShoppingWorkspace({
       const pruned = Object.fromEntries(Object.entries(current).filter(([key]) => validKeys.has(key)));
       return Object.keys(pruned).length === Object.keys(current).length ? current : pruned;
     });
-  }, [designFingerprint]);
+  }, [designFingerprint, designRequirements]);
 
   useEffect(() => {
     if (!designRequirements.length) {

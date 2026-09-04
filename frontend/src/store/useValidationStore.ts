@@ -38,22 +38,8 @@ export interface CompileState {
  * are intentionally not inspected: code is an editable artifact, not a
  * compiler input, and active validation is graph-only.
  */
-export function validateProject(project: HardwareGraph) {
-  const canonical = validateCanonicalProject(project as unknown as import("@schematic/hardware-graph").HardwareProject, (definitionId) => getCatalogComponent(definitionId));
-  const issues: ValidationIssue[] = canonical.issues.map((issue) => ({
-    id: issue.id,
-    severity: issue.severity,
-    code: issue.code,
-    message: issue.message,
-    ...(issue.affectedComponents ? { affectedComponents: [...issue.affectedComponents] } : {}),
-    ...(issue.affectedConnections ? { affectedConnections: [...issue.affectedConnections] } : {}),
-  }));
-
-  const boards = project.components.filter((component) => isBoardDefinition(componentDefinition(project, component.id)));
-  if (project.components.length > 0 && boards.length === 0) {
-    issues.push({ id: "no-board", severity: "info", code: "NO_BOARD", message: "No microcontroller board detected. You can still check wiring and export the design; firmware needs a board target." });
-  }
-
+export function validateFirmwareBindings(project: HardwareGraph): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
   for (const target of project.firmwareTargets) {
     const binding = resolveFirmwareBinding(project, target.componentId);
     if (!binding.component || !binding.definition) {
@@ -70,9 +56,29 @@ export function validateProject(project: HardwareGraph) {
       issues.push({ id: `firmware-fqbn-mismatch-${target.id}`, severity: "error", code: "FIRMWARE_FQBN_MISMATCH", message: `Firmware target ${target.id} uses ${target.boardFqbn}, but ${binding.definition.title} maps to ${binding.targetConfig?.fqbn}.`, affectedComponents: [target.componentId] });
     }
   }
+  return issues;
+}
 
-  // Keep the optional compatibility field present for consumers that render
-  // it, but do not derive it from editable firmware/source contents.
+export function validateProject(project: HardwareGraph) {
+  const canonical = validateCanonicalProject(project as unknown as import("@schematic/hardware-graph").HardwareProject, (definitionId) => getCatalogComponent(definitionId));
+  const issues: ValidationIssue[] = canonical.issues.map((issue) => ({
+    id: issue.id,
+    severity: issue.severity,
+    code: issue.code,
+    message: issue.message,
+    ...(issue.affectedComponents ? { affectedComponents: [...issue.affectedComponents] } : {}),
+    ...(issue.affectedConnections ? { affectedConnections: [...issue.affectedConnections] } : {}),
+  }));
+
+  const boards = project.components.filter((component) => isBoardDefinition(componentDefinition(project, component.id)));
+  if (project.components.length > 0 && boards.length === 0) {
+    issues.push({ id: "no-board", severity: "info", code: "NO_BOARD", message: "No microcontroller board detected. You can still check wiring and export the design; firmware needs a board target." });
+  }
+
+  // Active validation is the electrical/topology verdict only. Firmware target
+  // identity/FQBN metadata is checked separately by project verification and
+  // Browser Check so editing source metadata cannot make a sound wiring graph
+  // suddenly appear electrically invalid.
   return { valid: !issues.some((issue) => issue.severity === "error"), issues, codeIssues: [] };
 }
 

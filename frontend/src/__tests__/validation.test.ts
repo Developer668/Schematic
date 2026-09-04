@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { validateProject } from "@schematic/validation";
 import type { HardwareProject, HardwarePort } from "@schematic/hardware-graph";
-import { validateProject as validateFrontendProject } from "../store/useValidationStore.ts";
-import { useProjectStore } from "../store/useProjectStore.ts";
+import { validateFirmwareBindings, validateProject as validateFrontendProject } from "../store/useValidationStore.ts";
+import { normalizeProject, useProjectStore } from "../store/useProjectStore.ts";
 import { useValidationStore } from "../store/useValidationStore.ts";
+import metaGlassesBlueprint from "../../../examples/demo4-meta-glasses/project.json";
 
 const lookup = (id: string) => {
   const defs: Record<string, { ports: HardwarePort[] }> = {
@@ -40,6 +41,28 @@ describe("validation", () => {
     };
     const res = validateProject(p as any, lookup);
     expect(res).toHaveProperty("valid");
+  });
+
+  it("keeps the checked-in meta-glasses blueprint graph-valid before and after project normalization", () => {
+    const raw = validateFrontendProject(metaGlassesBlueprint as any);
+    expect(raw.issues.filter((issue) => issue.severity === "error")).toEqual([]);
+    expect(raw.valid).toBe(true);
+
+    const normalized = validateFrontendProject(normalizeProject(metaGlassesBlueprint) as any);
+    expect(normalized.issues.filter((issue) => issue.severity === "error")).toEqual([]);
+    expect(normalized.valid).toBe(true);
+  });
+
+  it("keeps firmware binding diagnostics separate from the graph-only verdict", () => {
+    const project = normalizeProject(metaGlassesBlueprint) as any;
+    project.firmwareTargets = project.firmwareTargets.map((target: any) => ({ ...target, boardFqbn: "wrong:board:target" }));
+
+    const graphResult = validateFrontendProject(project);
+    expect(graphResult.valid).toBe(true);
+    expect(graphResult.issues.some((issue) => issue.code.startsWith("FIRMWARE_"))).toBe(false);
+    expect(validateFirmwareBindings(project)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ severity: "error", code: "FIRMWARE_FQBN_MISMATCH" }),
+    ]));
   });
 
   it("keeps the frontend active validator independent from editable source", () => {

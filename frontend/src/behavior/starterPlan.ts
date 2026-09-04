@@ -1,5 +1,6 @@
 import { writeBehaviorPlan } from "../application/behaviorCommands.ts";
 import { GENERATED_STARTER_BEHAVIOR_PLAN_ID, useProjectStore } from "../store/useProjectStore.ts";
+import { prepareBehaviorPlanReadiness } from "../application/behaviorReadiness.ts";
 import { capabilitiesForCatalogComponent } from "./capabilities.ts";
 import { useBehaviorPreviewStore } from "./useBehaviorPreviewStore.ts";
 
@@ -29,6 +30,7 @@ const DEMO_PAYLOADS: Record<string, { kind: "literal"; value: Record<string, unk
   "relay.set": { kind: "literal", value: { on: true } },
   "servo.setAngle": { kind: "literal", value: { degrees: 90 } },
   "sensor.setReading": { kind: "literal", value: { value: 42 } },
+  "keypad.press": { kind: "literal", value: { key: "7" } },
 };
 
 interface StarterComponent {
@@ -186,16 +188,52 @@ export async function ensureStarterPlanForAgentBuild(): Promise<StarterPlanPrepa
   planId: string;
   revision: number;
   previewStarted: false;
+  planSha256: string;
+  projectSha256: string;
+} | {
+  ready: false;
+  status: "custom-plan-review" | "blocked";
+  planId: string;
+  revision: number;
+  previewStarted: false;
+  message: string;
+  code?: string;
 }> {
-  const plans = useProjectStore.getState().project.behaviorPlans ?? [];
+  const project = useProjectStore.getState().project;
+  const plans = project.behaviorPlans ?? [];
   const authored = plans.find((plan) => plan.id !== STARTER_PLAN_ID);
   if (authored) {
+    const preparation = await prepareBehaviorPlanReadiness(project, authored);
+    if (preparation.status === "blocked") {
+      return {
+        ready: false,
+        status: "blocked",
+        planId: authored.id,
+        revision: authored.revision,
+        previewStarted: false,
+        message: "The authored Behavior Plan no longer prepares against the current graph. Repair its exact component/action references before continuing.",
+        code: "BEHAVIOR_PLAN_BLOCKED",
+      };
+    }
+    if (preparation.status === "partial") {
+      return {
+        ready: false,
+        status: "custom-plan-review",
+        planId: authored.id,
+        revision: authored.revision,
+        previewStarted: false,
+        message: "The authored Behavior Plan only partially prepares against the current graph. Review its diagnostics instead of silently replacing it with a starter plan.",
+        code: "BEHAVIOR_PLAN_PARTIAL",
+      };
+    }
     return {
       ready: true,
       status: "custom-plan",
       planId: authored.id,
       revision: authored.revision,
       previewStarted: false,
+      planSha256: preparation.prepared.planSha256,
+      projectSha256: preparation.prepared.projectSha256,
     };
   }
   return prepareStarterPlan();

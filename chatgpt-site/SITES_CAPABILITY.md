@@ -70,17 +70,20 @@ record:
 - whether IndexedDB survives the required reload; and
 - that the route is isolated from the main project repository.
 
-The release agent must separately test the product's 45 native WebMCP tools,
-Behavior Plan preview, editable Code handoff, local project persistence, and
-retired-route 404 behavior. A capability probe pass cannot be substituted for
-those checks.
+The release agent must separately test the product's 56 native WebMCP tools,
+including the state-aware design surface, Behavior Plan preview, bounded Browser
+Check, editable Code handoff, local project persistence, and retired-route 404
+behavior. A capability probe pass cannot be substituted for those checks.
 
 ## Product boundary and future work
 
 The core Site uses typed Behavior Plans and checked-in visual profiles for
-preview. Editable code is a durable, hash-addressed artifact for later external
-SDK, IDE, compiler, or hardware use. No in-app compiler, MCU emulator, source
-interpreter, uploader, or physical test is part of this release.
+preview. Behavior Preview never reads or executes source. Editable code is a
+durable, hash-addressed artifact, and the separate Browser Check can execute a
+bounded documented Arduino/C/C++ subset plus static preflight entirely in the
+browser. Browser Check is not a compiler, MCU emulator, electrical simulator,
+uploader, or physical test; real compilation and hardware verification remain
+external.
 
 Legacy runtime/toolchain files may remain dormant in the repository, but the
 active Site import closure must not pull them. Do not add a dynamic source

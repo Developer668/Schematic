@@ -10,8 +10,9 @@ import {
   writeCode,
 } from "../application/behaviorCommands.ts";
 import { PREVIEW_DISCLAIMER, useBehaviorPreviewStore } from "../behavior/useBehaviorPreviewStore.ts";
+import { useProjectStore } from "../store/useProjectStore.ts";
 import { MAX_CODE_DEPENDENCIES_PER_DOCUMENT, MAX_CODE_FILE_BYTES, MAX_CODE_FILES_PER_DOCUMENT, type CodeDependencyRecord, type CodeFileRecord, type CodeLanguage } from "../store/behaviorPersistence.ts";
-import { isJsonValue, type BehaviorPayloadV1 } from "@schematic/behavior";
+import { CALCULATOR_KEYS, isJsonValue, type BehaviorPayloadV1 } from "@schematic/behavior";
 
 export interface BehaviorWebMCPTool {
   name: string;
@@ -49,6 +50,8 @@ function boundedIdentifier(value: unknown) {
 function expectedHash(value: unknown) {
   return value === null || (typeof value === "string" && SHA256_PATTERN.test(value));
 }
+
+export const KEYPAD_PRESS_RECOVERY_HINT = "Use behavior.get_capabilities to list keypad instances and exact behavior support.";
 
 /**
  * WebMCP and the human controls share command semantics, but model calls do
@@ -189,15 +192,82 @@ export const behaviorToolDefinitions: readonly BehaviorWebMCPTool[] = [
     },
   },
   {
+    name: "behavior.press_key",
+    description: "Press one calculator key on a membrane keypad instance through its exact keypad.press action. The keypad's deterministic calculator state emits the resulting display value for Behavior Plan routing to an LCD.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        componentId: { ...COMPONENT_ID_SCHEMA, description: "Membrane keypad instance id." },
+        definitionId: { ...COMPONENT_ID_SCHEMA, description: "Optional catalog definition id; resolved from the instance when omitted." },
+        key: { type: "string", enum: [...CALCULATOR_KEYS], description: "Calculator key to press." },
+      },
+      required: ["componentId", "key"],
+      additionalProperties: false,
+    },
+    execute: async (args) => {
+      const request = args && typeof args === "object" && !Array.isArray(args) ? args : {};
+      const { componentId, definitionId, key } = request;
+      const invalid = (message: string) => commandResult({ ok: false, error: { code: "INVALID_BEHAVIOR_REQUEST", message: `${message} ${KEYPAD_PRESS_RECOVERY_HINT}`, retryable: false }, data: { hint: KEYPAD_PRESS_RECOVERY_HINT } });
+      if (!boundedIdentifier(componentId)) return invalid("componentId must be a bounded non-empty identifier.");
+      const instance = useProjectStore.getState().project.components.find((item) => item.id === componentId);
+      if (!instance) return invalid(`Unknown component instance ${componentId}.`);
+      const resolvedDefinitionId = definitionId ?? instance.definitionId;
+      if (!boundedIdentifier(resolvedDefinitionId) || resolvedDefinitionId !== instance.definitionId) return invalid("definitionId must match the current component instance exactly.");
+      if (instance.definitionId !== "membrane-keypad") return invalid(`${componentId} is not a membrane keypad instance.`);
+      if (typeof key !== "string" || !(CALCULATOR_KEYS as readonly string[]).includes(key)) return invalid(`key must be one of ${CALCULATOR_KEYS.join(", ")}.`);
+      const result = await invokeBehavior({ componentId, definitionId: resolvedDefinitionId, actionId: "keypad.press", payload: { kind: "literal", value: { key } } });
+      return previewCommandResult(result, "invoke");
+    },
+  },
+  {
     name: "behavior.get_state",
-    description: "Read the active Behavior Preview snapshot, deterministic hashes, logical time, diagnostics, and explicit no-source-execution claims.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    description: "Read compact active Behavior Preview state. Logs and timeline entries are bounded by pagination parameters so default tool output stays small.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        detail: { type: "string", enum: ["compact", "full"], default: "compact" },
+        logLimit: { type: "integer", minimum: 0, maximum: 200, default: 12 },
+        logOffset: { type: "integer", minimum: 0, default: 0 },
+        eventsLimit: { type: "integer", minimum: 0, maximum: 200, default: 12 },
+      },
+      additionalProperties: false,
+    },
     annotations: { readOnlyHint: true },
-    execute: async () => commandResult(await getBehaviorState()),
+    execute: async (args) => {
+      const request = args && typeof args === "object" && !Array.isArray(args) ? args : {};
+      const detail = request.detail ?? "compact";
+      const logLimit = request.logLimit ?? 12;
+      const logOffset = request.logOffset ?? 0;
+      const eventsLimit = request.eventsLimit ?? 12;
+      if ((detail !== "compact" && detail !== "full") || !Number.isInteger(logLimit) || logLimit < 0 || logLimit > 200 || !Number.isInteger(logOffset) || logOffset < 0 || !Number.isInteger(eventsLimit) || eventsLimit < 0 || eventsLimit > 200) {
+        return commandResult({ ok: false, error: { code: "INVALID_BEHAVIOR_REQUEST", message: "Use detail compact/full, logLimit/eventsLimit 0-200, and a non-negative logOffset.", retryable: false } });
+      }
+      const result = await getBehaviorState();
+      if (!result.ok || detail === "full") return commandResult(result);
+      const data = result.data;
+      const snapshot = data.snapshot;
+      const sessionLog = snapshot && Array.isArray(snapshot.sessionLog) ? snapshot.sessionLog : [];
+      const events = snapshot && Array.isArray(snapshot.events) ? snapshot.events : [];
+      const compact = {
+        status: data.status,
+        projectId: data.projectId,
+        planId: data.planId,
+        logicalTimeMs: data.logicalTimeMs,
+        durationMs: data.durationMs,
+        componentCount: snapshot ? Object.keys(snapshot.components ?? {}).length : useProjectStore.getState().project.components.length,
+        sessionLogTotal: sessionLog.length,
+        sessionLog: sessionLog.slice(logOffset, logOffset + logLimit),
+        eventsTotal: events.length,
+        events: events.slice(0, eventsLimit),
+        diagnostics: data.preparationDiagnostics ?? snapshot?.diagnostics ?? [],
+        claims: data.claims,
+      };
+      return { content: [{ type: "text", text: JSON.stringify(compact) }], data: compact };
+    },
   },
   {
     name: "code.write",
-    description: "Write ordinary editable source files for a board using exact-hash optimistic concurrency. The source is saved for later external use and is never parsed, compiled, run, or uploaded by Schematic.",
+    description: "Write editable board source using exact-hash concurrency. expectedContentSha256=null creates source and may replace only Schematic's marked generated starter scaffold; real existing source still requires its exact hash. Browser Check can execute its supported bounded subset separately.",
     inputSchema: {
       type: "object",
       properties: {
@@ -240,6 +310,7 @@ export const behaviorToolDefinitions: readonly BehaviorWebMCPTool[] = [
       language: args.language as CodeLanguage,
       ...(args.dependencies !== undefined ? { dependencies: args.dependencies as CodeDependencyRecord[] } : {}),
       expectedContentSha256: args.expectedContentSha256,
+      replaceGeneratedStarter: args.expectedContentSha256 === null,
       origin: args.origin,
       boardFqbn: args.boardFqbn,
       linkToBehaviorPlan: args.linkToBehaviorPlan,

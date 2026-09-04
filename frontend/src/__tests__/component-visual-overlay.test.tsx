@@ -84,6 +84,23 @@ describe("ComponentVisualOverlay", () => {
     ]);
   });
 
+  it("routes membrane keypad controls through the calculator typed action", () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const onAction = vi.fn();
+    act(() => root?.render(<ComponentVisualOverlay
+      componentId="keypad-1"
+      onAction={onAction}
+      projection={{ accessibleSummary: "Calculator keypad result is 7.", primitives: [{ kind: "keypad", key: "keypad", lastKey: "7", keys: ["7", "+", "5", "="] }] }}
+    />));
+
+    const key = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.getAttribute("aria-label") === "Press calculator key 7");
+    expect(key).toBeDefined();
+    act(() => key?.click());
+    expect(onAction).toHaveBeenCalledWith("keypad.press", { kind: "literal", value: { key: "7" } });
+  });
+
   it("never forwards an untrusted indicator value into CSS", () => {
     host = document.createElement("div");
     document.body.appendChild(host);

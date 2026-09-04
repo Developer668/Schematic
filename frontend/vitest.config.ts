@@ -5,6 +5,12 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // The app intentionally uses BroadcastChannel for same-room cross-tab
+    // synchronization. Node's BroadcastChannel crosses Vitest worker threads,
+    // so parallel files that all run as the local-development room can mutate
+    // each other's project/validation stores. Run files serially while keeping
+    // each store's real synchronization behavior intact.
+    fileParallelism: false,
   },
   resolve: {
     alias: {

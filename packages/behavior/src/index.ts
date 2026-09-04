@@ -13,4 +13,6 @@ export * from "./profiles/relay";
 export * from "./profiles/rotary-actuator";
 export * from "./profiles/motor";
 export * from "./profiles/numeric-sensor";
+export * from "./profiles/calculator-engine";
+export * from "./profiles/membrane-keypad";
 

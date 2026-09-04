@@ -11,11 +11,13 @@ Hosting configuration:
 [`chatgpt-site/.openai/hosting.json`](../chatgpt-site/.openai/hosting.json)
 
 The release unit is the `chatgpt-site` wrapper plus its shared frontend,
-`packages/*` dependencies, and same-origin API route. The product path is
-Behavior Preview plus editable code. It does not compile, parse, execute,
-upload, flash, or physically test source. The standalone Vite/FastAPI app and
-legacy runtime/toolchain packages are development or historical boundaries, not
-evidence of Site capability.
+`packages/*` dependencies, and same-origin API route. The product path is typed
+Behavior Preview plus editable code and a separate bounded Browser Check.
+Behavior Preview never reads or executes source. Browser Check can execute its
+documented Arduino/C/C++ subset and static preflight, but it does not compile,
+electrically simulate, upload, flash, or physically verify hardware. The
+standalone Vite/FastAPI app and legacy runtime/toolchain packages are development
+or historical boundaries, not evidence of Site capability.
 
 ## 1. Prepare a release
 
@@ -55,10 +57,10 @@ npm --prefix chatgpt-site run verify
 
 The static behavior release gate is safe to run in CI: it checks the
 `@schematic/behavior` dependency boundary, active Site import closure, exact
-catalog bindings, 45-tool registration, active client/server import boundaries,
-forbidden endpoint references, truthful preview claims, and initial bundle
-boundaries. It does not make live HTTP requests or load/run user source; live
-retired-route 404 checks are separate.
+catalog bindings, 56-tool registration, active client/server import boundaries,
+forbidden endpoint references, truthful Behavior Preview and Browser Check
+claims, and initial bundle boundaries. It does not make live HTTP requests;
+live retired-route 404 checks are separate.
 
 Build the Site explicitly when publishing:
 
@@ -115,12 +117,12 @@ Run every check against the published URL in the ChatGPT in-app browser.
 | Authenticated `/api/auth/session` | Returns an authenticated short-lived Schematic session; bearer tokens never appear in logs. |
 | `GET /api/health` | HTTP 200 with `api_boundary: "same-origin"`. |
 | `GET /api/docs` | HTTP 200 JSON listing health, catalog, import, parts, and identity limits. |
-| Native WebMCP discovery | The ChatGPT host exposes exactly 45 registered tools. Local shims are not evidence of native discovery. |
-| Tool inventory | Five `behavior.*` tools and three `code.*` tools are present; `firmware.write/read` are compatibility aliases; `firmware.compile` and all `simulation.*` names are absent. |
+| Native WebMCP discovery | The ChatGPT host exposes exactly 56 registered tools. Local shims are not evidence of native discovery. |
+| Tool inventory | Six `behavior.*`, three `code.*`, eleven `project.*`, five `workspace.*`, eight `design.*`, and the remaining component/connection/firmware/validation/shopping tools are present; `firmware.write/read` are compatibility aliases; `firmware.compile` and all `simulation.*` names are absent. |
 | Graph workflow | Search/add a board, button, and LED; inspect ports; connect valid endpoints; return structured errors for invalid wiring. |
 | Behavior workflow | Discover capabilities, write a button→LED Behavior Plan, preview it, invoke `button.pressed`, and observe the LED visual projection. |
 | Preview truth | Result says scripted/typed preview; `sourceCodeExecuted`, `sourceCodeCompiled`, `hardwareUploaded`, and physical-verification claims remain false. |
-| Code workflow | Write ordinary editable source, read it back, edit it in Monaco, and export the handoff manifest. No source is parsed or run. |
+| Code workflow | Write ordinary editable source, read it back, edit it in Monaco, run `firmware.check`, and export the handoff manifest. Browser Check may execute only its bounded documented subset; it is not compilation or physical verification. |
 | Conflict/staleness | A wrong expected content hash preserves existing code; manual code edits or plan/graph changes make an old link stale. |
 | Save/reload | Plans and code documents survive reload in the same verified-user browser room; the preview session and snapshot are recreated, not persisted. |
 | Project isolation | Switching projects cannot leak plans, code documents, or preview snapshots between projects. |
@@ -137,8 +139,9 @@ For each accepted publication, keep a release note containing:
 - `planSha256`, `projectSha256`, `registrySha256`, `sessionLogSha256`, and
   `snapshotSha256` from the Behavior Preview fixture where available;
 - code document `contentSha256`, per-file hashes, and exported manifest hash;
-- the exact preview claims showing no source execution/build/upload/physical
-  verification; and
+- the exact Behavior Preview claims showing no source execution and the separate
+  Browser Check claims showing whether bounded browser execution occurred while
+  compilation/upload/physical-verification remain false; and
 - the result of the retired-route 404 checks.
 
 Hashes identify the data and provenance of a run. They are not correctness
