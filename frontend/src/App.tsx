@@ -3,8 +3,25 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import LandingPage from "./pages/LandingPage.tsx";
 import LogoMark from "./components/LogoMark.tsx";
 import LoadingState from "./components/ui/loading-state.tsx";
+import { registerWebMCPTools } from "./webmcp/tools.ts";
 
 const WorkspaceApp = lazy(() => import("./WorkspaceApp.tsx"));
+
+let webMCPRegistrationStarted = false;
+
+function startWebMCPRegistration() {
+  if (typeof document === "undefined" || webMCPRegistrationStarted) return;
+  webMCPRegistrationStarted = true;
+  void registerWebMCPTools().catch((error) => {
+    webMCPRegistrationStarted = false;
+    console.error("[WebMCP] bootstrap registration failed", error);
+  });
+}
+
+// Register as soon as the client entry is evaluated. Waiting for a passive
+// React effect leaves an avoidable discovery gap while the host is already
+// inspecting the top-level document.
+startWebMCPRegistration();
 
 function RouteEffects() {
   const { pathname } = useLocation();
@@ -51,21 +68,7 @@ function RouteLoading() {
  */
 function WebMCPBootstrap() {
   useEffect(() => {
-    let disposed = false;
-    void import("./webmcp/tools.ts")
-      .then(({ registerWebMCPTools }) => {
-        if (disposed) return;
-        return registerWebMCPTools();
-      })
-      .catch((error) => {
-        if (!disposed) console.error("[WebMCP] bootstrap registration failed", error);
-      });
-    return () => {
-      disposed = true;
-      void import("./webmcp/tools.ts").then(({ unregisterWebMCPTools }) => {
-        unregisterWebMCPTools();
-      }).catch(() => undefined);
-    };
+    startWebMCPRegistration();
   }, []);
   return null;
 }
