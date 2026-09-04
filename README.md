@@ -15,9 +15,11 @@ Schematic is an agent-native hardware workspace for assembling components, wirin
 
 <p align="center">
   <a href="https://schematic-hardware-workspace.decipherer71.chatgpt.site/studio">
-    <img src="docs/images/schematic-walkthrough.gif" alt="Real Schematic walkthrough: building a hardware calculator with an Arduino Uno, membrane keypad, and I2C LCD" />
+    <img src="docs/images/schematic-walkthrough.gif" alt="Real Schematic walkthrough: building a WebMCP weather station with an Arduino Uno, BME280 sensor, OLED display, eight wires, and editable firmware" />
   </a>
 </p>
+
+<p align="center"><sub>Real app capture: parts appear one by one, eight typed wires connect, weather firmware is written, and static graph validation returns <code>valid: true</code>.</sub></p>
 
 ## What Schematic does
 
