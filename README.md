@@ -13,7 +13,11 @@ Schematic is an agent-native hardware workspace for assembling components, wirin
 
 </div>
 
-![Schematic hardware workspace](frontend/public/social-preview.png)
+<p align="center">
+  <img src="docs/images/schematic-studio.png" alt="The real Schematic studio with an Arduino Uno, membrane keypad, I2C LCD, component catalog, canvas, and firmware editor" />
+</p>
+
+<p align="center"><sub>Real application capture: Arduino Uno, membrane keypad, I2C LCD, component catalog, hardware canvas, and editable firmware.</sub></p>
 
 ## What Schematic does
 
