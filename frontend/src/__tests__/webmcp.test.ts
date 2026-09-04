@@ -9,7 +9,7 @@ import { useShoppingStore } from "../store/useShoppingStore.ts";
 import { getCatalogComponent } from "../data/catalog.ts";
 import { resolveBoardPin } from "../data/hardware.ts";
 import { getAuthSession } from "../auth/session.ts";
-import { ensureWebMCPRegistration, fetchJson, getRegisteredToolNames, inspectNativeWebMCPRegistration, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools, WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
+import { auditPublishedWebMCPDefinitions, ensureWebMCPRegistration, fetchJson, getRegisteredToolNames, inspectNativeWebMCPRegistration, invokeWebMCPTool, registerWebMCPTools, unregisterWebMCPTools, WEBMCP_TOOL_COUNT } from "../webmcp/tools.ts";
 
 const AGENT_PUBLICATION = {
   authenticated: true as const,
@@ -82,6 +82,15 @@ describe("WebMCP tools", () => {
     ]));
     expect(names.some((name) => name.startsWith("simulation."))).toBe(false);
     expect(names).not.toContain("firmware.compile");
+  });
+
+  it("keeps every published definition within current WebMCP and Chrome guidance", () => {
+    expect(auditPublishedWebMCPDefinitions()).toEqual({
+      valid: true,
+      count: WEBMCP_TOOL_COUNT,
+      errors: [],
+      warnings: [],
+    });
   });
 
   it("publishes the complete explicit fallback bridge", async () => {
@@ -389,9 +398,17 @@ describe("WebMCP tools", () => {
     const calls = registerTool.mock.calls as any[];
     expect(calls.map(([definition]) => definition.name)).toEqual(getRegisteredToolNames());
     for (const [definition, options] of calls) {
-      expect(definition).toBe((window as any).schematicWebMCP.tools.get(definition.name));
+      const published = (window as any).schematicWebMCP.tools.get(definition.name);
+      expect(definition).toMatchObject({
+        name: published.name,
+        title: published.title,
+        description: published.description,
+        inputSchema: published.inputSchema,
+        annotations: published.annotations,
+      });
       expect(definition.execute).toBeTypeOf("function");
       expect(definition.inputSchema.type).toBe("object");
+      expect(definition.annotations?.untrustedContentHint).toBe(true);
       expect(options.signal).toBeInstanceOf(AbortSignal);
     }
     expect((window as any).schematicWebMCP.getStatus()).toMatchObject({ mode: "native+bridge", native: true });

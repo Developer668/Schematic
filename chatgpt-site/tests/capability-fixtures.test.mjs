@@ -26,6 +26,8 @@ test("the published Site sends the native WebMCP security headers", async () => 
   const source = await readFile(new URL("next.config.ts", root), "utf8");
   assert.match(source, /Permissions-Policy["'],\s*value:\s*["']tools=\(self\)["']/);
   assert.match(source, /Origin-Agent-Cluster["'],\s*value:\s*["']\?1["']/);
+  assert.match(source, /WEBMCP_ORIGIN_TRIAL_TOKEN/);
+  assert.match(source, /Origin-Trial["'],\s*value:\s*webMCPOriginTrialToken/);
 });
 
 test("hosted WebMCP keeps an honest BrickWrite-style direct-call fallback", async () => {

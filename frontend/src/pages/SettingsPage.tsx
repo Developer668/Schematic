@@ -25,7 +25,7 @@ import { useThemeStore } from "../store/useThemeStore.ts";
 import { useProjectStore } from "../store/useProjectStore.ts";
 import { useWorkspaceStore } from "../store/useWorkspaceStore.ts";
 import { useWebMCPStore } from "../store/useWebMCPStore.ts";
-import { getRegisteredToolNames } from "../webmcp/tools.ts";
+import { getRegisteredToolNames, inspectWebMCPEnvironment } from "../webmcp/tools.ts";
 import LogoMark from "../components/LogoMark.tsx";
 import { apiUrl } from "../auth/session.ts";
 import { parseSchematicProjectFile, triggerDownloadVlx } from "../utils/vllxFile.ts";
@@ -102,6 +102,7 @@ export default function SettingsPage() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [clearArmed, setClearArmed] = useState(false);
   const toolCount = getRegisteredToolNames().length;
+  const webmcpEnvironment = inspectWebMCPEnvironment();
   const apiBaseUrl = apiUrl("/api");
 
   const webmcpLabel =
@@ -287,7 +288,7 @@ export default function SettingsPage() {
                 <div><ShieldCheck size={15} /><b>WebMCP</b></div>
                 <span className={`connection-state is-${webmcpRegistration.state}`}>{webmcpLabel}</span>
                 <p>{webmcpRegistration.state === "fallback"
-                  ? `${toolCount} direct-call bridge tools are ready; ChatGPT Site Tools still require browser-native document.modelContext.`
+                  ? `${toolCount} direct-call bridge tools are ready. Native blocker: ${webmcpEnvironment.blocker ?? "unknown"}; secure=${webmcpEnvironment.secureContext}, origin-isolated=${webmcpEnvironment.originAgentCluster}, tools-permission=${String(webmcpEnvironment.toolsPermission)}.`
                   : `${webmcpRegistration.registeredCount || toolCount} tools are available to the current workspace surface.`}</p>
                 <a href="/api/docs" target="_blank" rel="noreferrer">Open API docs <ExternalLink size={11} /></a>
               </article>

@@ -111,6 +111,9 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.1.11(@types/node@24.13.3)(@vitest/coverage-v8@4.1.11)(jsdom@28.1.0)(vite@7.3.6(@types/node@24.13.3)(jiti@1.21.7))
+      webmcp-types:
+        specifier: 0.1.6
+        version: 0.1.6
 
   packages/avr-runtime:
     devDependencies:
@@ -2426,6 +2429,9 @@ packages:
   webidl-conversions@8.0.1:
     resolution: {integrity: sha512-BMhLD/Sw+GbJC21C/UgyaZX41nPt8bUTg+jWyDeg7e7YN4xOM05YPSIXceACnXVtqyEw/LMClUQMtMZ+PGGpqQ==}
     engines: {node: '>=20'}
+
+  webmcp-types@0.1.6:
+    resolution: {integrity: sha512-vWYNhhBXQhP4flPIk3sJuzsonPGSTdDyhWgpmPYCNdpIcLHJgjHE51lU0S7gi+UtdxO84FsCnvSJaMfLGWP+3Q==}
 
   websocket-driver@0.7.5:
     resolution: {integrity: sha512-ZL2+3c7kMBdIRCMz6l8jQMHyGVxj+UL+xVk74Ombiciboca8rHa15L86B19E5oh1pL9Ii/uj54gtsIrZGMo6zA==}
@@ -4779,6 +4785,8 @@ snapshots:
   web-vitals@4.2.4: {}
 
   webidl-conversions@8.0.1: {}
+
+  webmcp-types@0.1.6: {}
 
   websocket-driver@0.7.5:
     dependencies:

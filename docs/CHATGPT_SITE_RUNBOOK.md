@@ -109,7 +109,18 @@ point the Site at an unreviewed origin.
 
 ## 5. Production acceptance
 
-Run every check against the published URL in the ChatGPT desktop app's built-in browser with Browser Settings > Permissions > Enable site tools turned on. The webpage must remain open while its tools are being used. Ordinary browser access is not proof of ChatGPT Site-tool discovery.
+Run every check against the published URL in a WebMCP-capable host while the
+page remains open. Supported proof paths are ChatGPT Desktop Site Tools or
+Chrome 149 with either `chrome://flags/#enable-webmcp-testing` enabled or a
+valid `WEBMCP_ORIGIN_TRIAL_TOKEN` configured for the exact deployed origin.
+Ordinary browser access and the direct-call bridge are not proof of native
+discovery.
+
+Before blaming registration code, verify `isSecureContext === true`,
+`window.originAgentCluster === true`, the response contains
+`Permissions-Policy: tools=(self)`, and `document.modelContext` exists. If the
+first three pass but `document.modelContext` is undefined, that browser/session
+has not enabled WebMCP; page JavaScript cannot enable the browser feature.
 
 | Check | Expected result |
 | --- | --- |
